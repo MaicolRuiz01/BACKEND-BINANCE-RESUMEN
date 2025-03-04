@@ -7,7 +7,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/api")
+@RequestMapping("/api/p2p")
 @CrossOrigin(origins = "*")
 public class P2PController {
 
@@ -17,7 +17,7 @@ public class P2PController {
         this.binanceService = binanceService;
     }
 
-    @GetMapping("/p2p/orders")
+    @GetMapping("/orders")
     public ResponseEntity<String> getP2POrders(@RequestParam String account) {
         return ResponseEntity.ok().body(binanceService.getP2POrders(account));
     }
