@@ -1,3 +1,5 @@
+package com.binance.web.controller;
+
 @RestController
 @RequestMapping("/api/test")
 public class TestController {
