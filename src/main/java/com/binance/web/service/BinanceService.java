@@ -124,7 +124,7 @@ public class BinanceService {
         HttpResponse<String> response = sendBinanceRequest(url, null);
         JsonObject jsonResponse = JsonParser.parseString(response.body()).getAsJsonObject();
 
-        // 🔥 Verificar si "serverTime" existe antes de usar getAsLong()
+        // Verificar si "serverTime" existe antes de usar getAsLong()
         if (!jsonResponse.has("serverTime") || jsonResponse.get("serverTime").isJsonNull()) {
             throw new RuntimeException("No se pudo obtener el timestamp del servidor Binance");
         }
