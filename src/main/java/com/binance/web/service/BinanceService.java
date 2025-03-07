@@ -1,16 +1,14 @@
 package com.binance.web.service;
 
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.springframework.stereotype.Service;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -20,6 +18,10 @@ public class BinanceService {
 
     private static final String PAYMENTS_API_URL = "https://api.binance.com/sapi/v1/pay/transactions";
     private static final String P2P_ORDERS_API_URL = "https://api.binance.com/sapi/v1/c2c/orderMatch/listUserOrderHistory";
+
+    // Datos del proxy (Brasil)
+    private static final String PROXY_HOST = "52.67.10.183";
+    private static final int PROXY_PORT = 80;
 
     // Claves API de cada cuenta
     private final String[][] apiKeys = {
@@ -41,14 +43,8 @@ public class BinanceService {
             String signature = hmacSha256(secretKey, query);
             String url = PAYMENTS_API_URL + "?" + query + "&signature=" + signature;
 
-            HttpResponse<String> response = sendBinanceRequest(url, apiKey);
-            JsonObject jsonResponse = JsonParser.parseString(response.body()).getAsJsonObject();
+            return sendBinanceRequestWithProxy(url, apiKey);
 
-            if (jsonResponse.has("code") && !jsonResponse.get("code").getAsString().equals("000000")) {
-                return "{\"error\": \"" + jsonResponse.get("msg").getAsString() + "\"}";
-            }
-
-            return response.body();
         } catch (Exception e) {
             return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
         }
@@ -65,7 +61,7 @@ public class BinanceService {
             long timestamp = getServerTime();
             List<JsonObject> allOrders = new ArrayList<>();
             int currentPage = 1;
-            int rows = 50; // Binance solo permite 50 registros por solicitud
+            int rows = 50;
 
             while (true) {
                 String query = "tradeType=SELL&timestamp=" + timestamp +
@@ -73,27 +69,19 @@ public class BinanceService {
                 String signature = hmacSha256(secretKey, query);
                 String url = P2P_ORDERS_API_URL + "?" + query + "&signature=" + signature;
 
-                HttpResponse<String> response = sendBinanceRequest(url, apiKey);
-                String responseBody = response.body();
+                String response = sendBinanceRequestWithProxy(url, apiKey);
+                JsonObject jsonResponse = JsonParser.parseString(response).getAsJsonObject();
 
-                // 🔍 DEBUG: Imprimir respuesta de Binance
-                System.out.println("🔍 Binance Response (Page " + currentPage + "): " + responseBody);
-
-                JsonObject jsonResponse = JsonParser.parseString(responseBody).getAsJsonObject();
-
-                // Si hay error en la respuesta, devolverlo
                 if (jsonResponse.has("code") && !jsonResponse.get("code").getAsString().equals("000000")) {
                     return "{\"error\": \"" + jsonResponse.get("msg").getAsString() + "\"}";
                 }
 
-                // Obtener las órdenes de la respuesta
                 if (!jsonResponse.has("data") || jsonResponse.get("data").isJsonNull()) {
                     break;
                 }
 
                 jsonResponse.getAsJsonArray("data").forEach(order -> allOrders.add(order.getAsJsonObject()));
 
-                // Verificar si ya obtuvimos todas las órdenes
                 if (jsonResponse.has("total")) {
                     int totalOrders = jsonResponse.get("total").getAsInt();
                     if (allOrders.size() >= totalOrders) {
@@ -101,7 +89,7 @@ public class BinanceService {
                     }
                 }
 
-                currentPage++; // Siguiente página
+                currentPage++;
             }
 
             JsonObject finalResponse = new JsonObject();
@@ -113,18 +101,13 @@ public class BinanceService {
         }
     }
 
-
-
-
-
-
-
     private long getServerTime() throws Exception {
         String url = "https://api.binance.com/api/v3/time";
-        HttpResponse<String> response = sendBinanceRequest(url, null);
-        JsonObject jsonResponse = JsonParser.parseString(response.body()).getAsJsonObject();
+        String response = sendBinanceRequestWithProxy(url, null);
 
-        // Verificar si "serverTime" existe antes de usar getAsLong()
+        // Convertir la respuesta en JSON
+        JsonObject jsonResponse = JsonParser.parseString(response).getAsJsonObject(); // ✅ Se eliminó `.body()`
+
         if (!jsonResponse.has("serverTime") || jsonResponse.get("serverTime").isJsonNull()) {
             throw new RuntimeException("No se pudo obtener el timestamp del servidor Binance");
         }
@@ -132,15 +115,30 @@ public class BinanceService {
         return jsonResponse.get("serverTime").getAsLong();
     }
 
-    private HttpResponse<String> sendBinanceRequest(String url, String apiKey) throws Exception {
-        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .GET();
+    private String sendBinanceRequestWithProxy(String url, String apiKey) throws Exception {
+        Proxy proxy = new Proxy(Proxy.Type.HTTP, new InetSocketAddress(PROXY_HOST, PROXY_PORT));
+
+        HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection(proxy);
+        connection.setRequestMethod("GET");
+
         if (apiKey != null) {
-            requestBuilder.header("X-MBX-APIKEY", apiKey);
+            connection.setRequestProperty("X-MBX-APIKEY", apiKey);
         }
 
-        return HttpClient.newHttpClient().send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+        int responseCode = connection.getResponseCode();
+        if (responseCode != 200) {
+            throw new RuntimeException("Error HTTP: " + responseCode);
+        }
+
+        // Leer la respuesta
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()))) {
+            StringBuilder response = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                response.append(line);
+            }
+            return response.toString();
+        }
     }
 
     private String[] getApiCredentials(String account) {
