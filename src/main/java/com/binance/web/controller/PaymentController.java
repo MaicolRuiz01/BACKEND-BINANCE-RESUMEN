@@ -16,7 +16,7 @@ public class PaymentController {
     }
 
     @GetMapping("/payments")
-    public ResponseEntity<String> getPaymentHistory(@RequestParam String account) {
+    public ResponseEntity<String> getPaymentHistory(@RequestParam("account") String account) {
         String response = binanceService.getPaymentHistory(account);
         return ResponseEntity.ok().body(response);
     }

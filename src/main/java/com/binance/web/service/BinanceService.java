@@ -19,10 +19,6 @@ public class BinanceService {
     private static final String PAYMENTS_API_URL = "https://api.binance.com/sapi/v1/pay/transactions";
     private static final String P2P_ORDERS_API_URL = "https://api.binance.com/sapi/v1/c2c/orderMatch/listUserOrderHistory";
 
-    // Datos del proxy (Brasil)
-    private static final String PROXY_HOST = "52.67.10.183";
-    private static final int PROXY_PORT = 80;
-
     // Claves API de cada cuenta
     private final String[][] apiKeys = {
             {"MILTON", "EfBN9mFWAxk7CwsZzu37sXIGXyIQnyLVrAs3aqZOLAa3NumayunaGRQIJ6fi4U2r", "NbdiovuQxwgzwANxgZC669Jke5MZJUH3hyLT6BD8iWYz91EVK6e9adOY2Wq4t6nK"},
@@ -116,9 +112,8 @@ public class BinanceService {
     }
 
     private String sendBinanceRequestWithProxy(String url, String apiKey) throws Exception {
-        Proxy proxy = new Proxy(Proxy.Type.HTTP, new InetSocketAddress(PROXY_HOST, PROXY_PORT));
-
-        HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection(proxy);
+       
+        HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
         connection.setRequestMethod("GET");
 
         if (apiKey != null) {
