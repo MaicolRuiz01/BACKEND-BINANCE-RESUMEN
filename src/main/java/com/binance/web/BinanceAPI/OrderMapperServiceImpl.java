@@ -1,8 +1,8 @@
-package com.binance.web.service.impl;
+package com.binance.web.BinanceAPI;
 
 import java.util.Date;
 
-import com.binance.web.model.dto.OrderP2PDto;
+import com.binance.web.OrderP2P.OrderP2PDto;
 import com.google.gson.JsonObject;
 
 public class OrderMapperServiceImpl {

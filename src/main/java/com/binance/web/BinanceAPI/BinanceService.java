@@ -1,4 +1,4 @@
-package com.binance.web.service;
+package com.binance.web.BinanceAPI;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;

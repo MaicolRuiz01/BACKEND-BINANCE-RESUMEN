@@ -1,8 +1,6 @@
-package com.binance.web.service;
+package com.binance.web.OrderP2P;
 
 import java.util.List;
-
-import com.binance.web.model.dto.OrderP2PDto;
 
 public interface OrderP2PService {
 

@@ -1,6 +1,5 @@
-package com.binance.web.controller;
+package com.binance.web.BinanceAPI;
 
-import com.binance.web.service.BinanceService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 

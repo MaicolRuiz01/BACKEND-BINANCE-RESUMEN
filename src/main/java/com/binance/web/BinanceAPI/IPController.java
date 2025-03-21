@@ -1,4 +1,4 @@
-package com.binance.web.controller;
+package com.binance.web.BinanceAPI;
 
 import javax.net.ssl.*;
 import java.io.BufferedReader;

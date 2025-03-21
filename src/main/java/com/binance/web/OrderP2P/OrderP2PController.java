@@ -1,13 +1,10 @@
-package com.binance.web.controller;
+package com.binance.web.OrderP2P;
 
 import java.util.List;
 
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-
-import com.binance.web.model.dto.OrderP2PDto;
-import com.binance.web.service.OrderP2PService;
 
 @RestController
 @RequestMapping("/order-p2p")

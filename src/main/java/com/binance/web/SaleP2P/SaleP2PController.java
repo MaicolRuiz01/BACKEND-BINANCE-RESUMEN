@@ -1,13 +1,10 @@
-package com.binance.web.controller;
+package com.binance.web.SaleP2P;
 
 import java.util.List;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
-import com.binance.web.entity.SaleP2P;
-import com.binance.web.service.SaleP2PService;
 
 @RestController
 @RequestMapping("/saleP2P")
@@ -19,7 +16,6 @@ public class SaleP2PController {
 	public SaleP2PController(SaleP2PService saleP2PService) {
 	    this.saleP2PService = saleP2PService;
 	}
-
 
     @GetMapping
     public ResponseEntity<List<SaleP2P>> getAllSales() {
@@ -34,9 +30,9 @@ public class SaleP2PController {
     }
 
     @PostMapping
-    public ResponseEntity<SaleP2P> createSale(@RequestBody SaleP2P saleP2P) {
-        saleP2PService.saveSaleP2P(saleP2P);
-        return ResponseEntity.status(HttpStatus.CREATED).body(saleP2P);
+    public ResponseEntity<SaleP2PDto> createSale(@RequestBody SaleP2PDto saleP2PDto) {
+        saleP2PService.processAssignAccountCop(saleP2PDto);;
+        return ResponseEntity.status(HttpStatus.CREATED).body(saleP2PDto);
     }
 
     @PutMapping("/{id}")

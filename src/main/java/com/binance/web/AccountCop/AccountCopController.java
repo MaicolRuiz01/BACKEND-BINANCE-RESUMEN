@@ -1,4 +1,4 @@
-package com.binance.web.controller;
+package com.binance.web.AccountCop;
 
 import java.util.List;
 
@@ -12,9 +12,6 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-
-import com.binance.web.entity.AccountCop;
-import com.binance.web.service.AccountCopService;
 
 @RestController
 @RequestMapping("/cuenta-cop")

@@ -1,12 +1,8 @@
-package com.binance.web.service.impl;
+package com.binance.web.AccountCop;
 
 import java.util.List;
 
 import org.springframework.stereotype.Service;
-
-import com.binance.web.entity.AccountCop;
-import com.binance.web.repository.AccountCopRepository;
-import com.binance.web.service.AccountCopService;
 
 @Service
 public class AccountCopServiceImpl implements AccountCopService {

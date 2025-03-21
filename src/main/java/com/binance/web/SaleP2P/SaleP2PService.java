@@ -1,8 +1,6 @@
-package com.binance.web.service;
+package com.binance.web.SaleP2P;
 
 import java.util.List;
-
-import com.binance.web.entity.SaleP2P;
 
 public interface SaleP2PService {
 	List<SaleP2P> findAllSaleP2P();
@@ -10,4 +8,5 @@ public interface SaleP2PService {
     void saveSaleP2P(SaleP2P saleP2P);
     void updateSaleP2P(Integer id, SaleP2P sale);
     void deleteSaleP2P(Integer id);
+    void processAssignAccountCop(SaleP2PDto sale);
 }

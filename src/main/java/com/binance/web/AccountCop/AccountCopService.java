@@ -1,7 +1,6 @@
-package com.binance.web.service;
+package com.binance.web.AccountCop;
 
 import java.util.List;
-import com.binance.web.entity.AccountCop;
 
 public interface AccountCopService {
 	List<AccountCop> findAllAccountCop();

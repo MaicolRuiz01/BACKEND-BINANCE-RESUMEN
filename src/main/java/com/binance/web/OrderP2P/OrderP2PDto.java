@@ -1,4 +1,4 @@
-package com.binance.web.model.dto;
+package com.binance.web.OrderP2P;
 
 import java.util.Date;
 

@@ -1,21 +1,21 @@
-package com.binance.web.service.impl;
+package com.binance.web.OrderP2P;
 
 import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import com.binance.web.entity.SaleP2P;
-import com.binance.web.model.dto.OrderP2PDto;
-import com.binance.web.repository.SaleP2PRepository;
-import com.binance.web.service.BinanceService;
-import com.binance.web.service.OrderP2PService;
+import com.binance.web.AccountBinance.AccountBinance;
+import com.binance.web.AccountBinance.AccountBinanceRepository;
+import com.binance.web.BinanceAPI.BinanceService;
+import com.binance.web.BinanceAPI.OrderMapperServiceImpl;
+import com.binance.web.SaleP2P.SaleP2P;
+import com.binance.web.SaleP2P.SaleP2PRepository;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -29,6 +29,8 @@ public class OrderP2PServiceImpl implements OrderP2PService {
 	@Autowired
 	private BinanceService binanceService;
 
+	@Autowired
+	private AccountBinanceRepository accountBinanceRepository;
 	
 
 	@Override
@@ -37,25 +39,28 @@ public class OrderP2PServiceImpl implements OrderP2PService {
 		Date date = getTodayDate();
 		ordenesP2P = getOrderP2P(account);
 		ordenesP2P = getOrderP2pCompleted(ordenesP2P);
-		//ordenesP2P = getOrderP2pByDate(ordenesP2P, date);
-		ordenesP2P = assignAccountIfExists(ordenesP2P);
+		ordenesP2P = getOrderP2pByDate(ordenesP2P, date);
+		ordenesP2P = assignAccountIfExists(ordenesP2P, account);
 		return ordenesP2P;
 	}
 	
-	private List<OrderP2PDto> assignAccountIfExists(List<OrderP2PDto> ordenes) {
-	    // Extraer solo los numberOrder únicos
-	    Set<String> uniqueNumbers = ordenes.stream()
-	                                     .map(OrderP2PDto::getOrderNumber)
-	                                     .collect(Collectors.toSet());
+	private List<OrderP2PDto> assignAccountIfExists(List<OrderP2PDto> ordenes, String accountName) {
+	    // Buscar la cuenta de Binance por nombre
+	    AccountBinance accountBinance = accountBinanceRepository.findByName(accountName);
+	    
+	    if (accountBinance == null) {
+	        // Si no se encuentra la cuenta, devolver las órdenes sin cambios
+	        return ordenes;
+	    }
 
-	    // Buscar solo los registros que realmente existen en la base de datos en UNA SOLA CONSULTA
-	    List<SaleP2P> sales = saleP2PRepository.findByNumberOrderIn(uniqueNumbers);
+	    // 1. Obtener todas las ventas asociadas a la cuenta de Binance
+	    List<SaleP2P> salesByAccount = saleP2PRepository.findByBinanceAccount(accountBinance);
 
 	    // Convertir la lista de resultados en un Mapa para búsqueda O(1)
-	    Map<String, SaleP2P> saleMap = sales.stream()
-	    	    .collect(Collectors.toMap(sale -> String.valueOf(sale.getNumberOrder()), sale -> sale));
+	    Map<String, SaleP2P> saleMap = salesByAccount.stream()
+	        .collect(Collectors.toMap(sale -> String.valueOf(sale.getNumberOrder()), sale -> sale));
 
-	    // Recorrer ordenes una sola vez y asignar la cuenta si existe en el mapa
+	    // Recorrer las órdenes y asignar la cuenta si existe en el mapa
 	    ordenes.forEach(order -> {
 	        SaleP2P sale = saleMap.get(order.getOrderNumber());
 	        if (sale != null) {

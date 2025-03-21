@@ -1,4 +1,4 @@
-package com.binance.web.entity;
+package com.binance.web.AccountBinance;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -13,11 +13,12 @@ import lombok.NoArgsConstructor;
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
-@Table(name="account_cop")
-public class AccountCop {
+@Table(name="account_binance")
+public class AccountBinance {
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Integer id;
 	private String name;
+	private String referenceAccount;
 	private Double balance;
 }
