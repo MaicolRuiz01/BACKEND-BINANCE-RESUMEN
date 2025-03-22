@@ -5,7 +5,6 @@ import lombok.Data;
 
 @Data
 public class SaleP2PDto {
-	private Integer id;
 	private String numberOrder;
 	private Date date;
 	private String taxType;

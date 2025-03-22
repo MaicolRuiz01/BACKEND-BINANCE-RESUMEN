@@ -1,5 +1,7 @@
 package com.binance.web.Supplier;
 
+import java.util.List;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -28,5 +30,10 @@ public class SupplierServiceImpl implements SupplierService {
 		Double balance = supplier.getBalance() - pesosCop;
 		supplier.setBalance(balance);
 		saveSupplier(supplier);
+	}
+	
+	public void subtractAllSalesFromSupplier() {
+		Double ventasNoAsignadas = 0.0;
+		List<Supplier> supplier = supplierRepository.findAll();
 	}
 }
