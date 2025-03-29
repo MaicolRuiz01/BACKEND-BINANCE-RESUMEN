@@ -1,5 +1,7 @@
 package com.binance.web.Supplier;
 
+import java.util.Date;
+
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -20,4 +22,5 @@ public class Supplier {
 	private Integer id;
 	private String name;
 	private Double balance;
+	private Date lastPaymentDate;
 }

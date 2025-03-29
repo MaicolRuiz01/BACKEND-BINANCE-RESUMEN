@@ -18,7 +18,7 @@ public class P2PController {
 
     @GetMapping("/orders")
     public ResponseEntity<String> getP2POrders(@RequestParam("account") String account) {
-        return ResponseEntity.ok().body(binanceService.getP2POrders(account));
+        return ResponseEntity.ok().body(binanceService.getP2POrderLatest(account));
     }
 
 }

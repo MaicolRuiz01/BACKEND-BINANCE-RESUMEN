@@ -1,5 +1,6 @@
 package com.binance.web.BinanceAPI;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.springframework.stereotype.Service;
@@ -46,7 +47,7 @@ public class BinanceService {
         }
     }
 
-    public String getP2POrders(String account) {
+    public String getP2POrdersInRange(String account, long startTime, long endTime) {
         try {
             String[] credentials = getApiCredentials(account);
             if (credentials == null) return "{\"error\": \"Cuenta no válida.\"}";
@@ -54,14 +55,20 @@ public class BinanceService {
             String apiKey = credentials[0];
             String secretKey = credentials[1];
 
-            long timestamp = getServerTime();
             List<JsonObject> allOrders = new ArrayList<>();
             int currentPage = 1;
             int rows = 50;
 
             while (true) {
-                String query = "tradeType=SELL&timestamp=" + timestamp +
-                               "&recvWindow=60000&page=" + currentPage + "&rows=" + rows;
+                long timestamp = getServerTime();
+                String query = "tradeType=SELL" +
+                               "&startTimestamp=" + startTime +
+                               "&endTimestamp=" + endTime +
+                               "&page=" + currentPage +
+                               "&rows=" + rows +
+                               "&recvWindow=60000" +
+                               "&timestamp=" + timestamp;
+
                 String signature = hmacSha256(secretKey, query);
                 String url = P2P_ORDERS_API_URL + "?" + query + "&signature=" + signature;
 
@@ -72,18 +79,13 @@ public class BinanceService {
                     return "{\"error\": \"" + jsonResponse.get("msg").getAsString() + "\"}";
                 }
 
-                if (!jsonResponse.has("data") || jsonResponse.get("data").isJsonNull()) {
-                    break;
-                }
+                JsonArray dataArray = jsonResponse.getAsJsonArray("data");
+                if (dataArray == null || dataArray.size() == 0) break;
 
-                jsonResponse.getAsJsonArray("data").forEach(order -> allOrders.add(order.getAsJsonObject()));
+                dataArray.forEach(order -> allOrders.add(order.getAsJsonObject()));
 
-                if (jsonResponse.has("total")) {
-                    int totalOrders = jsonResponse.get("total").getAsInt();
-                    if (allOrders.size() >= totalOrders) {
-                        break;
-                    }
-                }
+                int totalOrders = jsonResponse.has("total") ? jsonResponse.get("total").getAsInt() : 0;
+                if (allOrders.size() >= totalOrders) break;
 
                 currentPage++;
             }
@@ -96,6 +98,7 @@ public class BinanceService {
             return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
         }
     }
+
 
     private long getServerTime() throws Exception {
         String url = "https://api.binance.com/api/v3/time";

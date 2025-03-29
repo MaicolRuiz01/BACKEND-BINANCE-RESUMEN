@@ -1,7 +1,5 @@
 package com.binance.web.OrderP2P;
 
-import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
@@ -47,11 +45,18 @@ public class OrderP2PServiceImpl implements OrderP2PService {
 	
 	@Override
 	public List<OrderP2PDto> showOrderP2PByDateRange(String account, Date fechaInicio, Date fechaFin) {
-	    List<OrderP2PDto> ordenesP2P = getAllOrderP2P(account);
+	    List<OrderP2PDto> ordenesP2P = getAllOrderP2P(account, fechaInicio, fechaFin);
 	    ordenesP2P = getOrderP2pCompleted(ordenesP2P);
-	    ordenesP2P = getOrderP2pByDateRange(ordenesP2P, fechaInicio, fechaFin);
 	    ordenesP2P = assignAccountIfExists(ordenesP2P, account);
 	    return ordenesP2P;
+	}
+	
+	@Override
+	public List<OrderP2PDto> showAllOrderP2(String account) {
+		  List<OrderP2PDto> ordenesP2P = getOrderP2P(account);
+		    ordenesP2P = getOrderP2pCompleted(ordenesP2P);
+		    ordenesP2P = assignAccountIfExists(ordenesP2P, account);
+		    return ordenesP2P;
 	}
 	
 	private List<OrderP2PDto> assignAccountIfExists(List<OrderP2PDto> ordenes, String accountName) {
@@ -62,7 +67,6 @@ public class OrderP2PServiceImpl implements OrderP2PService {
 	        // Si no se encuentra la cuenta, devolver las órdenes sin cambios
 	        return ordenes;
 	    }
-
 	    // 1. Obtener todas las ventas asociadas a la cuenta de Binance
 	    List<SaleP2P> salesByAccount = saleP2PRepository.findByBinanceAccount(accountBinance);
 
@@ -105,9 +109,13 @@ public class OrderP2PServiceImpl implements OrderP2PService {
 				.collect(Collectors.toList());
 	}
 
-	private List<OrderP2PDto> getAllOrderP2P(String account) {
+	private List<OrderP2PDto> getAllOrderP2P(String account, Date fechaInicio, Date fechaFin) {
+		
+	    long startTime = fechaInicio.toInstant().toEpochMilli();
+	    long endTime = fechaFin.toInstant().toEpochMilli();
+		
 		// Llamamos al servicio que obtiene el JSON de Binance
-		String jsonResponse = binanceService.getP2POrders(account);
+		String jsonResponse = binanceService.getP2POrdersInRange(account, startTime, endTime);
 
 		// Convertimos la respuesta JSON en un objeto de Gson
 		JsonObject jsonObject = JsonParser.parseString(jsonResponse).getAsJsonObject();
@@ -152,22 +160,4 @@ public class OrderP2PServiceImpl implements OrderP2PService {
 	        calendar.set(Calendar.MILLISECOND, 0);
 	        return calendar.getTime();
 	    }
-	 
-	 private List<OrderP2PDto> getOrderP2pByDateRange(List<OrderP2PDto> ordenes, Date fechaInicio, Date fechaFin) {
-		    return ordenes.stream()
-		        .filter(order -> isWithinRange(order.getCreateTime(), fechaInicio, fechaFin))
-		        .collect(Collectors.toList());
-		}
-
-	private boolean isWithinRange(Date date, Date start, Date end) {
-		    if (date == null || start == null || end == null)
-		        return false;
-
-		    LocalDate localDate = date.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
-		    LocalDate localStart = start.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
-		    LocalDate localEnd = end.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
-
-		    return (localDate.isEqual(localStart) || localDate.isAfter(localStart)) &&
-		           (localDate.isEqual(localEnd) || localDate.isBefore(localEnd));
-	}
 }

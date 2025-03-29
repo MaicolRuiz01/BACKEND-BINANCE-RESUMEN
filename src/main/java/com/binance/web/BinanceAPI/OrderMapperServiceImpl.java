@@ -11,12 +11,12 @@ public class OrderMapperServiceImpl {
         
         dto.setOrderNumber(getJsonValue(json, "orderNumber"));
         dto.setTradeType(getJsonValue(json, "tradeType"));
-        dto.setAmount(getJsonValue(json, "amount"));
-        dto.setTotalPrice(getJsonValue(json, "totalPrice"));
-        dto.setUnitPrice(getJsonValue(json, "unitPrice"));
+        dto.setAmount(getJsonDoubleValue(json, "amount"));
+        dto.setTotalPrice(getJsonDoubleValue(json, "totalPrice"));
+        dto.setUnitPrice(getJsonDoubleValue(json, "unitPrice"));
         dto.setOrderStatus(getJsonValue(json, "orderStatus"));
         dto.setCreateTime(getJsonDateValue(json, "createTime"));
-        dto.setCommission(getJsonValue(json, "commission"));
+        dto.setCommission(getJsonDoubleValue(json, "commission"));
         dto.setCounterPartNickName(getJsonValue(json, "counterPartNickName"));
         dto.setPayMethodName(getJsonValue(json, "payMethodName"));
 
@@ -33,5 +33,15 @@ public class OrderMapperServiceImpl {
             return new Date(timestamp); // Convierte el timestamp a Date
         }
         return null;
+    }
+    
+    private static Double getJsonDoubleValue(JsonObject json, String key) {
+        try {
+            return json.has(key) && !json.get(key).isJsonNull()
+                ? json.get(key).getAsDouble()
+                : null;
+        } catch (Exception e) {
+            return null;
+        }
     }
 }

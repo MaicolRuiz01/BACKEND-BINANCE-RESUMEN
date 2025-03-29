@@ -61,7 +61,7 @@ public class SaleP2PServiceImpl implements SaleP2PService{
 		sale = assignAccountCop(saleDto.getAccountCopId(), sale);
 		}
 		sale = assignAccountBiannce(sale, saleDto.getNameAccountBinance());
-		supplierService.subtractSupplierDebt(saleDto.getPesosCop(), saleDto.getTaxType());
+		supplierService.subtractSupplierDebt(saleDto.getPesosCop(), saleDto.getTaxType(), saleDto.getDate());
 		saveSaleP2P(sale);
 	}
 

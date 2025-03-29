@@ -10,15 +10,15 @@ import lombok.Data;
 public class OrderP2PDto {
 		private String orderNumber;
 	    private String tradeType;
-	    private String amount;
-	    private String totalPrice;
-	    private String unitPrice;
+	    private Double amount;
+	    private Double totalPrice;
+	    private Double unitPrice;
 	    private String orderStatus;
 	    
 	    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "dd-MM-yyyy HH:mm:ss", timezone = "America/Bogota")
 	    private Date createTime;
 	    
-	    private String commission;
+	    private Double commission;
 	    private String counterPartNickName;
 	    private String payMethodName;
 	    private String nameAccount;
