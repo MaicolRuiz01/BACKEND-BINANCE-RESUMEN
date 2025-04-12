@@ -1,11 +1,6 @@
 package com.binance.web.gastos;
-
-
-
 import java.util.Date;
-
 import com.binance.web.TipoGasto.TipoGasto;
-
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;

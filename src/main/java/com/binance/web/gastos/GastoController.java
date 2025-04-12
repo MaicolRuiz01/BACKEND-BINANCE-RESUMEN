@@ -54,4 +54,11 @@ public class GastoController {
             })
             .orElseGet(() -> ResponseEntity.notFound().build());
     }
+    
+    @PutMapping("/{id}/pagar")
+    public ResponseEntity<Gasto> pagar(@PathVariable Integer id) {
+        return gastoService.marcarComoPagado(id)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
 }

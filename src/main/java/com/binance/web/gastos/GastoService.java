@@ -28,4 +28,12 @@ public class GastoService {
     public void deleteById(Integer id) {
         gastoRepository.deleteById(id);
     }
+    
+    public Optional<Gasto> marcarComoPagado(Integer id) {
+        return gastoRepository.findById(id).map(gasto -> {
+            gasto.setPagado(true);
+            return gastoRepository.save(gasto);
+        });
+    }
+
 }
