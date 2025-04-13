@@ -54,6 +54,7 @@ public class SaleP2PServiceImpl implements SaleP2PService{
 		saleP2PRepository.deleteById(id);
 	}
 	
+	//este metodo hace el proceso de asignar una cuenta colombiana a una venta solo necesitamos enviarle una venta dto
 	@Override
 	public void processAssignAccountCop(SaleP2PDto saleDto) {
 		SaleP2P sale = convertDtoToSaleP2p(saleDto);
@@ -64,7 +65,13 @@ public class SaleP2PServiceImpl implements SaleP2PService{
 		supplierService.subtractSupplierDebt(saleDto.getPesosCop(), saleDto.getTaxType(), saleDto.getDate());
 		saveSaleP2P(sale);
 	}
-
+	
+	/*
+	 * para que funcione hay que enviarle el id de la cuenta colombiana y la venta,
+	 * el metodo encuentra la entidad por el nombre que le pase
+	 * este metodo no es necesario llamarlo porque este lo usa otro metodo llamado processAssignAccountCop
+	 */
+	
 	private SaleP2P assignAccountCop(Integer accountCopId ,SaleP2P sale) {
 		AccountCop accountCop = accountCopService.findByIdAccountCop(accountCopId);
 		sale.setAccountCop(accountCop);
@@ -72,12 +79,14 @@ public class SaleP2PServiceImpl implements SaleP2PService{
 		return sale;
 	}
 	
+	//para que funcione hay que enviarle una venta y un nombre, el metodo encuentra la entidad por el nombre que le pase
 	private SaleP2P assignAccountBiannce(SaleP2P sale, String name) {
 		AccountBinance accountBinance = accountBinanceRepository.findByName(name);
 		sale.setBinanceAccount(accountBinance);
 		return sale;
 	}
 	
+	//metodo que recibe un dto de sale y lo convierte a una entidad
 	private SaleP2P convertDtoToSaleP2p(SaleP2PDto saleDto) {
 		SaleP2P sale = new SaleP2P();
 		sale.setNumberOrder(saleDto.getNumberOrder());
