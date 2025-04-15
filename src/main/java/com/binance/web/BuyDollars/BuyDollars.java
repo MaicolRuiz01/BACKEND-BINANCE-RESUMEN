@@ -2,6 +2,7 @@ package com.binance.web.BuyDollars;
 
 import java.util.Date;
 
+import com.binance.web.AccountBinance.AccountBinance;
 import com.binance.web.Supplier.Supplier;
 
 import jakarta.persistence.Entity;
@@ -30,6 +31,10 @@ public class BuyDollars {
 	@ManyToOne
 	@JoinColumn(name = "supplier_id")
 	private Supplier supplier;
+	
+	@ManyToOne
+	@JoinColumn(name = "account_binance_id")
+	private AccountBinance accountBinance;
 	
 	private Date date;
 }

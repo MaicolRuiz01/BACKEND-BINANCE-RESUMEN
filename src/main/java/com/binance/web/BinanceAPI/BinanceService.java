@@ -220,4 +220,61 @@ public class BinanceService {
             return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
         }
     }
+    
+    public String getSpotOrders(String account) {
+        try {
+            // Obtener las credenciales de la cuenta
+            String[] credentials = getApiCredentials(account);
+            if (credentials == null) return "{\"error\": \"Cuenta no válida.\"}";
+
+            String apiKey = credentials[0];
+            String secretKey = credentials[1];
+
+            List<JsonObject> allOrders = new ArrayList<>();
+            int currentPage = 1;
+            int rows = 50;
+
+            // Continuar consultando hasta obtener todas las órdenes
+            while (true) {
+                long timestamp = getServerTime();
+                String query = "timestamp=" + timestamp +
+                               "&recvWindow=60000" +
+                               "&page=" + currentPage +
+                               "&limit=" + rows;
+
+                // Crear la firma HMAC SHA256 para la solicitud
+                String signature = hmacSha256(secretKey, query);
+                String url = "https://api.binance.com/api/v3/allOrders?" + query + "&signature=" + signature;
+
+                // Enviar la solicitud a la API de Binance
+                String response = sendBinanceRequestWithProxy(url, apiKey);
+                JsonObject jsonResponse = JsonParser.parseString(response).getAsJsonObject();
+
+                // Manejo de errores en la respuesta
+                if (jsonResponse.has("code") && !jsonResponse.get("code").getAsString().equals("000000")) {
+                    return "{\"error\": \"" + jsonResponse.get("msg").getAsString() + "\"}";
+                }
+
+                // Obtener los datos de las órdenes de la respuesta
+                JsonArray dataArray = jsonResponse.getAsJsonArray("data");
+                if (dataArray == null || dataArray.size() == 0) break;
+
+                // Agregar las órdenes a la lista de órdenes
+                dataArray.forEach(order -> allOrders.add(order.getAsJsonObject()));
+
+                int totalOrders = jsonResponse.has("total") ? jsonResponse.get("total").getAsInt() : 0;
+                if (allOrders.size() >= totalOrders) break;
+
+                currentPage++;
+            }
+
+            // Devolver las órdenes en formato JSON
+            JsonObject finalResponse = new JsonObject();
+            finalResponse.add("data", JsonParser.parseString(allOrders.toString()));
+            return finalResponse.toString();
+
+        } catch (Exception e) {
+            return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
+        }
+    }
 }

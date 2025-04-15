@@ -19,4 +19,11 @@ public class PaymentController {
         String response = binanceService.getPaymentHistory(account);
         return ResponseEntity.ok().body(response);
     }
+    
+    
+    @GetMapping("/spot")
+    public ResponseEntity<String> getSpot(@RequestParam("account") String account) {
+        String response = binanceService.getSpotOrders(account);
+        return ResponseEntity.ok().body(response);
+    }
 }

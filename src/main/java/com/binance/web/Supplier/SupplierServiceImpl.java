@@ -27,6 +27,12 @@ public class SupplierServiceImpl implements SupplierService {
 	private OrderP2PService orderP2PService;
 	
 	@Override
+	public Supplier getSupplierById(Integer supplierId) {
+		Supplier supplier =  supplierRepository.findById(supplierId).get();
+		return supplier;
+	}
+	
+	@Override
 	public void saveSupplier(Supplier supplier) {
 		supplierRepository.save(supplier);
 	}
