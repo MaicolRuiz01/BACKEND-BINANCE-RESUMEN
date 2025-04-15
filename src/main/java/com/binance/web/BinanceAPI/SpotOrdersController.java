@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/spot-orders")
 public class SpotOrdersController {
+
 	 @Autowired
 	    private BinanceService binanceService;
 
@@ -21,3 +22,4 @@ public class SpotOrdersController {
 	        return ResponseEntity.ok(response);
 	    }
 }
+
