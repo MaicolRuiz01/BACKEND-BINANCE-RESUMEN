@@ -24,7 +24,9 @@ public class BinanceService {
     private final String[][] apiKeys = {
             {"MILTON", "EfBN9mFWAxk7CwsZzu37sXIGXyIQnyLVrAs3aqZOLAa3NumayunaGRQIJ6fi4U2r", "NbdiovuQxwgzwANxgZC669Jke5MZJUH3hyLT6BD8iWYz91EVK6e9adOY2Wq4t6nK"},
             {"CESAR", "Ho474mufN8vTwvrZLjj8DdZHxa88JYlCrcPHp1r7UAhwc197So9vmUG9tRhM3XNr", "Ns41sTlvAM3nUzD0qMPE4PW57omuSxOPKdcngudgqVPphExjJC3tWX8kcxwibXDz"},
-            {"MARCEL", "vtNXEFCDEYxWpGGipXG210zzq5i2FnJAqmK5LJtRGiq5NRMCJqCQEOcR85SAunUP", "J9eIUXMxwFggHvU2HHp2EiWfNaXGvShSx5UihepHmW1gIjIBe3waZC3JvMUPBfga"}
+            {"MARCEL", "vtNXEFCDEYxWpGGipXG210zzq5i2FnJAqmK5LJtRGiq5NRMCJqCQEOcR85SAunUP", "J9eIUXMxwFggHvU2HHp2EiWfNaXGvShSx5UihepHmW1gIjIBe3waZC3JvMUPBfga"},
+            {"SONIA", "N0lUyNy3rlgNxq6XKlKdjxVLppvBwPl1Bxi7FeDZ82G7X47oL2tor20vprJaLZLk", "Nqhxi7XMzNmQMk4phC442bkA368L8Toi0EAidGOJhal2f72olp5FMhOY7OoaehUg"}
+
     };
 
     public String getPaymentHistory(String account) {
@@ -219,17 +221,27 @@ public class BinanceService {
         } catch (Exception e) {
             return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
         }
+        
+        
     }
+<<<<<<< HEAD
     
     public String getSpotOrders(String account) {
         try {
             // Obtener las credenciales de la cuenta
+=======
+
+    public String getSpotOrders(String account, String symbol, int limit) {
+        try {
+            // Obtén las credenciales de la cuenta
+>>>>>>> origin
             String[] credentials = getApiCredentials(account);
             if (credentials == null) return "{\"error\": \"Cuenta no válida.\"}";
 
             String apiKey = credentials[0];
             String secretKey = credentials[1];
 
+<<<<<<< HEAD
             List<JsonObject> allOrders = new ArrayList<>();
             int currentPage = 1;
             int rows = 50;
@@ -272,9 +284,72 @@ public class BinanceService {
             JsonObject finalResponse = new JsonObject();
             finalResponse.add("data", JsonParser.parseString(allOrders.toString()));
             return finalResponse.toString();
+=======
+            long timestamp = getServerTime();
+            String query = "symbol=" + symbol +
+                           "&limit=" + limit +
+                           "&timestamp=" + timestamp +
+                           "&recvWindow=60000";
+
+            String signature = hmacSha256(secretKey, query);
+            String url = "https://api.binance.com/api/v3/allOrders?" + query + "&signature=" + signature;
+
+            // Realiza la solicitud HTTP a la API de Binance
+            return sendBinanceRequestWithProxy(url, apiKey);
+>>>>>>> origin
 
         } catch (Exception e) {
             return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
         }
     }
+<<<<<<< HEAD
+=======
+    
+    public String getFuturesOrders(String account, String symbol, int limit) {
+        try {
+            String[] credentials = getApiCredentials(account);
+            if (credentials == null) return "{\"error\": \"Cuenta no válida.\"}";
+
+            String apiKey = credentials[0];
+            String secretKey = credentials[1];
+
+            long timestamp = getServerTime();
+            String query = "symbol=" + symbol +
+                           "&limit=" + limit +
+                           "&timestamp=" + timestamp +
+                           "&recvWindow=60000";
+
+            String signature = hmacSha256(secretKey, query);
+            String url = "https://fapi.binance.com/fapi/v1/allOrders?" + query + "&signature=" + signature;
+
+            return sendBinanceRequestWithProxy(url, apiKey);
+
+        } catch (Exception e) {
+            return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
+        }
+    }
+    
+    public String getFuturesPositions(String account) {
+        try {
+            String[] credentials = getApiCredentials(account);
+            if (credentials == null) return "{\"error\": \"Cuenta no válida.\"}";
+
+            String apiKey = credentials[0];
+            String secretKey = credentials[1];
+
+            long timestamp = getServerTime();
+            String query = "timestamp=" + timestamp + "&recvWindow=60000";
+            String signature = hmacSha256(secretKey, query);
+            String url = "https://fapi.binance.com/fapi/v2/positionRisk?" + query + "&signature=" + signature;
+
+            return sendBinanceRequestWithProxy(url, apiKey);
+
+        } catch (Exception e) {
+            return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
+        }
+    }
+
+
+
+>>>>>>> origin
 }

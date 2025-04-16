@@ -40,9 +40,9 @@ public class SupplierServiceImpl implements SupplierService {
 	@Override
 	public void subtractSupplierDebt(Double pesosCop, String taxType, Date date) {
 		Supplier supplier = supplierRepository.findByName("Deuda");
-		if(taxType.contentEquals("2x")) {
-			pesosCop = pesosCop * 0.998;
-		}
+//		if(taxType.contentEquals("2x")) {
+//			pesosCop = pesosCop * 0.998;
+//		}
 		
 		if(taxType.contentEquals("4x")) {
 			pesosCop = pesosCop * 0.996;
