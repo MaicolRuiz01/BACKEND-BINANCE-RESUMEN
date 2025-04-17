@@ -1,5 +1,7 @@
 package com.binance.web.futures;
 
-public class FuturesRepository {
-    
+import org.springframework.data.jpa.repository.JpaRepository;
+
+public interface FuturesRepository extends JpaRepository<Futures, Integer> {
+
 }
