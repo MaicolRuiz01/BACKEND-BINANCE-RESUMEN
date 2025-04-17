@@ -25,7 +25,6 @@ public class Spot {
     private String executedQty;  // Cantidad ejecutada
     private String cummulativeQuoteQty;  // Cantidad acumulada en la divisa cotizada
     private String status;  // Estado de la orden (FILLED, CANCELED, PENDING)
-    private String timeInForce;  // Tiempo de vigencia de la orden (GTC, IOC, etc.)
     private String type;  // Tipo de orden (MARKET, LIMIT)
     private String side;  // Lado de la orden (BUY, SELL)
     private String stopPrice;  // Precio de activación (si es una orden stop)
