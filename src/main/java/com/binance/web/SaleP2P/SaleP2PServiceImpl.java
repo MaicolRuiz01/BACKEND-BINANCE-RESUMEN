@@ -58,23 +58,36 @@ public class SaleP2PServiceImpl implements SaleP2PService{
 	//este metodo hace el proceso de asignar una cuenta colombiana a una venta solo necesitamos enviarle una venta dto
 	@Override
 	public void processAssignAccountCop(SaleP2PDto saleDto) {
-	    // Convertir el DTO de la venta a una entidad
+	    // Convertir el DTO en entidad
 	    SaleP2P sale = convertDtoToSaleP2p(saleDto);
 
-	    // Asignar las cuentas COP si los IDs de las cuentas están presentes
+	    // Asociar cuentas COP (y poner el nameAccount como el nombre de la primera)
 	    if (saleDto.getAccountCopIds() != null && !saleDto.getAccountCopIds().isEmpty()) {
-	        sale = assignAccountCop(saleDto.getAccountCopIds(), sale);  // Cambié accountCopId a accountCopIds
+	        sale = assignAccountCop(saleDto.getAccountCopIds(), sale);
 	    }
 
-	    // Asignar la cuenta Binance como antes
-	    sale = assignAccountBiannce(sale, saleDto.getNameAccountBinance());
+	    // Asignar cuenta Binance (si se envió nombre)
+	    if (saleDto.getNameAccountBinance() != null && !saleDto.getNameAccountBinance().isEmpty()) {
+	        sale = assignAccountBiannce(sale, saleDto.getNameAccountBinance());
+	    }
 
-	    // Restar la deuda del proveedor
-	    supplierService.subtractSupplierDebt(saleDto.getPesosCop(), saleDto.getTaxType(), saleDto.getDate());
+	    // Actualizar balances de cuentas COP
+	    if (saleDto.getAccountAmounts() != null) {
+	        for (Integer accountId : saleDto.getAccountCopIds()) {
+	            Double amount = saleDto.getAccountAmounts().get(accountId);
+	            AccountCop account = accountCopService.findByIdAccountCop(accountId);
+	            if (account != null && amount != null) {
+	                account.setBalance(account.getBalance() + amount);
+	                accountCopService.updateAccountCop(account.getId(), account);
+	            }
+	        }
+	    }
 
-	    // Guardar la venta actualizada
-	    saveSaleP2P(sale);
+	    // Guardar la venta con cuentas y binance ya asociadas
+	    saleP2PRepository.save(sale);
 	}
+
+
 
 	
 	/*

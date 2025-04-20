@@ -23,7 +23,7 @@ public class AccountCopController {
 		this.AccountCopService = AccountCopService;
 	}
 
-	@GetMapping
+	@GetMapping(produces = "application/json")
 	public ResponseEntity<List<AccountCop>> getAllAccountCop() {
 		List<AccountCop> cuentasCop = AccountCopService.findAllAccountCop();
 		return ResponseEntity.ok(cuentasCop);
