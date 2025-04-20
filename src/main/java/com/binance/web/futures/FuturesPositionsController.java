@@ -5,6 +5,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/futures")
-public class FuturesController {
+public class FuturesPositionsController {
 
 }

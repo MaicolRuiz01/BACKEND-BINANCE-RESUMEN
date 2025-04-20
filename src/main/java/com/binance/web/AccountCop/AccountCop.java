@@ -3,6 +3,7 @@ package com.binance.web.AccountCop;
 import java.util.List;
 
 import com.binance.web.SaleP2P.SaleP2P;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -25,8 +26,8 @@ public class AccountCop {
     private Integer id;
     private String name;
     private Double balance;
-
     @ManyToMany(mappedBy = "accountCops")  // Relación inversa con `SaleP2P`
+    @JsonIgnore
     private List<SaleP2P> saleP2Ps;  // Lista de ventas asociadas a esta cuenta
 }
 

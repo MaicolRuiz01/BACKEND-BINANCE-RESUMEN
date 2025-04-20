@@ -294,6 +294,59 @@ public class BinanceService {
             return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
         }
     }
+    
+    //esto trae los depositos/compras que aparecen en billetera spot
+    public String getSpotDeposits(String account, int limit) {
+        try {
+            // Obtén las credenciales de la cuenta
+            String[] credentials = getApiCredentials(account);
+            if (credentials == null) return "{\"error\": \"Cuenta no válida.\"}";
+
+            String apiKey = credentials[0];
+            String secretKey = credentials[1];
+
+            long timestamp = getServerTime();
+            String query = "limit=" + limit +
+                           "&timestamp=" + timestamp +
+                           "&recvWindow=60000";
+
+            String signature = hmacSha256(secretKey, query);
+            String url = "https://api.binance.com/sapi/v1/capital/deposit/hisrec?" + query + "&signature=" + signature;
+
+            // Realiza la solicitud HTTP a la API de Binance
+            return sendBinanceRequestWithProxy(url, apiKey);
+
+        } catch (Exception e) {
+            return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
+        }
+    }
+  //esto trae los retirosventas que aparecen en billetera spot
+    public String getSpotWithdrawals(String account, int limit) {
+        try {
+            // Obtén las credenciales de la cuenta
+            String[] credentials = getApiCredentials(account);
+            if (credentials == null) return "{\"error\": \"Cuenta no válida.\"}";
+
+            String apiKey = credentials[0];
+            String secretKey = credentials[1];
+
+            long timestamp = getServerTime();
+            String query = "limit=" + limit +
+                           "&timestamp=" + timestamp +
+                           "&recvWindow=60000";
+
+            String signature = hmacSha256(secretKey, query);
+            String url = "https://api.binance.com/sapi/v1/capital/withdraw/history?" + query + "&signature=" + signature;
+
+            // Realiza la solicitud HTTP a la API de Binance
+            return sendBinanceRequestWithProxy(url, apiKey);
+
+        } catch (Exception e) {
+            return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
+        }
+    }
+
+
 
 
 

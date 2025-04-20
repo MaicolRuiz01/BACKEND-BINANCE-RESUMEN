@@ -42,6 +42,12 @@ public class FuturesServiceImpl implements FuturesService {
 		
 	}
 
+	@Override
+	public void updateFuturesOrder(Integer id, Futures futuresOrder) {
+		// TODO Auto-generated method stub
+		
+	}
+
 	
 
 }
