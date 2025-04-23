@@ -1,24 +1,18 @@
 package com.binance.web.AccountBinance;
 
-import com.binance.web.BinanceAPI.BinanceService;
-import org.springframework.beans.factory.annotation.Autowired;
+import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
 
 @RestController
 @RequestMapping("/cuenta-binance")
 public class AccountBinanceController {
 
     private final AccountBinanceService accountBinanceService;
-    private final BinanceService binanceService;
 
-    @Autowired
-    public AccountBinanceController(AccountBinanceService accountBinanceService, BinanceService binanceService) {
+    public AccountBinanceController(AccountBinanceService accountBinanceService) {
         this.accountBinanceService = accountBinanceService;
-        this.binanceService = binanceService;
     }
 
     @GetMapping
@@ -52,19 +46,5 @@ public class AccountBinanceController {
     public ResponseEntity<Void> deleteAccount(@PathVariable Integer id) {
         accountBinanceService.deleteAccountBinance(id);
         return ResponseEntity.noContent().build();
-    }
-
-    // 🔹 Obtener saldo spot de una cuenta por nombre
-    @GetMapping("/saldo-spot/{nombre}")
-    public ResponseEntity<String> getSpotBalance(@PathVariable String nombre) {
-        String response = binanceService.getSpotBalances(nombre.toUpperCase());
-        return ResponseEntity.ok(response);
-    }
-
-    // 🔹 Obtener saldo de futuros de una cuenta por nombre
-    @GetMapping("/saldo-futures/{nombre}")
-    public ResponseEntity<String> getFuturesBalance(@PathVariable String nombre) {
-        String response = binanceService.getFuturesBalances(nombre.toUpperCase());
-        return ResponseEntity.ok(response);
     }
 }

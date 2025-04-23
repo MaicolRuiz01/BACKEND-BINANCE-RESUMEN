@@ -16,6 +16,7 @@ public class SaleP2PController {
 	public SaleP2PController(SaleP2PService saleP2PService) {
 	    this.saleP2PService = saleP2PService;
 	}
+	
 
     @GetMapping
     public ResponseEntity<List<SaleP2P>> getAllSales() {

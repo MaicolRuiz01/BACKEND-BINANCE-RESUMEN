@@ -26,7 +26,6 @@ public class BinanceService {
             {"CESAR", "Ho474mufN8vTwvrZLjj8DdZHxa88JYlCrcPHp1r7UAhwc197So9vmUG9tRhM3XNr", "Ns41sTlvAM3nUzD0qMPE4PW57omuSxOPKdcngudgqVPphExjJC3tWX8kcxwibXDz"},
             {"MARCEL", "vtNXEFCDEYxWpGGipXG210zzq5i2FnJAqmK5LJtRGiq5NRMCJqCQEOcR85SAunUP", "J9eIUXMxwFggHvU2HHp2EiWfNaXGvShSx5UihepHmW1gIjIBe3waZC3JvMUPBfga"},
             {"SONIA", "N0lUyNy3rlgNxq6XKlKdjxVLppvBwPl1Bxi7FeDZ82G7X47oL2tor20vprJaLZLk", "Nqhxi7XMzNmQMk4phC442bkA368L8Toi0EAidGOJhal2f72olp5FMhOY7OoaehUg"}
-
     };
 
     public String getPaymentHistory(String account) {
@@ -101,13 +100,12 @@ public class BinanceService {
         }
     }
 
-
     private long getServerTime() throws Exception {
         String url = "https://api.binance.com/api/v3/time";
         String response = sendBinanceRequestWithProxy(url, null);
 
         // Convertir la respuesta en JSON
-        JsonObject jsonResponse = JsonParser.parseString(response).getAsJsonObject(); // ✅ Se eliminó `.body()`
+        JsonObject jsonResponse = JsonParser.parseString(response).getAsJsonObject();
 
         if (!jsonResponse.has("serverTime") || jsonResponse.get("serverTime").isJsonNull()) {
             throw new RuntimeException("No se pudo obtener el timestamp del servidor Binance");
@@ -117,7 +115,6 @@ public class BinanceService {
     }
 
     private String sendBinanceRequestWithProxy(String url, String apiKey) throws Exception {
-       
         HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
         connection.setRequestMethod("GET");
 
@@ -130,7 +127,6 @@ public class BinanceService {
             throw new RuntimeException("Error HTTP: " + responseCode);
         }
 
-        // Leer la respuesta
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()))) {
             StringBuilder response = new StringBuilder();
             String line;
@@ -169,7 +165,7 @@ public class BinanceService {
         }
         return result.toString();
     }
-    
+
     public String getP2POrderLatest(String account) {
         try {
             String[] credentials = getApiCredentials(account);
@@ -181,7 +177,7 @@ public class BinanceService {
             long timestamp = getServerTime();
             List<JsonObject> allOrders = new ArrayList<>();
             int currentPage = 1;
-            int rows = 50; // Binance permite obtener hasta 50 órdenes por página
+            int rows = 50;
 
             while (true) {
                 String query = "tradeType=SELL&timestamp=" + timestamp +
@@ -202,7 +198,6 @@ public class BinanceService {
 
                 jsonResponse.getAsJsonArray("data").forEach(order -> allOrders.add(order.getAsJsonObject()));
 
-                // Si ya tenemos al menos 100 órdenes, detenemos la consulta
                 if (allOrders.size() >= 100) {
                     break;
                 }
@@ -210,7 +205,6 @@ public class BinanceService {
                 currentPage++;
             }
 
-            // 🔹 Nos aseguramos de solo devolver las últimas 100 órdenes
             int startIndex = Math.max(0, allOrders.size() - 100);
             List<JsonObject> last100Orders = allOrders.subList(startIndex, allOrders.size());
 
@@ -221,13 +215,10 @@ public class BinanceService {
         } catch (Exception e) {
             return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
         }
-        
-        
     }
 
     public String getSpotOrders(String account, String symbol, int limit) {
         try {
-            // Obtén las credenciales de la cuenta
             String[] credentials = getApiCredentials(account);
             if (credentials == null) return "{\"error\": \"Cuenta no válida.\"}";
 
@@ -243,14 +234,13 @@ public class BinanceService {
             String signature = hmacSha256(secretKey, query);
             String url = "https://api.binance.com/api/v3/allOrders?" + query + "&signature=" + signature;
 
-            // Realiza la solicitud HTTP a la API de Binance
             return sendBinanceRequestWithProxy(url, apiKey);
 
         } catch (Exception e) {
             return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
         }
     }
-    
+
     public String getFuturesOrders(String account, String symbol, int limit) {
         try {
             String[] credentials = getApiCredentials(account);
@@ -274,7 +264,7 @@ public class BinanceService {
             return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
         }
     }
-    
+
     public String getFuturesPositions(String account) {
         try {
             String[] credentials = getApiCredentials(account);
@@ -294,7 +284,9 @@ public class BinanceService {
             return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
         }
     }
-    public String getSpotBalances(String account) {
+
+    // 🔸 Esto trae los depósitos/compras que aparecen en billetera spot
+    public String getSpotDeposits(String account, int limit) {
         try {
             String[] credentials = getApiCredentials(account);
             if (credentials == null) return "{\"error\": \"Cuenta no válida.\"}";
@@ -303,10 +295,12 @@ public class BinanceService {
             String secretKey = credentials[1];
 
             long timestamp = getServerTime();
-            String query = "timestamp=" + timestamp + "&recvWindow=60000";
-            String signature = hmacSha256(secretKey, query);
+            String query = "limit=" + limit +
+                           "&timestamp=" + timestamp +
+                           "&recvWindow=60000";
 
-            String url = "https://api.binance.com/api/v3/account?" + query + "&signature=" + signature;
+            String signature = hmacSha256(secretKey, query);
+            String url = "https://api.binance.com/sapi/v1/capital/deposit/hisrec?" + query + "&signature=" + signature;
 
             return sendBinanceRequestWithProxy(url, apiKey);
 
@@ -315,7 +309,8 @@ public class BinanceService {
         }
     }
 
-    public String getFuturesBalances(String account) {
+    // 🔸 Esto trae los retiros/ventas que aparecen en billetera spot
+    public String getSpotWithdrawals(String account, int limit) {
         try {
             String[] credentials = getApiCredentials(account);
             if (credentials == null) return "{\"error\": \"Cuenta no válida.\"}";
@@ -324,10 +319,12 @@ public class BinanceService {
             String secretKey = credentials[1];
 
             long timestamp = getServerTime();
-            String query = "timestamp=" + timestamp + "&recvWindow=60000";
-            String signature = hmacSha256(secretKey, query);
+            String query = "limit=" + limit +
+                           "&timestamp=" + timestamp +
+                           "&recvWindow=60000";
 
-            String url = "https://fapi.binance.com/fapi/v2/account?" + query + "&signature=" + signature;
+            String signature = hmacSha256(secretKey, query);
+            String url = "https://api.binance.com/sapi/v1/capital/withdraw/history?" + query + "&signature=" + signature;
 
             return sendBinanceRequestWithProxy(url, apiKey);
 
@@ -335,5 +332,14 @@ public class BinanceService {
             return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
         }
     }
+
+	public String getSpotBalances(String upperCase) {
+		// TODO Auto-generated method stub
+		return null;
+	}
+
+	public String getFuturesBalances(String upperCase) {
+		// TODO Auto-generated method stub
+		return null;
+	}
 }
-

@@ -11,6 +11,8 @@ import org.springframework.stereotype.Service;
 
 import com.binance.web.AccountBinance.AccountBinance;
 import com.binance.web.AccountBinance.AccountBinanceRepository;
+import com.binance.web.BuyDollars.BuyDollars;
+import com.binance.web.BuyDollars.BuyDollarsRepository;
 import com.binance.web.OrderP2P.OrderP2PDto;
 import com.binance.web.OrderP2P.OrderP2PService;
 
@@ -25,6 +27,9 @@ public class SupplierServiceImpl implements SupplierService {
 	
 	@Autowired
 	private OrderP2PService orderP2PService;
+	
+	@Autowired
+    private BuyDollarsRepository buyDollarsRepository;
 	
 	@Override
 	public void saveSupplier(Supplier supplier) {
@@ -85,5 +90,30 @@ public class SupplierServiceImpl implements SupplierService {
 	        calendar.set(Calendar.SECOND, 0);
 	        calendar.set(Calendar.MILLISECOND, 0);
 	        return calendar.getTime();
+	    }
+	 
+	 @Override
+	    public Supplier getSupplierById(int id) {
+	        return supplierRepository.findById(id).orElse(null);
+	    }
+
+	    @Override
+	    public void addBuyDollars(BuyDollars buyDollars) {
+	        // Se crea un nuevo BuyDollars
+	        buyDollarsRepository.save(buyDollars);
+
+	        // Actualizamos el balance del Supplier (aquí asumimos que el Supplier con id 1 es el único)
+	        Supplier supplier = supplierRepository.findById(1).orElseThrow(() -> new RuntimeException("Supplier not found"));
+	        supplier.setBalance(supplier.getBalance() + buyDollars.getDollars());
+	        supplierRepository.save(supplier);
+	    }
+
+	    @Override
+	    public Supplier updateSupplierBalance(Integer id, Supplier supplier) {
+	        // Lógica para actualizar el balance del Supplier
+	        Supplier existingSupplier = supplierRepository.findById(id).orElseThrow(() -> new RuntimeException("Supplier not found"));
+	        existingSupplier.setBalance(supplier.getBalance());
+	        existingSupplier.setLastPaymentDate(supplier.getLastPaymentDate());
+	        return supplierRepository.save(existingSupplier);
 	    }
 }
