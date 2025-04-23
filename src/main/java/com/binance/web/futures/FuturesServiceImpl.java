@@ -3,7 +3,9 @@ package com.binance.web.futures;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
 
+@Service
 public class FuturesServiceImpl implements FuturesService {
 
 	@Autowired
@@ -39,6 +41,12 @@ public class FuturesServiceImpl implements FuturesService {
 	public void deleteFutures(Integer id) {
 		// TODO Auto-generated method stub
 		futuresRepository.deleteById(id);
+		
+	}
+
+	@Override
+	public void updateFuturesOrder(Integer id, Futures futuresOrder) {
+		// TODO Auto-generated method stub
 		
 	}
 

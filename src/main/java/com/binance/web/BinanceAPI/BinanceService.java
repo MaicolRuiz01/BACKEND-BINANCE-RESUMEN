@@ -294,7 +294,46 @@ public class BinanceService {
             return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
         }
     }
+    public String getSpotBalances(String account) {
+        try {
+            String[] credentials = getApiCredentials(account);
+            if (credentials == null) return "{\"error\": \"Cuenta no válida.\"}";
 
+            String apiKey = credentials[0];
+            String secretKey = credentials[1];
 
+            long timestamp = getServerTime();
+            String query = "timestamp=" + timestamp + "&recvWindow=60000";
+            String signature = hmacSha256(secretKey, query);
 
+            String url = "https://api.binance.com/api/v3/account?" + query + "&signature=" + signature;
+
+            return sendBinanceRequestWithProxy(url, apiKey);
+
+        } catch (Exception e) {
+            return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
+        }
+    }
+
+    public String getFuturesBalances(String account) {
+        try {
+            String[] credentials = getApiCredentials(account);
+            if (credentials == null) return "{\"error\": \"Cuenta no válida.\"}";
+
+            String apiKey = credentials[0];
+            String secretKey = credentials[1];
+
+            long timestamp = getServerTime();
+            String query = "timestamp=" + timestamp + "&recvWindow=60000";
+            String signature = hmacSha256(secretKey, query);
+
+            String url = "https://fapi.binance.com/fapi/v2/account?" + query + "&signature=" + signature;
+
+            return sendBinanceRequestWithProxy(url, apiKey);
+
+        } catch (Exception e) {
+            return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
+        }
+    }
 }
+
