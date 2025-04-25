@@ -3,8 +3,12 @@ package com.binance.web.AccountBinance;
 import java.util.List;
 import org.springframework.stereotype.Service;
 
+import jakarta.transaction.Transactional;
+
 @Service
+@Transactional
 public class AccountBinanceServiceImpl implements AccountBinanceService {
+
 
     private final AccountBinanceRepository accountBinanceRepository;
 
@@ -42,4 +46,20 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
     public void deleteAccountBinance(Integer id) {
         accountBinanceRepository.deleteById(id);
     }
+    
+    @Override
+    public AccountBinance findByName(String name) {
+        return accountBinanceRepository.findByName(name);
+    }
+    
+    public void subtractBalance(String name, Double amount) {
+        AccountBinance account = accountBinanceRepository.findByName(name);
+        if (account != null && amount != null && account.getBalance() != null) {
+            account.setBalance(account.getBalance() - amount);
+            accountBinanceRepository.save(account);
+        }
+        System.out.println("🔴 Restando saldo: " + amount + " a cuenta: " + name);
+
+    }
+
 }

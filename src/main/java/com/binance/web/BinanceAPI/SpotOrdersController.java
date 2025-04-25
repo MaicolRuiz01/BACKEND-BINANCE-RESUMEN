@@ -156,6 +156,14 @@ public class SpotOrdersController {
 	        }
 	    }
 	    
+	    @GetMapping("/spot-balance")
+	    public ResponseEntity<String> getSpotBalance(
+	            @RequestParam String account,
+	            @RequestParam String asset) {
+	        return ResponseEntity.ok(binanceService.getSpotBalanceByAsset(account, asset));
+	    }
+
+	    
 
 }
 

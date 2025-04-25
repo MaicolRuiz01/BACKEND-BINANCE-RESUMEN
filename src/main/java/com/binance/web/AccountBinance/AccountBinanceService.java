@@ -8,4 +8,6 @@ public interface AccountBinanceService {
     void saveAccountBinance(AccountBinance accountBinance);
     void updateAccountBinance(Integer id, AccountBinance accountBinance);
     void deleteAccountBinance(Integer id);
+    AccountBinance findByName(String name);
+    void subtractBalance(String name, Double amount);
 }

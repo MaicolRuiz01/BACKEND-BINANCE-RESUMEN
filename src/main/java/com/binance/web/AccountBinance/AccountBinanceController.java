@@ -47,4 +47,22 @@ public class AccountBinanceController {
         accountBinanceService.deleteAccountBinance(id);
         return ResponseEntity.noContent().build();
     }
+    
+    @GetMapping("/buscar")
+    public ResponseEntity<AccountBinance> getAccountByName(@RequestParam String name) {
+        AccountBinance account = accountBinanceService.findByName(name);
+        return account != null ? ResponseEntity.ok(account) : ResponseEntity.notFound().build();
+    }
+    
+    @GetMapping("/balance")
+    public ResponseEntity<Double> getBalanceByName(@RequestParam String name) {
+        System.out.println("🟢 Consultando balance de: " + name);  // <- agrega esto para probar si entra
+        AccountBinance account = accountBinanceService.findByName(name);
+        return account != null ? ResponseEntity.ok(account.getBalance()) : ResponseEntity.notFound().build();
+    }
+    
+    @GetMapping("/prueba")
+    public ResponseEntity<String> test() {
+        return ResponseEntity.ok("✅ Endpoint activo");
+    }
 }

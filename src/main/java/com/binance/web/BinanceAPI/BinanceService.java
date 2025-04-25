@@ -342,4 +342,38 @@ public class BinanceService {
 		// TODO Auto-generated method stub
 		return null;
 	}
+	
+	public String getSpotBalanceByAsset(String account, String asset) {
+	    try {
+	        String[] credentials = getApiCredentials(account);
+	        if (credentials == null) return "{\"error\": \"Cuenta no válida.\"}";
+
+	        String apiKey = credentials[0];
+	        String secretKey = credentials[1];
+
+	        long timestamp = getServerTime();
+	        String query = "timestamp=" + timestamp + "&recvWindow=60000";
+	        String signature = hmacSha256(secretKey, query);
+	        String url = "https://api.binance.com/api/v3/account?" + query + "&signature=" + signature;
+
+	        String response = sendBinanceRequestWithProxy(url, apiKey);
+	        JsonObject accountData = JsonParser.parseString(response).getAsJsonObject();
+	        JsonArray balances = accountData.getAsJsonArray("balances");
+
+	        for (int i = 0; i < balances.size(); i++) {
+	            JsonObject balance = balances.get(i).getAsJsonObject();
+	            if (balance.get("asset").getAsString().equalsIgnoreCase(asset)) {
+	                JsonObject result = new JsonObject();
+	                result.add("balance", balance);
+	                return result.toString();
+	            }
+	        }
+
+	        return "{\"error\": \"Activo no encontrado.\"}";
+
+	    } catch (Exception e) {
+	        return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
+	    }
+	}
+
 }

@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 
 import com.binance.web.AccountBinance.AccountBinance;
 import com.binance.web.AccountBinance.AccountBinanceRepository;
+import com.binance.web.AccountBinance.AccountBinanceService;
 import com.binance.web.AccountCop.AccountCop;
 import com.binance.web.AccountCop.AccountCopService;
 import com.binance.web.Supplier.SupplierService;
@@ -26,6 +27,10 @@ public class SaleP2PServiceImpl implements SaleP2PService{
 	
 	@Autowired
 	private AccountBinanceRepository accountBinanceRepository;
+	
+	@Autowired
+	private AccountBinanceService accountBinanceService;
+
 
 	@Override
 	public List<SaleP2P> findAllSaleP2P() {
@@ -68,8 +73,15 @@ public class SaleP2PServiceImpl implements SaleP2PService{
 
 	    // Asignar cuenta Binance (si se envió nombre)
 	    if (saleDto.getNameAccountBinance() != null && !saleDto.getNameAccountBinance().isEmpty()) {
-	        sale = assignAccountBiannce(sale, saleDto.getNameAccountBinance());
+	        sale = assignAccountBinance(sale, saleDto.getNameAccountBinance());
+
+	        // 🔽 Descontar saldo en la cuenta Binance
+	        if (sale.getPesosCop() != null) {
+	            accountBinanceService.subtractBalance(saleDto.getNameAccountBinance(), sale.getPesosCop());
+	        }
+
 	    }
+
 
 	    // Actualizar balances de cuentas COP
 	    if (saleDto.getAccountAmounts() != null) {
@@ -123,7 +135,7 @@ public class SaleP2PServiceImpl implements SaleP2PService{
 
 	
 	//para que funcione hay que enviarle una venta y un nombre, el metodo encuentra la entidad por el nombre que le pase
-	private SaleP2P assignAccountBiannce(SaleP2P sale, String name) {
+	private SaleP2P assignAccountBinance(SaleP2P sale, String name) {
 		AccountBinance accountBinance = accountBinanceRepository.findByName(name);
 		sale.setBinanceAccount(accountBinance);
 		return sale;
