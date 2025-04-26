@@ -38,6 +38,7 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
             existing.setName(updatedAccountBinance.getName());
             existing.setReferenceAccount(updatedAccountBinance.getReferenceAccount());
             existing.setBalance(updatedAccountBinance.getBalance());
+            existing.setCorreo(updatedAccountBinance.getCorreo());
             accountBinanceRepository.save(existing);
         }
     }

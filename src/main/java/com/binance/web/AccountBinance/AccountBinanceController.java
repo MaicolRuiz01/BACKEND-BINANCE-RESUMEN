@@ -60,9 +60,4 @@ public class AccountBinanceController {
         AccountBinance account = accountBinanceService.findByName(name);
         return account != null ? ResponseEntity.ok(account.getBalance()) : ResponseEntity.notFound().build();
     }
-    
-    @GetMapping("/prueba")
-    public ResponseEntity<String> test() {
-        return ResponseEntity.ok("✅ Endpoint activo");
-    }
 }
