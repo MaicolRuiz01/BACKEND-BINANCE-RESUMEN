@@ -21,9 +21,10 @@ public class AccountCopServiceImpl implements AccountCopService {
 
 	@Override
 	public AccountCop findByIdAccountCop(Integer id) {
-		AccountCop AccountCop = AccountCopRepository.findById(id).get();
-		return AccountCop;
+		return AccountCopRepository.findById(id).orElse(null);
+
 	}
+
 
 	@Override
 	public void saveAccountCop(AccountCop accountCop) {

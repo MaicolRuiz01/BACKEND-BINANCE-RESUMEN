@@ -21,4 +21,5 @@ public class AccountBinance {
 	private String name;
 	private String referenceAccount;
 	private Double balance;
+	private String correo;
 }
