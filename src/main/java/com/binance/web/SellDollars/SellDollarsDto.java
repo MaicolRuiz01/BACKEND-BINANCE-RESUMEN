@@ -13,6 +13,7 @@ public class SellDollarsDto {
 	private String idWithdrawals;
     private Double tasa;
     private Double dollars;
+    private Double pesos;
     private Date date;
     private String nameAccount;
 

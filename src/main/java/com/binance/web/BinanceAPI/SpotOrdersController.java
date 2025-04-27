@@ -2,6 +2,7 @@ package com.binance.web.BinanceAPI;
 
 import java.util.Date;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,6 +16,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import lombok.RequiredArgsConstructor;
 
+import com.binance.web.AccountBinance.AccountBinance;
+import com.binance.web.AccountBinance.AccountBinanceRepository;
 import com.binance.web.BuyDollars.BuyDollars;
 import com.binance.web.BuyDollars.BuyDollarsRepository;
 import com.binance.web.BuyDollars.BuyDollarsService;
@@ -38,7 +41,7 @@ public class SpotOrdersController {
     private final BuyDollarsRepository     buyDollarsRepository;
     private final OrderP2PService          orderP2PService;
     private final SaleP2PRepository        saleP2PRepository;
-
+    private final AccountBinanceRepository accountBinanceRepository;
     // ----------------- P2P Orders (filtradas) -----------------
     @GetMapping
     public ResponseEntity<List<OrderP2PDto>> getP2POrders(@RequestParam String account) {
@@ -55,51 +58,56 @@ public class SpotOrdersController {
         return ResponseEntity.ok(sinAsignar);
     }
 	    
-	    
-	    // Obtener depósitos en la billetera Spot
-	    @GetMapping("/depositos")
-	    public ResponseEntity<String> getSpotDeposits(
-	            @RequestParam String account,
-	            @RequestParam(defaultValue = "100") int limit) {
+    // Obtener depósitos en la billetera Spot, excluyendo:
+    //  • Los ya convertidos en BuyDollars (idDeposit)
+    //  • Las transacciones cuyo address esté registrado en AccountBinance.address
+    @GetMapping("/depositos")
+    public ResponseEntity<String> getSpotDeposits(
+            @RequestParam String account,
+            @RequestParam(defaultValue = "100") int limit) {
 
-	        String response = binanceService.getSpotDeposits(account, limit);
+        String response = binanceService.getSpotDeposits(account, limit);
 
-	        try {
-	            ObjectMapper mapper = new ObjectMapper();
-	            JsonNode root = mapper.readTree(response);
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            JsonNode root     = mapper.readTree(response);
+            JsonNode dataNode = root.path("data");
+            if (!dataNode.isArray()) {
+                return ResponseEntity.ok(response);
+            }
+            ArrayNode sourceArray = (ArrayNode) dataNode;
 
-	            // 1) IDs ya usados
-	            Set<String> assignedIds = buyDollarsRepository.findAll().stream()
-	                .map(bd -> bd.getIdDeposit())
-	                .collect(Collectors.toSet());
+            // 1) IDs ya usados en compras
+            Set<String> assignedIds = buyDollarsRepository.findAll().stream()
+                .map(bd -> bd.getIdDeposit())
+                .collect(Collectors.toSet());
 
-	            // 2) Accedemos al array original (en data)
-	            JsonNode dataNode = root.path("data");
-	            if (!dataNode.isArray()) {
-	                return ResponseEntity.ok(response);
-	            }
-	            ArrayNode sourceArray = (ArrayNode) dataNode;
+            // 2) Direcciones registradas que queremos excluir
+            Set<String> blockedAddresses = getRegisteredAddresses();
 
-	            // 3) Filtramos
-	            ArrayNode filtered = mapper.createArrayNode();
-	            for (JsonNode deposit : sourceArray) {
-	                String id = deposit.path("id").asText();
-	                if (!assignedIds.contains(id)) {
-	                    filtered.add(deposit);
-	                }
-	            }
+            // 3) Filtramos
+            ArrayNode filtered = mapper.createArrayNode();
+            for (JsonNode deposit : sourceArray) {
+                String id      = deposit.path("id").asText();
+                String address = deposit.path("address").asText(null);
+                if (!assignedIds.contains(id)
+                        && (address == null || !blockedAddresses.contains(address))) {
+                    filtered.add(deposit);
+                }
+            }
 
-	            // 4) Reemplazamos "data" y devolvemos el JSON completo
-	            ((ObjectNode) root).set("data", filtered);
-	            return ResponseEntity.ok(mapper.writeValueAsString(root));
+            // 4) Reemplazamos "data" y devolvemos
+            ((ObjectNode) root).set("data", filtered);
+            return ResponseEntity.ok(mapper.writeValueAsString(root));
 
-	        } catch (Exception e) {
-	            // en caso de fallo devolvemos la respuesta original
-	            return ResponseEntity.ok(response);
-	        }
-	    }
+        } catch (Exception e) {
+            return ResponseEntity.ok(response);
+        }
+    }
 	
-
+    // Obtener retiros en la billetera Spot, excluyendo:
+    //  • Los ya convertidos en SellDollars (idWithdrawals)
+    //  • Las transacciones cuyo address esté registrado en AccountBinance.address
 	    @GetMapping("/withdrawals")
 	    public ResponseEntity<String> getSpotWithdrawals(
 	            @RequestParam String account,
@@ -111,47 +119,47 @@ public class SpotOrdersController {
 	            ObjectMapper mapper = new ObjectMapper();
 	            JsonNode root = mapper.readTree(response);
 
-	            // 1) Construimos la lista de IDs ya asignados
-	            Set<String> assignedIds = sellDollarsRepository.findAll()
-	                .stream()
-	                .map(SellDollars::getIdWithdrawals)
-	                .collect(Collectors.toSet());
-
-	            ArrayNode sourceArray;
 	            boolean rootIsArray = root.isArray();
+	            ArrayNode sourceArray;
 
-	            // 2) Obtenemos el ArrayNode correcto según la forma del JSON
 	            if (rootIsArray) {
 	                sourceArray = (ArrayNode) root;
 	            } else {
 	                JsonNode dataNode = root.path("data");
 	                if (!dataNode.isArray()) {
-	                    // no hay array que filtrar, devolvemos original
 	                    return ResponseEntity.ok(response);
 	                }
 	                sourceArray = (ArrayNode) dataNode;
 	            }
 
+	            // 1) IDs ya usados en ventas
+	            Set<String> assignedIds = sellDollarsRepository.findAll().stream()
+	                .map(sd -> sd.getIdWithdrawals())
+	                .collect(Collectors.toSet());
+
+	            // 2) Direcciones registradas que queremos excluir
+	            Set<String> blockedAddresses = getRegisteredAddresses();
+
 	            // 3) Filtramos
 	            ArrayNode filtered = mapper.createArrayNode();
 	            for (JsonNode withdrawal : sourceArray) {
-	                String id = withdrawal.path("id").asText();
-	                if (!assignedIds.contains(id)) {
+	                String id      = withdrawal.path("id").asText();
+	                String address = withdrawal.path("address").asText(null);
+	                if (!assignedIds.contains(id)
+	                        && (address == null || !blockedAddresses.contains(address))) {
 	                    filtered.add(withdrawal);
 	                }
 	            }
 
-	            // 4) Reemplazamos en la respuesta
+	            // 4) Reemplazamos y devolvemos
 	            if (rootIsArray) {
-	                // si era un array puro, devolvemos sólo el array filtrado
 	                return ResponseEntity.ok(mapper.writeValueAsString(filtered));
 	            } else {
-	                // si era un objeto con data, sustituimos data
 	                ((ObjectNode) root).set("data", filtered);
 	                return ResponseEntity.ok(mapper.writeValueAsString(root));
 	            }
+
 	        } catch (Exception e) {
-	            // ante cualquier error devolvemos la respuesta original
 	            return ResponseEntity.ok(response);
 	        }
 	    }
@@ -161,6 +169,13 @@ public class SpotOrdersController {
 	            @RequestParam String account,
 	            @RequestParam String asset) {
 	        return ResponseEntity.ok(binanceService.getSpotBalanceByAsset(account, asset));
+	    }
+	    
+	    private Set<String> getRegisteredAddresses() {
+	        return accountBinanceRepository.findAll().stream()
+	            .map(AccountBinance::getAddress)
+	            .filter(Objects::nonNull)
+	            .collect(Collectors.toSet());
 	    }
 
 	    

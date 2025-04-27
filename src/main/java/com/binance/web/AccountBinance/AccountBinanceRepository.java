@@ -6,4 +6,9 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface AccountBinanceRepository  extends JpaRepository<AccountBinance, Integer>{
 	AccountBinance findByName(String name);
+
+	AccountBinance findByUserBinance(String name);
+
+	AccountBinance findByReferenceAccount(String referenceAccount);
+
 }

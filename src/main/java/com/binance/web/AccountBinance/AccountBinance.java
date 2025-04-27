@@ -22,4 +22,7 @@ public class AccountBinance {
 	private String referenceAccount;
 	private Double balance;
 	private String correo;
+	private String userBinance;
+	//esto se usa para identificar a las cuentas en la parte de traspasos en billetra spot
+	private String address; 
 }

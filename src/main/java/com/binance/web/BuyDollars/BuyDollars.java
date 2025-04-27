@@ -26,6 +26,7 @@ public class BuyDollars {
 	private Integer id;
 	private Double tasa;
 	private Double dollars;
+	private Double pesos;
 	@ManyToOne
 	@JoinColumn(name = "supplier_id")
 	private Supplier supplier;
