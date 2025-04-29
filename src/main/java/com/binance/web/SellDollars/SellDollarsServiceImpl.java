@@ -1,27 +1,42 @@
 package com.binance.web.SellDollars;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import com.binance.web.AccountBinance.AccountBinance;
+import com.binance.web.AccountBinance.AccountBinanceRepository;
+import com.binance.web.BuyDollars.BuyDollarsRepository;
 
 import lombok.RequiredArgsConstructor;
 
 @Service
 @RequiredArgsConstructor
 public class SellDollarsServiceImpl implements SellDollarsService{
+	
+	@Autowired
+    private SellDollarsRepository sellDollarsRepository;
+	
+	@Autowired
+    private AccountBinanceRepository accountBinanceRepository;
 
-	private final SellDollarsRepository repo;
+	@Override
+	@Transactional
+	public SellDollars createSellDollars(SellDollarsDto dto) {
+	    // Obtener la cuenta de Binance correspondiente
+	    AccountBinance accountBinance = accountBinanceRepository.findById(dto.getAccountBinanceId())
+	            .orElseThrow(() -> new RuntimeException("AccountBinance not found"));
 
-    @Override
-    @Transactional
-    public SellDollars createSellDollars(SellDollarsDto dto) {
-        SellDollars sale = new SellDollars();
-        sale.setIdWithdrawals(dto.getIdWithdrawals());
-        sale.setTasa(dto.getTasa());
-        sale.setDollars(dto.getDollars());
-        sale.setDate(dto.getDate());
-        sale.setNameAccount(dto.getNameAccount());
-        
-        return repo.save(sale);
-    }
+	    // Crear una nueva venta de dólares
+	    SellDollars sale = new SellDollars();
+	    sale.setIdWithdrawals(dto.getIdWithdrawals());
+	    sale.setTasa(dto.getTasa());
+	    sale.setDollars(dto.getDollars());
+	    sale.setDate(dto.getDate());
+	    sale.setNameAccount(dto.getNameAccount());
+	    sale.setAccountBinance(accountBinance);  // Asociar la cuenta de Binance con la venta
+
+	    return sellDollarsRepository.save(sale);  // Guardar la venta de dólares
+	}
 
 }

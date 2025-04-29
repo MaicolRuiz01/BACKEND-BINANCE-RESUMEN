@@ -2,9 +2,12 @@ package com.binance.web.SellDollars;
 
 import java.util.Date;
 
+import com.binance.web.AccountBinance.AccountBinance;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -31,5 +34,8 @@ public class SellDollars {
 	private Double pesos;
 	private Date date;
 	private String nameAccount;
+	@ManyToOne
+	@JoinColumn(name = "account_binance_id")  // La columna que hace referencia a account_binance
+	private AccountBinance accountBinance;
 
 }

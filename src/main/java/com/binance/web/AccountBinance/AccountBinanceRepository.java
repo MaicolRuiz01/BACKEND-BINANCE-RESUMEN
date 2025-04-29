@@ -10,5 +10,7 @@ public interface AccountBinanceRepository  extends JpaRepository<AccountBinance,
 	AccountBinance findByUserBinance(String name);
 
 	AccountBinance findByReferenceAccount(String referenceAccount);
+	
+	AccountBinance findById(int id);  // Este método debe estar presente
 
 }

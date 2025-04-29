@@ -8,22 +8,34 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.binance.web.AccountBinance.AccountBinance;
+import com.binance.web.AccountBinance.AccountBinanceRepository;
+
 @RestController
 @RequestMapping("/api/buy-dollars")
 public class BuyDollarsController {
+    
     @Autowired
     private BuyDollarsService buyDollarsService;
 
-    // Inyección de dependencias vía constructor (mejor práctica que @Autowired en campo)
-    public BuyDollarsController(BuyDollarsService buyDollarsService) {
-        this.buyDollarsService = buyDollarsService;
-    }
+    @Autowired
+    private AccountBinanceRepository accountBinanceRepository;  // Inyección del repositorio
 
     @PostMapping
     public ResponseEntity<BuyDollars> createBuyDollars(@RequestBody BuyDollarsDto buyDollarsDto) {
-        // Llamamos al servicio con el DTO para crear la entidad BuyDollars
+        // Buscar la cuenta de Binance que coincida con el nombre proporcionado
+        AccountBinance accountBinance = accountBinanceRepository.findByName(buyDollarsDto.getNameAccount());
+        
+        if (accountBinance == null) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(null);  // Si no se encuentra la cuenta
+        }
+
+        // Asignar la cuenta de Binance al DTO de compra de dólares
+        buyDollarsDto.setAccountBinanceId(accountBinance.getId());
+
+        // Crear la compra de dólares
         BuyDollars newBuy = buyDollarsService.createBuyDollars(buyDollarsDto);
-        // Retornamos la entidad creada con código 201 (Created)
+
         return ResponseEntity.status(HttpStatus.CREATED).body(newBuy);
     }
 }
