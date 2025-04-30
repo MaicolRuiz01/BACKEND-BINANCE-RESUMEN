@@ -13,13 +13,8 @@ import java.util.Date;
 public class BuyDollarsDto {
 
     private Double dollars;      // Monto de dólares a comprar
-    
-
     private Double tasa;         // Tasa de cambio aplicada
-    
-
     private String nameAccount;  // Nombre de la cuenta
-
     private Date date;           // Fecha de la operación
     private String idDeposit;
     private Double pesos;
