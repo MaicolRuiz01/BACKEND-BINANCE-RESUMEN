@@ -1,0 +1,39 @@
+* [33mfa48922[m[33m ([m[1;31morigin/ZeusRama[m[33m)[m se hizo futures y de todo
+* [33me7f2d6a[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mZeusRama[m[33m)[m crud futures
+* [33m9557574[m Actualizo ZeusRama con cambios desde main
+* [33m09a7718[m Actualizo ZeusRama con cambios desde main
+[31m|[m * [33m5555a8f[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m spot
+[31m|[m[31m/[m  
+[31m|[m *   [33m17c88a4[m[33m ([m[1;31morigin/servicios_mauricio[m[33m)[m Se realizo el merge de main
+[31m|[m [33m|[m[31m\[m  
+[31m|[m [33m|[m[31m/[m  
+[31m|[m[31m/[m[33m|[m   
+* [33m|[m   [33m01bcf13[m[33m ([m[1;31morigin/rama-mike[m[33m, [m[1;32mmain[m[33m)[m se creo futures y se modifico la entidad sales y ademas de spot y agregar la api de sonia
+[35m|[m[36m\[m [33m\[m  
+[35m|[m * [33m|[m [33m0a39234[m[33m ([m[1;31morigin/nueva-rama[m[33m)[m Guardando cambios antes de cambiar de rama
+* [36m|[m [33m|[m [33m4639812[m se agrego sonia, se elimino validacion de x2, se comentaron metodos, se agrego el controlador de spot
+* [36m|[m [33m|[m [33m7bd741c[m datos
+[36m|[m[36m/[m [33m/[m  
+[36m|[m * [33mcc68229[m Se guardan cambios para aplicar actualizacion
+[36m|[m * [33m58d74f8[m CORS error solution
+[36m|[m[36m/[m  
+* [33ma0da133[m The module for assigning the account to sales has been completed and it must follow the proper procedure to deduct the amount from the debtor.
+* [33m5890ce9[m nuevas entidades segun el mer
+*   [33mca46f44[m[33m ([m[1;31morigin/elvin-whatsapp[m[33m)[m Merge pull request #1 from MaicolRuiz01/servicios_mauricio
+[1;31m|[m[1;32m\[m  
+[1;31m|[m * [33m82b89fd[m It was implemented that orders can now be obtained by date range
+[1;31m|[m[1;31m/[m  
+* [33m3c40281[m A package reorganization was carried out and the balance is deducted from the debt when an account is assigned with its tax.
+* [33mb1ae3d4[m A list of P2P sales brought by Binance is generated, it is filtered and the assigned account is added if it exists
+* [33meff0f74[m Se acomodo que los contoladores reciban dela url la account que se va a atrabajar
+* [33ma46f071[m chakar ip
+* [33md300be0[m chakar ip
+* [33m5992944[m agregando proxy
+* [33m3fc1b7a[m permitir todas las ips
+* [33md586863[m controlador de ip
+* [33m933775a[m test
+* [33mbb7fcfb[m Update TestController.java
+* [33mb8d28b1[m Create TestController.java
+* [33mdec4ec3[m Update BinanceService.java
+* [33mc3b86c8[m cambio de jhora
+* [33m0f10494[m primer commit
