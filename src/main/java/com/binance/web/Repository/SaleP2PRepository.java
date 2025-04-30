@@ -1,4 +1,4 @@
-package com.binance.web.SaleP2P;
+package com.binance.web.Repository;
 
 import java.util.Date;
 import java.util.List;

@@ -1,4 +1,4 @@
-package com.binance.web.Supplier;
+package com.binance.web.Repository;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;

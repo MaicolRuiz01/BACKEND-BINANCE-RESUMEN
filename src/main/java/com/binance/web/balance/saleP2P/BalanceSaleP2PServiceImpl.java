@@ -7,7 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import com.binance.web.Entity.SaleP2P;
-import com.binance.web.SaleP2P.SaleP2PRepository;
+import com.binance.web.Repository.SaleP2PRepository;
 
 @Service
 public class BalanceSaleP2PServiceImpl {

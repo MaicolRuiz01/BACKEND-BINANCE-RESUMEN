@@ -8,9 +8,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.binance.web.AccountBinance.AccountBinanceRepository;
 import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.SellDollars;
+import com.binance.web.Repository.AccountBinanceRepository;
 
 import lombok.RequiredArgsConstructor;
 

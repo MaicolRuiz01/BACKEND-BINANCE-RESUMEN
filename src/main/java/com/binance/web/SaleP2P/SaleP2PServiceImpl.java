@@ -6,12 +6,13 @@ import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import com.binance.web.AccountBinance.AccountBinanceRepository;
 import com.binance.web.AccountBinance.AccountBinanceService;
 import com.binance.web.AccountCop.AccountCopService;
 import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.AccountCop;
 import com.binance.web.Entity.SaleP2P;
+import com.binance.web.Repository.AccountBinanceRepository;
+import com.binance.web.Repository.SaleP2PRepository;
 import com.binance.web.Supplier.SupplierService;
 
 @Service

@@ -1,4 +1,4 @@
-package com.binance.web.TipoGasto;
+package com.binance.web.Repository;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 
