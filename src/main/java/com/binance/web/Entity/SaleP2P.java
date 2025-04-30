@@ -1,10 +1,7 @@
-package com.binance.web.SaleP2P;
+package com.binance.web.Entity;
 
 import java.util.Date;
 import java.util.List;
-
-import com.binance.web.AccountBinance.AccountBinance;
-import com.binance.web.AccountCop.AccountCop;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -32,6 +29,7 @@ public class SaleP2P {
     private Date date;
     private Double commission;
     private Double pesosCop;
+    private Double dollarsUs;
 
     @ManyToMany
     @JoinTable(
@@ -46,5 +44,6 @@ public class SaleP2P {
     @ManyToOne
     @JoinColumn(name = "binance_account_id")
     private AccountBinance binanceAccount;
+
 }
 

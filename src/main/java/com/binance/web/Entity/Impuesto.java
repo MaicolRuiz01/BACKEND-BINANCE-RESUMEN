@@ -1,4 +1,4 @@
-package com.binance.web.TipoGasto;
+package com.binance.web.Entity;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -9,16 +9,17 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-@Entity
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
-@Table(name="tipo_gasto")
-public class TipoGasto {
+@Entity
+@Table(name = "impuesto")
+public class Impuesto {
 	
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
-	private Integer id;
-	private String descripcion;
-
+	private Integer id; 
+	private String nombre;
+	private Double costo;
+	
 }

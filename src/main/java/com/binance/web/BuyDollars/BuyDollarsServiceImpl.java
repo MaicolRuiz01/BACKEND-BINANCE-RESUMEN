@@ -6,9 +6,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.binance.web.AccountBinance.AccountBinance;
 import com.binance.web.AccountBinance.AccountBinanceRepository;
-import com.binance.web.Supplier.Supplier;
+import com.binance.web.Entity.AccountBinance;
+import com.binance.web.Entity.BuyDollars;
+import com.binance.web.Entity.Supplier;
 import com.binance.web.Supplier.SupplierRepository;
 import com.binance.web.Supplier.SupplierService;
 @Service

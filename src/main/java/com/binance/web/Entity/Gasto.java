@@ -1,9 +1,5 @@
-package com.binance.web.BuyDollars;
-
+package com.binance.web.Entity;
 import java.util.Date;
-
-import com.binance.web.AccountBinance.AccountBinance;
-import com.binance.web.Supplier.Supplier;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -16,25 +12,24 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-@Entity
+
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
-@Table(name="buy_dollars")
-public class BuyDollars {
+@Entity
+@Table(name = "gasto")
+public class Gasto {
+	
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Integer id;
-	private Double tasa;
-	private Double dollars;
-	private Double pesos;
+	
 	@ManyToOne
-	@JoinColumn(name = "supplier_id")
-	private Supplier supplier;
-	private Date date;
-	private String nameAccount;
-	private String idDeposit;
-	@ManyToOne
-	@JoinColumn(name = "account_binance_id")
-	private AccountBinance accountBinance;
+	@JoinColumn(name="tipo_id", nullable = false)
+	private TipoGasto tipo;
+	private String descripcion; 
+	private Date fecha;
+	private Double monto;
+	private Boolean pagado;
+	
 }

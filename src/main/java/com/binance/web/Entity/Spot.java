@@ -1,4 +1,4 @@
-package com.binance.web.Spot;
+package com.binance.web.Entity;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;

@@ -4,9 +4,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.binance.web.AccountBinance.AccountBinance;
 import com.binance.web.AccountBinance.AccountBinanceRepository;
 import com.binance.web.BuyDollars.BuyDollarsRepository;
+import com.binance.web.Entity.AccountBinance;
+import com.binance.web.Entity.SellDollars;
 
 import lombok.RequiredArgsConstructor;
 

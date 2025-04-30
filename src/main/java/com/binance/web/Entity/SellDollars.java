@@ -1,8 +1,7 @@
-package com.binance.web.SellDollars;
+package com.binance.web.Entity;
 
 import java.util.Date;
 
-import com.binance.web.AccountBinance.AccountBinance;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import jakarta.persistence.Id;

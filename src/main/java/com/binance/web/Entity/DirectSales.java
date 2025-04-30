@@ -1,4 +1,4 @@
-package com.binance.web.Supplier;
+package com.binance.web.Entity;
 
 import java.util.Date;
 
@@ -15,12 +15,14 @@ import lombok.NoArgsConstructor;
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
-@Table(name="supplier")
-public class Supplier {
+@Table(name="direct_sales")
+public class DirectSales {
+	
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Integer id;
-	private String name;
-	private Double balance;
-	private Date lastPaymentDate;
+	private Date fechaRegistro;
+	private Double tasaCompra;
+	private Double tasaVenta;
+
 }

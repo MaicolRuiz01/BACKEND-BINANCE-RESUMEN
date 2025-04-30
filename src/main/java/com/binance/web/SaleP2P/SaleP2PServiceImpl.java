@@ -6,11 +6,12 @@ import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import com.binance.web.AccountBinance.AccountBinance;
 import com.binance.web.AccountBinance.AccountBinanceRepository;
 import com.binance.web.AccountBinance.AccountBinanceService;
-import com.binance.web.AccountCop.AccountCop;
 import com.binance.web.AccountCop.AccountCopService;
+import com.binance.web.Entity.AccountBinance;
+import com.binance.web.Entity.AccountCop;
+import com.binance.web.Entity.SaleP2P;
 import com.binance.web.Supplier.SupplierService;
 
 @Service
@@ -76,8 +77,8 @@ public class SaleP2PServiceImpl implements SaleP2PService{
 	        sale = assignAccountBinance(sale, saleDto.getNameAccountBinance());
 
 	        // 🔽 Descontar saldo en la cuenta Binance
-	        if (sale.getPesosCop() != null) {
-	            accountBinanceService.subtractBalance(saleDto.getNameAccountBinance(), sale.getPesosCop());
+	        if (sale.getDollarsUs() != null) {
+	            accountBinanceService.subtractBalance(saleDto.getNameAccountBinance(), sale.getDollarsUs());
 	        }
 
 	    }

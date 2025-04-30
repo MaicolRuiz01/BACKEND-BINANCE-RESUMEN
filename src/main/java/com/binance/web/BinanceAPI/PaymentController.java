@@ -10,10 +10,10 @@ import java.util.stream.Collectors;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import com.binance.web.AccountBinance.AccountBinance;
 import com.binance.web.AccountBinance.AccountBinanceRepository;
 import com.binance.web.BuyDollars.BuyDollarsDto;
 import com.binance.web.BuyDollars.BuyDollarsService;
+import com.binance.web.Entity.AccountBinance;
 import com.binance.web.SellDollars.SellDollarsDto;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;

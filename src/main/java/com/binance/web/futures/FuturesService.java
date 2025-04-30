@@ -2,6 +2,8 @@ package com.binance.web.futures;
 
 import java.util.List;
 
+import com.binance.web.Entity.Futures;
+
 
 public interface FuturesService {
 	List<Futures> findAllOrdersFutures();

@@ -11,7 +11,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.binance.web.BuyDollars.BuyDollars;
+import com.binance.web.Entity.BuyDollars;
+import com.binance.web.Entity.Supplier;
 
 
 @RestController

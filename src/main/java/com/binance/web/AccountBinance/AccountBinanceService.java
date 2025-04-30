@@ -2,6 +2,8 @@ package com.binance.web.AccountBinance;
 
 import java.util.List;
 
+import com.binance.web.Entity.AccountBinance;
+
 public interface AccountBinanceService {
     List<AccountBinance> findAllAccountBinance();
     AccountBinance findByIdAccountBinance(Integer id);

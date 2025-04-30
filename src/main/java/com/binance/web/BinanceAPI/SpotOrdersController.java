@@ -16,18 +16,18 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import lombok.RequiredArgsConstructor;
 
-import com.binance.web.AccountBinance.AccountBinance;
 import com.binance.web.AccountBinance.AccountBinanceRepository;
-import com.binance.web.BuyDollars.BuyDollars;
 import com.binance.web.BuyDollars.BuyDollarsRepository;
 import com.binance.web.BuyDollars.BuyDollarsService;
-import com.binance.web.SellDollars.SellDollars;
+import com.binance.web.Entity.AccountBinance;
+import com.binance.web.Entity.BuyDollars;
+import com.binance.web.Entity.SaleP2P;
+import com.binance.web.Entity.SellDollars;
 import com.binance.web.SellDollars.SellDollarsRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.binance.web.OrderP2P.*;
-import com.binance.web.SaleP2P.SaleP2P;
 import com.binance.web.SaleP2P.SaleP2PRepository;
 
 @RestController

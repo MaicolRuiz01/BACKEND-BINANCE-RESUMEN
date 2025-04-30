@@ -6,6 +6,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import com.binance.web.Entity.SaleP2P;
+
 @RestController
 @RequestMapping("/saleP2P")
 public class SaleP2PController {

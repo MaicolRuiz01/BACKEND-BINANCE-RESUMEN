@@ -1,8 +1,7 @@
-package com.binance.web.AccountCop;
+package com.binance.web.Entity;
 
 import java.util.List;
 
-import com.binance.web.SaleP2P.SaleP2P;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import jakarta.persistence.Entity;
