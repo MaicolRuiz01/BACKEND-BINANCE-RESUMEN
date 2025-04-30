@@ -30,7 +30,7 @@ public class SaleP2P {
     private Integer id;
     private String numberOrder;
     private Date date;
-    private String taxType;
+    private Double commission;
     private Double pesosCop;
 
     @ManyToMany

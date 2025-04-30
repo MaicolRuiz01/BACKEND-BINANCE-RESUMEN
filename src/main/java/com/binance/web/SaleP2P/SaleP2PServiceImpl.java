@@ -146,7 +146,7 @@ public class SaleP2PServiceImpl implements SaleP2PService{
 		SaleP2P sale = new SaleP2P();
 		sale.setNumberOrder(saleDto.getNumberOrder());
 		sale.setDate(saleDto.getDate());
-		sale.setTaxType(saleDto.getTaxType());
+		sale.setCommission(saleDto.getCommission());
 		sale.setPesosCop(saleDto.getPesosCop());
 		sale.setNameAccount(saleDto.getNameAccount());
 		return sale;
