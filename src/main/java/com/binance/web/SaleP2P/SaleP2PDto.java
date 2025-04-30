@@ -10,7 +10,7 @@ import lombok.Data;
 public class SaleP2PDto {
 	private String numberOrder;
 	private Date date;
-	private String taxType;
+	private Double commission;
 	private Double pesosCop;
 	private List<Integer> accountCopIds; 
 	private String nameAccount;
