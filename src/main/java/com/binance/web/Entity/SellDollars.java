@@ -2,8 +2,6 @@ package com.binance.web.Entity;
 
 import java.util.Date;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
-
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
