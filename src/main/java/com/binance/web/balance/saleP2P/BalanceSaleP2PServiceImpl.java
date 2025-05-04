@@ -28,7 +28,7 @@ public class BalanceSaleP2PServiceImpl {
 	}
 	
 	private List<SaleP2P> generateListSaleP2PDay(Date fecha) {
-		return p2pRepository.findByDate(fecha);
+		return p2pRepository.findByDateWithoutTime(fecha);
 	}
 	
 	private BalanceSaleP2PDto createBalanceSaleP2PDto(List<SaleP2P> daySales) {
