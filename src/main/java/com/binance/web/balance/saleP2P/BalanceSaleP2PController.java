@@ -18,9 +18,10 @@ public class BalanceSaleP2PController {
 	@Autowired
 	private BalanceSaleP2PService balanceSaleP2PService;
 	 
-	 @GetMapping
-	 public ResponseEntity<BalanceSaleP2PDto> getBalanceSaleP2P(@RequestParam("fecha") @DateTimeFormat(pattern = "yyyy-MM-dd") Date fecha) {
-	     BalanceSaleP2PDto balanceSaleP2P = balanceSaleP2PService.balanceSaleP2PDay(fecha);
-	     return ResponseEntity.ok(balanceSaleP2P);
-	 }
+	@GetMapping
+    public ResponseEntity<BalanceSaleP2PDto> getBalanceSaleP2P(
+            @RequestParam("fecha") @DateTimeFormat(pattern = "yyyy-MM-dd") Date fecha) {
+        BalanceSaleP2PDto balanceSaleP2P = balanceSaleP2PService.balanceSaleP2PDay(fecha);
+        return ResponseEntity.ok(balanceSaleP2P);
+    }
 }

@@ -97,6 +97,7 @@ public class SaleP2PServiceImpl implements SaleP2PService{
 
 	    // Guardar la venta con cuentas y binance ya asociadas
 	    saleP2PRepository.save(sale);
+	    
 	}
 
 

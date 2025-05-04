@@ -5,6 +5,7 @@ import java.util.List;
 
 import com.binance.web.AccountBinance.AccountBinance;
 import com.binance.web.AccountCop.AccountCop;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -39,6 +40,7 @@ public class SaleP2P {
         joinColumns = @JoinColumn(name = "sale_p2p_id"),  // Columna de la venta
         inverseJoinColumns = @JoinColumn(name = "account_cop_id")  // Columna de las cuentas COP
     )
+    @JsonIgnore
     private List<AccountCop> accountCops;  // Cambié de "accountCop" a una lista de cuentas
 
     private String nameAccount;
@@ -46,5 +48,12 @@ public class SaleP2P {
     @ManyToOne
     @JoinColumn(name = "binance_account_id")
     private AccountBinance binanceAccount;
+    
+    
+    @Override
+    public String toString() {
+        return "SaleP2P{id=" + id + ", numberOrder='" + numberOrder + "', date=" + date + ", commission=" + commission + "}";
+    }
+
 }
 
