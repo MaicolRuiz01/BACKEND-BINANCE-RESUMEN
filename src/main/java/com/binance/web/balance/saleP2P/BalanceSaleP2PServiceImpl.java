@@ -20,15 +20,15 @@ public class BalanceSaleP2PServiceImpl {
 	@Autowired
 	private BuyDollarsRepository buyDollarsRepository;
 
-	public BalanceSaleP2PDto balanceSaleP2PDay(Date fehca) {
-		List<SaleP2P> daySales = generateListSaleP2PDay(fehca);
+	public BalanceSaleP2PDto balanceSaleP2PDay(Date fecha) {
+		List<SaleP2P> daySales = generateListSaleP2PDay(fecha);
 		BalanceSaleP2PDto  balanceSaleP2P = createBalanceSaleP2PDto(daySales);
 		
 		return balanceSaleP2P;
 	}
 	
-	private List<SaleP2P> generateListSaleP2PDay(Date fehca) {
-		return p2pRepository.findByDate(fehca);
+	private List<SaleP2P> generateListSaleP2PDay(Date fecha) {
+		return p2pRepository.findByDate(fecha);
 	}
 	
 	private BalanceSaleP2PDto createBalanceSaleP2PDto(List<SaleP2P> daySales) {
