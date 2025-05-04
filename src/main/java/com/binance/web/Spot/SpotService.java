@@ -1,6 +1,8 @@
 package com.binance.web.Spot;
 import java.util.List;
 
+import com.binance.web.Entity.Spot;
+
 public interface SpotService {
 	
 	List<Spot> findAllOrdersSpot();

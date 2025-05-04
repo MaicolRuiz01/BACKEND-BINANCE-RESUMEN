@@ -18,4 +18,6 @@ public class BuyDollarsDto {
     private Date date;           // Fecha de la operación
     private String idDeposit;
     private Double pesos;
+    private Integer accountBinanceId;
+	
 }

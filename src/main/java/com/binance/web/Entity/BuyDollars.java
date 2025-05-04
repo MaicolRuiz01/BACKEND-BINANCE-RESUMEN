@@ -1,8 +1,6 @@
-package com.binance.web.BuyDollars;
+package com.binance.web.Entity;
 
 import java.util.Date;
-
-import com.binance.web.Supplier.Supplier;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -33,4 +31,7 @@ public class BuyDollars {
 	private Date date;
 	private String nameAccount;
 	private String idDeposit;
+	@ManyToOne
+	@JoinColumn(name = "account_binance_id")
+	private AccountBinance accountBinance;
 }

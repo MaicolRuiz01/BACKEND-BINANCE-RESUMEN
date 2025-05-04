@@ -3,6 +3,9 @@ package com.binance.web.AccountBinance;
 import java.util.List;
 import org.springframework.stereotype.Service;
 
+import com.binance.web.Entity.AccountBinance;
+import com.binance.web.Repository.AccountBinanceRepository;
+
 import jakarta.transaction.Transactional;
 
 @Service

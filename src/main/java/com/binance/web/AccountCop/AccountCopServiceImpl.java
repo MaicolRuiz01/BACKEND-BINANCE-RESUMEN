@@ -4,6 +4,9 @@ import java.util.List;
 
 import org.springframework.stereotype.Service;
 
+import com.binance.web.Entity.AccountCop;
+import com.binance.web.Repository.AccountCopRepository;
+
 @Service
 public class AccountCopServiceImpl implements AccountCopService {
 

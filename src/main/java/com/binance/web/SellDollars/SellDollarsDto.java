@@ -16,5 +16,6 @@ public class SellDollarsDto {
     private Double pesos;
     private Date date;
     private String nameAccount;
+    private Integer accountBinanceId;
 
 }

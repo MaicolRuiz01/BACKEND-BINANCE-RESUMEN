@@ -15,5 +15,6 @@ public class SaleP2PDto {
 	private List<Integer> accountCopIds; 
 	private String nameAccount;
 	private String nameAccountBinance;
-	private Map<Integer, Double> accountAmounts; 
+	private Map<Integer, Double> accountAmounts;
+	private Double dollarsUs;
 }

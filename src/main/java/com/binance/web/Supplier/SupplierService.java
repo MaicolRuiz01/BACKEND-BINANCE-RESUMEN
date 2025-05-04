@@ -2,7 +2,8 @@ package com.binance.web.Supplier;
 
 import java.util.Date;
 
-import com.binance.web.BuyDollars.BuyDollars;
+import com.binance.web.Entity.BuyDollars;
+import com.binance.web.Entity.Supplier;
 
 public interface SupplierService {
 	void saveSupplier(Supplier supplier);

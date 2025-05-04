@@ -5,6 +5,9 @@ import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import com.binance.web.Entity.Futures;
+import com.binance.web.Repository.FuturesRepository;
+
 @Service
 public class FuturesServiceImpl implements FuturesService {
 

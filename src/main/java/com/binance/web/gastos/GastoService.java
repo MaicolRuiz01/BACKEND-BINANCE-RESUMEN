@@ -4,6 +4,9 @@ package com.binance.web.gastos;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import com.binance.web.Entity.Gasto;
+import com.binance.web.Repository.GastoRepository;
+
 import java.util.List;
 import java.util.Optional;
 

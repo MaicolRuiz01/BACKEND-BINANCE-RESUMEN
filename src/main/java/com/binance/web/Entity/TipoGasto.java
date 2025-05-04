@@ -1,6 +1,4 @@
-package com.binance.web.DirectSales;
-
-import java.util.Date;
+package com.binance.web.Entity;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -15,14 +13,12 @@ import lombok.NoArgsConstructor;
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
-@Table(name="direct_sales")
-public class DirectSales {
+@Table(name="tipo_gasto")
+public class TipoGasto {
 	
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Integer id;
-	private Date fechaRegistro;
-	private Double tasaCompra;
-	private Double tasaVenta;
+	private String descripcion;
 
 }

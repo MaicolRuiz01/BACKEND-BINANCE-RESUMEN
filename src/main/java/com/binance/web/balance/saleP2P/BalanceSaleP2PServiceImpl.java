@@ -6,43 +6,54 @@ import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import com.binance.web.SaleP2P.SaleP2P;
-import com.binance.web.SaleP2P.SaleP2PRepository;
+import com.binance.web.Entity.BuyDollars;
+import com.binance.web.Entity.SaleP2P;
+import com.binance.web.Repository.BuyDollarsRepository;
+import com.binance.web.Repository.SaleP2PRepository;
 
 @Service
 public class BalanceSaleP2PServiceImpl implements BalanceSaleP2PService{
 	
 	@Autowired
 	private SaleP2PRepository p2pRepository;
+	
+	@Autowired
+	private BuyDollarsRepository buyDollarsRepository;
 
-	public BalanceSaleP2PDto balanceSaleP2PDay(Date fehca) {
-		List<SaleP2P> daySales = generateListSaleP2PDay(fehca);
+	public BalanceSaleP2PDto balanceSaleP2PDay(Date fecha) {
+		List<SaleP2P> daySales = generateListSaleP2PDay(fecha);
 		BalanceSaleP2PDto  balanceSaleP2P = createBalanceSaleP2PDto(daySales);
 		
 		return balanceSaleP2P;
 	}
 	
-	private List<SaleP2P> generateListSaleP2PDay(Date fehca) {
-		return p2pRepository.findByDate(fehca);
+	private List<SaleP2P> generateListSaleP2PDay(Date fecha) {
+		return p2pRepository.findByDateWithoutTime(fecha);
 	}
 	
 	private BalanceSaleP2PDto createBalanceSaleP2PDto(List<SaleP2P> daySales) {
-        BalanceSaleP2PDto balanceSaleP2P = new BalanceSaleP2PDto();
-        
-        // Inicializamos los campos a 0.0 para evitar NullPointerException
-        balanceSaleP2P.setVendidos(0.0);
-        balanceSaleP2P.setComisionUsdt(0.0);
-        balanceSaleP2P.setImpuestosCol(0.0);
-        
-        for (SaleP2P saleP2P : daySales) {
-            double pesos = saleP2P.getPesosCop() != null ? saleP2P.getPesosCop() : 0.0;
-            double com = saleP2P.getCommission() != null ? saleP2P.getCommission() : 0.0;
 
-            balanceSaleP2P.setVendidos(balanceSaleP2P.getVendidos() + pesos);
-            balanceSaleP2P.setComisionUsdt(balanceSaleP2P.getComisionUsdt() + com);
-            balanceSaleP2P.setImpuestosCol(balanceSaleP2P.getImpuestosCol() + (pesos * 0.004));
-        }
-        
-        return balanceSaleP2P;
-    }
+		BalanceSaleP2PDto  balanceSaleP2P = new BalanceSaleP2PDto();
+		Double vendidos = 0.0;
+		Double	comision = 0.0;
+		Double	impuestos = 0.0;
+		Double dolares = 0.0;
+		
+		for (SaleP2P saleP2P : daySales) {
+			vendidos += saleP2P.getPesosCop();
+			comision += saleP2P.getCommission();
+			impuestos += ( saleP2P.getPesosCop() * 0.004);
+			dolares += saleP2P.getDollarsUs();
+		}
+		balanceSaleP2P.setVendidos(vendidos);
+		balanceSaleP2P.setComisionUsdt(comision);
+		balanceSaleP2P.setImpuestosCol(impuestos);
+		balanceSaleP2P.setTasaVenta(vendidos / dolares);
+		return balanceSaleP2P;
+	}
+	
+	private List<BuyDollars> generateListBuyDollarsDay(Date fecha) {
+		return buyDollarsRepository.findByDate(fecha);
+	}
+
 }

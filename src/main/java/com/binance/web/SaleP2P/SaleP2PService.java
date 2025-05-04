@@ -2,6 +2,8 @@ package com.binance.web.SaleP2P;
 
 import java.util.List;
 
+import com.binance.web.Entity.SaleP2P;
+
 public interface SaleP2PService {
 	List<SaleP2P> findAllSaleP2P();
     SaleP2P findByIdSaleP2P(Integer id);
