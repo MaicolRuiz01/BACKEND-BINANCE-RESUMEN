@@ -7,8 +7,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import com.binance.web.Entity.BuyDollars;
+import com.binance.web.Entity.PurchaseRate;
 import com.binance.web.Entity.SaleP2P;
 import com.binance.web.Repository.BuyDollarsRepository;
+import com.binance.web.Repository.PurchaseRateRepository;
 import com.binance.web.Repository.SaleP2PRepository;
 
 @Service
@@ -20,9 +22,13 @@ public class BalanceSaleP2PServiceImpl {
 	@Autowired
 	private BuyDollarsRepository buyDollarsRepository;
 
+	@Autowired
+	private PurchaseRateRepository purchaseRateRepository;
+	
 	public BalanceSaleP2PDto balanceSaleP2PDay(Date fecha) {
 		List<SaleP2P> daySales = generateListSaleP2PDay(fecha);
-		BalanceSaleP2PDto  balanceSaleP2P = createBalanceSaleP2PDto(daySales);
+		BalanceSaleP2PDto  balanceSaleP2P = createBalanceSaleP2PDto(daySales, fecha);
+		
 		
 		return balanceSaleP2P;
 	}
@@ -31,13 +37,13 @@ public class BalanceSaleP2PServiceImpl {
 		return p2pRepository.findByDateWithoutTime(fecha);
 	}
 	
-	private BalanceSaleP2PDto createBalanceSaleP2PDto(List<SaleP2P> daySales) {
+	private BalanceSaleP2PDto createBalanceSaleP2PDto(List<SaleP2P> daySales, Date fecha) {
 		BalanceSaleP2PDto  balanceSaleP2P = new BalanceSaleP2PDto();
 		Double vendidos = 0.0;
 		Double	comision = 0.0;
 		Double	impuestos = 0.0;
 		Double dolares = 0.0;
-		
+		Double purchaseRate = getPurchaseRateDay(fecha);
 		for (SaleP2P saleP2P : daySales) {
 			vendidos += saleP2P.getPesosCop();
 			comision += saleP2P.getCommission();
@@ -48,7 +54,18 @@ public class BalanceSaleP2PServiceImpl {
 		balanceSaleP2P.setComisionUsdt(comision);
 		balanceSaleP2P.setImpuestosCol(impuestos);
 		balanceSaleP2P.setTasaVenta(vendidos / dolares);
+		balanceSaleP2P.setTasaCompra(purchaseRate);
+		
+		Double total = vendidos - (impuestos + (comision * purchaseRate));
+		
+		balanceSaleP2P.setTotal(total);
+		
 		return balanceSaleP2P;
+	}
+	
+	private Double getPurchaseRateDay(Date fecha) {
+		PurchaseRate purchaseRate = purchaseRateRepository.findByDateWithoutTime(fecha);
+		return purchaseRate.getRate();
 	}
 	
 	private List<BuyDollars> generateListBuyDollarsDay(Date fecha) {

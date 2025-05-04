@@ -24,4 +24,5 @@ public class PurchaseRate {
 	private Date date;
 	private Double dolares;
 	private Double Pesos;
+	private Double rate;
 }
