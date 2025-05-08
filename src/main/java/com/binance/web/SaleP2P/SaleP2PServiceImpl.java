@@ -141,6 +141,7 @@ public class SaleP2PServiceImpl implements SaleP2PService {
 		sale.setCommission(saleDto.getCommission());
 		sale.setPesosCop(saleDto.getPesosCop());
 		sale.setNameAccount(saleDto.getNameAccount());
+		sale.setDollarsUs(saleDto.getDollarsUs());
 		return sale;
 	}
 }
