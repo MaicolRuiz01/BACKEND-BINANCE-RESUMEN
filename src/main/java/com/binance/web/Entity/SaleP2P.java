@@ -14,6 +14,7 @@ import jakarta.persistence.JoinTable;
 import jakarta.persistence.ManyToMany;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.Column;  // Aseguramos que importas @Column
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -48,5 +49,10 @@ public class SaleP2P {
     @JoinColumn(name = "binance_account_id")
     private AccountBinance binanceAccount;
 
+    // Nuevo campo para marcar las órdenes asignadas
+    @Column(name = "assigned")
+    private Boolean assigned = false; // Por defecto, no asignada
 }
+
+
 

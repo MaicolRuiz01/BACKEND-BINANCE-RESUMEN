@@ -13,18 +13,17 @@ import com.binance.web.Entity.SaleP2P;
 @RestController
 @RequestMapping("/saleP2P")
 public class SaleP2PController {
-	
-	
+
     private final SaleP2PService saleP2PService;
-	
-	public SaleP2PController(SaleP2PService saleP2PService) {
-	    this.saleP2PService = saleP2PService;
-	}
-	
+
+    public SaleP2PController(SaleP2PService saleP2PService) {
+        this.saleP2PService = saleP2PService;
+    }
 
     @GetMapping
     public ResponseEntity<List<SaleP2P>> getAllSales() {
-        List<SaleP2P> sales = saleP2PService.findAllSaleP2P();
+        // método que obtiene solo las órdenes no asignadas
+        List<SaleP2P> sales = saleP2PService.getUnassignedOrders();
         return ResponseEntity.ok(sales);
     }
 
@@ -36,7 +35,7 @@ public class SaleP2PController {
 
     @PostMapping
     public ResponseEntity<SaleP2PDto> createSale(@RequestBody SaleP2PDto saleP2PDto) {
-        saleP2PService.processAssignAccountCop(saleP2PDto);;
+        saleP2PService.processAssignAccountCop(saleP2PDto);
         return ResponseEntity.status(HttpStatus.CREATED).body(saleP2PDto);
     }
 
@@ -89,7 +88,6 @@ public class SaleP2PController {
         return ResponseEntity.ok(summary);
     }
 
-
     // DTO auxiliar para el resumen
     public static class SaleP2PSummaryDto {
         private String nameAccount;
@@ -101,6 +99,7 @@ public class SaleP2PController {
             this.totalPesosCop   = totalPesosCop;
             this.totalCommission = totalCommission;
         }
+
         public String getNameAccount()       { return nameAccount; }
         public Double getTotalPesosCop()     { return totalPesosCop; }
         public Double getTotalCommission()   { return totalCommission; }

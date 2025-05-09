@@ -144,4 +144,16 @@ public class SaleP2PServiceImpl implements SaleP2PService {
 		sale.setDollarsUs(saleDto.getDollarsUs());
 		return sale;
 	}
+
+	@Override
+	public List<SaleP2P> getUnassignedOrders() {
+		// TODO Auto-generated method stub
+		return null;
+	}
+
+	@Override
+	public void markAsAssigned(Integer id) {
+		// TODO Auto-generated method stub
+		
+	}
 }

@@ -11,4 +11,10 @@ public interface SaleP2PService {
     void updateSaleP2P(Integer id, SaleP2P sale);
     void deleteSaleP2P(Integer id);
     void processAssignAccountCop(SaleP2PDto sale);
+    
+    // Método para obtener solo las ventas no asignadas
+    List<SaleP2P> getUnassignedOrders();
+
+    // Método para marcar una venta P2P como asignada
+    void markAsAssigned(Integer id);
 }
