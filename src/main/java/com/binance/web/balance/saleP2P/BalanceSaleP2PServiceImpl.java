@@ -6,10 +6,8 @@ import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import com.binance.web.Entity.BuyDollars;
 import com.binance.web.Entity.PurchaseRate;
 import com.binance.web.Entity.SaleP2P;
-import com.binance.web.Repository.BuyDollarsRepository;
 import com.binance.web.Repository.PurchaseRateRepository;
 import com.binance.web.Repository.SaleP2PRepository;
 
@@ -18,9 +16,6 @@ public class BalanceSaleP2PServiceImpl {
 	
 	@Autowired
 	private SaleP2PRepository p2pRepository;
-	
-	@Autowired
-	private BuyDollarsRepository buyDollarsRepository;
 
 	@Autowired
 	private PurchaseRateRepository purchaseRateRepository;
@@ -66,9 +61,5 @@ public class BalanceSaleP2PServiceImpl {
 	private Double getPurchaseRateDay(Date fecha) {
 		PurchaseRate purchaseRate = purchaseRateRepository.findByDateWithoutTime(fecha);
 		return purchaseRate.getRate();
-	}
-	
-	private List<BuyDollars> generateListBuyDollarsDay(Date fecha) {
-		return buyDollarsRepository.findByDate(fecha);
 	}
 }
