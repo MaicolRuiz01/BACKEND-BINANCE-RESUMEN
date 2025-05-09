@@ -39,17 +39,17 @@ public class SupplierServiceImpl implements SupplierService {
 	}
 
 	@Override
-	public void subtractSupplierDebt(Double pesosCop, String taxType, Date date) {
+	public void subtractSupplierDebt(Double dollars, String taxType, Date date) {
 		Supplier supplier = supplierRepository.findByName("Deuda");
 //		if(taxType.contentEquals("2x")) {
 //			pesosCop = pesosCop * 0.998;
 //		}
 		
 		if(taxType.contentEquals("4x")) {
-			pesosCop = pesosCop * 0.996;
+			dollars = dollars * 0.996;
 		}
 		
-		Double balance = supplier.getBalance() - pesosCop;
+		Double balance = supplier.getBalance() - dollars;
 		supplier.setBalance(balance);
 		supplier.setLastPaymentDate(date);
 		saveSupplier(supplier);
