@@ -45,11 +45,28 @@ public class OrderP2PServiceImpl implements OrderP2PService {
 	
 	@Override
 	public List<OrderP2PDto> showOrderP2PByDateRange(String account, Date fechaInicio, Date fechaFin) {
+	    // Obtén todas las órdenes P2P en el rango de fechas
 	    List<OrderP2PDto> ordenesP2P = getAllOrderP2P(account, fechaInicio, fechaFin);
+	    
+	    // Filtra las órdenes P2P que ya han sido convertidas a SaleP2P
+	    List<String> convertedOrderNumbers = saleP2PRepository.findAll().stream()
+	            .map(SaleP2P::getNumberOrder)
+	            .collect(Collectors.toList());
+	    
+	    // Filtra las órdenes P2P, excluyendo las que ya están en SaleP2P
+	    ordenesP2P = ordenesP2P.stream()
+	            .filter(order -> !convertedOrderNumbers.contains(order.getOrderNumber()))
+	            .collect(Collectors.toList());
+
+	    // Filtra las órdenes que ya han sido completadas
 	    ordenesP2P = getOrderP2pCompleted(ordenesP2P);
+	    
+	    // Asigna la cuenta asociada a la orden
 	    ordenesP2P = assignAccountIfExists(ordenesP2P, account);
+	    
 	    return ordenesP2P;
 	}
+
 	
 	@Override
 	public List<OrderP2PDto> showAllOrderP2(String account) {
