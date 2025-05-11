@@ -1,4 +1,4 @@
-package com.binance.web.balance;
+package com.binance.web.Entity;
 
 import java.util.Date;
 
