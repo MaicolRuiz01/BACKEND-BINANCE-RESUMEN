@@ -64,7 +64,7 @@ public class SpotOrdersController {
     @GetMapping("/depositos")
     public ResponseEntity<String> getSpotDeposits(
             @RequestParam String account,
-            @RequestParam(defaultValue = "100") int limit) {
+            @RequestParam(defaultValue = "1000") int limit) {
 
         String response = binanceService.getSpotDeposits(account, limit);
 
