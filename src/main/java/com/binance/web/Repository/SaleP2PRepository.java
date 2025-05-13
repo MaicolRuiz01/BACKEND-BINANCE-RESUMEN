@@ -14,7 +14,7 @@ import com.binance.web.Entity.SaleP2P;
 @Repository
 public interface SaleP2PRepository extends JpaRepository<SaleP2P, Integer>{
 	List<SaleP2P> findByBinanceAccount(AccountBinance accountBinance);
-	@Query(value = "SELECT * FROM sale_p2p WHERE DATE(date) = :fecha", nativeQuery = true)
+	@Query(value = "SELECT * FROM sale_p2p WHERE DATE(date) = DATE(:fecha)", nativeQuery = true)
 	List<SaleP2P> findByDateWithoutTime(@Param("fecha") Date fecha);
 
 }

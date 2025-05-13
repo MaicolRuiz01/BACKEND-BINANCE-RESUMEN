@@ -1,7 +1,5 @@
 package com.binance.web.balance.PurchaseRate;
 
-import java.util.Date;
-
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -14,14 +12,15 @@ public class PurchseRateServiceImpl implements PurchaseRateService {
 
 	@Autowired
 	private PurchaseRateRepository purchaseRateRepository;
-	
+
 	@Override
-	public void createPurchaseRate(Double PurchaseRate, Balance previousBalance, Date date) {
+	public void createPurchaseRate(Balance balance) {
+		Double purchaseRate = balance.getPesos() / balance.getUsdt();
 		PurchaseRate tasaCompra = new PurchaseRate();
-		tasaCompra.setDate(date);
-		tasaCompra.setDolares(previousBalance.getUsdt());
-		tasaCompra.setPesos(previousBalance.getPesos());
-		tasaCompra.setRate(PurchaseRate);
+		tasaCompra.setDate(balance.getDate());
+		tasaCompra.setDolares(balance.getUsdt());
+		tasaCompra.setPesos(balance.getPesos());
+		tasaCompra.setRate(purchaseRate);
 		purchaseRateRepository.save(tasaCompra);
 	}
 }
