@@ -44,6 +44,8 @@ public class BuyDollarsServiceImpl implements BuyDollarsService{
         buy.setDate(dto.getDate());
         buy.setSupplier(supplier);
         buy.setAccountBinance(accountBinance);
+        buy.setPesos(dto.getPesos());
+        buy.setIdDeposit(dto.getIdDeposit());
         
         // 3. Actualizar el balance del supplier sumando el monto de la compra
         double montoSumar = dto.getDollars() * dto.getTasa();

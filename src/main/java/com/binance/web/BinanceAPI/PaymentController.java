@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.*;
 import com.binance.web.BuyDollars.BuyDollarsDto;
 import com.binance.web.BuyDollars.BuyDollarsService;
 import com.binance.web.Entity.AccountBinance;
+import com.binance.web.Entity.BuyDollars;
 import com.binance.web.Repository.AccountBinanceRepository;
 import com.binance.web.Repository.BuyDollarsRepository;
 import com.binance.web.Repository.SellDollarsRepository;
@@ -184,38 +185,43 @@ public class PaymentController {
         List<BuyDollarsDto> buyDollarsList = new ArrayList<>();
 
         try {
-            // Obtener el historial de pagos y procesar las entradas (compras)
+            // Obtener IDs ya registrados como compras
+            Set<String> assignedIds = buyDollarsRepository.findAll().stream()
+                .map(BuyDollars::getIdDeposit)
+                .collect(Collectors.toSet());
+
+            // Procesar historial de pagos
             String response = binanceService.getPaymentHistory(account);
             List<Transaction> transactions = parseTransactions(response);
 
             for (Transaction transaction : transactions) {
                 double amount = transaction.getAmount();
-                
-                // Transacciones donde YO soy receptor (compras, entradas)
+
                 if (amount > 0 && transaction.getReceiverInfo().getBinanceId() != null) {
                     String receiverBinanceId = String.valueOf(transaction.getReceiverInfo().getBinanceId());
 
-                    // Verificamos que la cuenta receptor (TÚ) es la misma cuenta que estás consultando
                     AccountBinance accountBinance = accountBinanceRepository.findByReferenceAccount(receiverBinanceId);
 
-                    if (accountBinance != null && accountBinance.getName().equalsIgnoreCase(account)) {
+                    if (accountBinance != null &&
+                        accountBinance.getName().equalsIgnoreCase(account) &&
+                        !assignedIds.contains(transaction.getTransactionId())) {
+
                         BuyDollarsDto buyDollarsDto = new BuyDollarsDto();
                         buyDollarsDto.setDollars(amount);
-                        buyDollarsDto.setTasa(0.0); // Tasa asignada posteriormente
+                        buyDollarsDto.setTasa(0.0);
                         buyDollarsDto.setNameAccount(account);
                         buyDollarsDto.setDate(transaction.getTransactionTime());
                         buyDollarsDto.setIdDeposit(transaction.getTransactionId());
                         buyDollarsDto.setPesos(0.0);
-                        
+
                         buyDollarsList.add(buyDollarsDto);
                     }
                 }
             }
 
-            // Obtener depósitos (compra en Spot)
+            // Procesar depósitos desde spot
             String depositResponse = binanceService.getSpotDeposits(account, 1000);
-            // Procesamos los depósitos de Spot de forma similar a las compras
-            buyDollarsList.addAll(processDeposits(depositResponse, account));
+            buyDollarsList.addAll(processDeposits(depositResponse, account, assignedIds));
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -225,30 +231,17 @@ public class PaymentController {
         return ResponseEntity.ok(buyDollarsList);
     }
 
-    private List<BuyDollarsDto> processDeposits(String response, String account) {
+    // Actualizamos también processDeposits para recibir los IDs ya asignados
+    private List<BuyDollarsDto> processDeposits(String response, String account, Set<String> assignedIds) {
         List<BuyDollarsDto> buyDollarsList = new ArrayList<>();
-        
+
         try {
             ObjectMapper mapper = new ObjectMapper();
             JsonNode rootNode = mapper.readTree(response);
 
-            JsonNode dataNode;
-            if (rootNode.isArray()) {
-                // El JSON ya es directamente un array (caso spotDeposits)
-                dataNode = rootNode;
-            } else {
-                // Normalmente viene como objeto con campo "data"
-                dataNode = rootNode.path("data");
-            }
+            JsonNode dataNode = rootNode.isArray() ? rootNode : rootNode.path("data");
 
-            if (!dataNode.isArray()) {
-                return buyDollarsList;
-            }
-
-            // Filtrar depósitos ya registrados
-            Set<String> assignedIds = buyDollarsRepository.findAll().stream()
-                .map(buy -> buy.getIdDeposit())
-                .collect(Collectors.toSet());
+            if (!dataNode.isArray()) return buyDollarsList;
 
             for (JsonNode deposit : dataNode) {
                 String id = deposit.path("id").asText();
@@ -262,7 +255,6 @@ public class PaymentController {
                     dto.setIdDeposit(id);
                     dto.setPesos(0.0);
 
-                    // Puedes usar insertTime o completeTime como fecha
                     long timestamp = deposit.path("insertTime").asLong(0);
                     if (timestamp > 0) {
                         dto.setDate(new Date(timestamp));
@@ -273,11 +265,12 @@ public class PaymentController {
             }
 
         } catch (Exception e) {
-            e.printStackTrace(); // puedes loggear más claro si lo necesitas
+            e.printStackTrace();
         }
 
         return buyDollarsList;
     }
+
 
 
     

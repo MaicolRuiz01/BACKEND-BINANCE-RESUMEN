@@ -37,6 +37,7 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 	    sale.setDate(dto.getDate());
 	    sale.setNameAccount(dto.getNameAccount());
 	    sale.setAccountBinance(accountBinance);  // Asociar la cuenta de Binance con la venta
+	    sale.setPesos(dto.getPesos());
 
 	    return sellDollarsRepository.save(sale);  // Guardar la venta de dólares
 	}
