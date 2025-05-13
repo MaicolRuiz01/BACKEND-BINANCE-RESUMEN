@@ -10,6 +10,6 @@ import org.springframework.data.repository.query.Param;
 import com.binance.web.Entity.SellDollars;
 
 public interface SellDollarsRepository extends JpaRepository<SellDollars, Integer> {
-	@Query(value = "SELECT * FROM sell_dollars WHERE DATE(date) = :fecha", nativeQuery = true)
+	@Query(value = "SELECT * FROM sell_dollars WHERE DATE(date) = DATE(:fecha)", nativeQuery = true)
 	List<SellDollars> findByDateWithoutTime(@Param("fecha") Date fecha);
 }

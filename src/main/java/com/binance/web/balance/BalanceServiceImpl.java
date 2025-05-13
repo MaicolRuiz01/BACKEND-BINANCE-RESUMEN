@@ -64,6 +64,7 @@ public class BalanceServiceImpl implements BalanceService {
 		balance.setUsdt(usdt);
 		balance.setSaldo(Saldo);
 		balanceRepository.save(balance);
+		purchaseRateService.createPurchaseRate(balance);
 	}
 
 	private Double getDollarsBalance(Date date) {
@@ -80,6 +81,7 @@ public class BalanceServiceImpl implements BalanceService {
 		Double dollarsBuyed = 0.0;
 		Double dollarsBuyedPesos = 0.0;
 		List<BuyDollars> buyDollarsDay = buyDollarsRepository.findByDateWithoutTime(date);
+		System.out.println("La fehca es:" + date + "Y la lista de compras es: " + buyDollarsDay);
 		for (BuyDollars buyDollar : buyDollarsDay) {
 			dollarsBuyed += buyDollar.getDollars();
 			dollarsBuyedPesos += buyDollar.getPesos();
@@ -127,7 +129,6 @@ public class BalanceServiceImpl implements BalanceService {
 		} else {
 			purchaseRateDay = dayBuyedDollarsPesos / dayBuyedDollars;
 		}
-		purchaseRateService.createPurchaseRate(purchaseRateDay, previusBalance, date);
 		return purchaseRateDay;
 	}
 
