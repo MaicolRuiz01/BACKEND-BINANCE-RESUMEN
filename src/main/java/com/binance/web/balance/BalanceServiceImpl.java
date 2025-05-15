@@ -104,6 +104,9 @@ public class BalanceServiceImpl implements BalanceService {
 
 	private Double getSupplierDebt() {
 		Supplier supplier = supplierRepository.findByName("Deuda");
+		if (supplier == null) {
+		    throw new IllegalStateException("Supplier not found");
+		}
 		return supplier.getBalance();
 	}
 
