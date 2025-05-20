@@ -1,6 +1,6 @@
 package com.binance.web.OrderP2P;
 
-import java.util.Date;
+import java.time.LocalDate;
 import java.util.List;
 
 import org.springframework.format.annotation.DateTimeFormat;
@@ -28,8 +28,8 @@ public class OrderP2PController {
 	    @GetMapping("/date-range")
 	    public ResponseEntity<List<OrderP2PDto>> getOrdersByDateRange(
 	            @RequestParam String account,
-	            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) Date fechaInicio,
-	            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) Date fechaFin) {
+	            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fechaInicio,
+	            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fechaFin) {
 
 	        List<OrderP2PDto> ordenes = orderP2PService.showOrderP2PByDateRange(account, fechaInicio, fechaFin);
 	        return ResponseEntity.ok(ordenes);

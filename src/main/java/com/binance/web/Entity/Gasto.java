@@ -1,5 +1,6 @@
 package com.binance.web.Entity;
-import java.util.Date;
+
+import java.time.LocalDateTime;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -28,7 +29,7 @@ public class Gasto {
 	@JoinColumn(name="tipo_id", nullable = false)
 	private TipoGasto tipo;
 	private String descripcion; 
-	private Date fecha;
+	private LocalDateTime fecha;
 	private Double monto;
 	private Boolean pagado;
 	

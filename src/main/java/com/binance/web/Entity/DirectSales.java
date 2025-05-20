@@ -1,6 +1,6 @@
 package com.binance.web.Entity;
 
-import java.util.Date;
+import java.time.LocalDateTime;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -21,7 +21,7 @@ public class DirectSales {
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Integer id;
-	private Date fechaRegistro;
+	private LocalDateTime fechaRegistro;
 	private Double tasaCompra;
 	private Double tasaVenta;
 

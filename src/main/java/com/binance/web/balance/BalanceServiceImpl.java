@@ -1,6 +1,6 @@
 package com.binance.web.balance;
 
-import java.util.Date;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -50,14 +50,14 @@ public class BalanceServiceImpl implements BalanceService {
 	}
 
 	@Override
-	public void createBalance(Date date) {
+	public void createBalance(LocalDate date) {
 		Double usdt = getDollarsBalance(date);
 		Double deuda = getSupplierDebt();
 		Double gastos = 0.0;
 		Double pesos = calculatePesos(date, usdt);
 		Double Saldo = 0.0;
 		Balance balance = new Balance();
-		balance.setDate(date);
+		balance.setDate(date.atStartOfDay());
 		balance.setDeuda(deuda);
 		balance.setGastos(gastos);
 		balance.setPesos(pesos);
@@ -67,7 +67,7 @@ public class BalanceServiceImpl implements BalanceService {
 		purchaseRateService.createPurchaseRate(balance);
 	}
 
-	private Double getDollarsBalance(Date date) {
+	private Double getDollarsBalance(LocalDate date) {
 		Double dayBuyedDollars = getDayBuyedDollars(date, true);
 		Double daySalesDollars = getDaySalesDollars(date);
 		Balance previusBalance = balanceRepository.findTopByOrderByIdDesc().orElse(null);
@@ -77,7 +77,7 @@ public class BalanceServiceImpl implements BalanceService {
 		return dolares;
 	}
 
-	private Double getDayBuyedDollars(Date date, Boolean inDollars) {
+	private Double getDayBuyedDollars(LocalDate date, Boolean inDollars) {
 		Double dollarsBuyed = 0.0;
 		Double dollarsBuyedPesos = 0.0;
 		List<BuyDollars> buyDollarsDay = buyDollarsRepository.findByDateWithoutTime(date);
@@ -89,7 +89,7 @@ public class BalanceServiceImpl implements BalanceService {
 		return inDollars ? dollarsBuyed : dollarsBuyedPesos;
 	}
 
-	private Double getDaySalesDollars(Date date) {
+	private Double getDaySalesDollars(LocalDate date) {
 		Double dollarsSales = 0.0;
 		List<SaleP2P> daySalesDollars = saleP2PRepository.findByDateWithoutTime(date);
 		List<SellDollars> daySellDollars = sellDollarsRepository.findByDateWithoutTime(date);
@@ -110,12 +110,12 @@ public class BalanceServiceImpl implements BalanceService {
 		return supplier.getBalance();
 	}
 
-	private Double calculatePesos(Date date, Double usdt) {
+	private Double calculatePesos(LocalDate date, Double usdt) {
 		Double purchaseRateDay = calculatePurchaseRate(date);
 		return purchaseRateDay * usdt;
 	}
 
-	private Double calculatePurchaseRate(Date date) {
+	private Double calculatePurchaseRate(LocalDate date) {
 		Double dayBuyedDollars = getDayBuyedDollars(date, true);
 		Double dayBuyedDollarsPesos = getDayBuyedDollars(date, false);
 		Balance previusBalance = balanceRepository.findTopByOrderByIdDesc().orElse(null);
@@ -124,7 +124,7 @@ public class BalanceServiceImpl implements BalanceService {
 	}
 
 	private Double createPurchaseRate(Double dayBuyedDollars, Double dayBuyedDollarsPesos, Balance previusBalance,
-			Date date) {
+			LocalDate date) {
 		Double purchaseRateDay = 0.0;
 		if (previusBalance != null) {
 			purchaseRateDay = (dayBuyedDollarsPesos + previusBalance.getPesos())
@@ -138,7 +138,7 @@ public class BalanceServiceImpl implements BalanceService {
 	private BalanceDTO convertBalanceToDto(Balance balance) {
 		BalanceDTO dto = new BalanceDTO();
 		dto.setId(balance.getId());
-		dto.setDate(balance.getDate());
+		dto.setDate(balance.getDate().toLocalDate());
 		dto.setSaldo(balance.getSaldo());
 		return dto;
 	}

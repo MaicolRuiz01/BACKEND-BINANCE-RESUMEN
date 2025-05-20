@@ -1,6 +1,6 @@
 package com.binance.web.balance;
 
-import java.util.Date;
+import java.time.LocalDate;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,7 +25,7 @@ public class BalanceController {
 
 	@PostMapping("/save")
 	public ResponseEntity<Void> createBalance(
-			@RequestParam(DATE2) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) Date date) {
+			@RequestParam(DATE2) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
 		balanceService.createBalance(date);
 		return ResponseEntity.ok().build();
 	}

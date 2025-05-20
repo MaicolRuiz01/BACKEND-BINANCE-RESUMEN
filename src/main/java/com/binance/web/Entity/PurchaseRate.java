@@ -1,6 +1,6 @@
 package com.binance.web.Entity;
 
-import java.util.Date;
+import java.time.LocalDateTime;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -21,7 +21,7 @@ public class PurchaseRate {
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Integer id;
-	private Date date;
+	private LocalDateTime date;
 	private Double dolares;
 	private Double Pesos;
 	private Double rate;

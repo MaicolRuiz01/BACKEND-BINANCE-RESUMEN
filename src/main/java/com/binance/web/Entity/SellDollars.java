@@ -1,6 +1,6 @@
 package com.binance.web.Entity;
 
-import java.util.Date;
+import java.time.LocalDateTime;
 
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
@@ -29,7 +29,7 @@ public class SellDollars {
 	private Double tasa;
 	private Double dollars;
 	private Double pesos;
-	private Date date;
+	private LocalDateTime date;
 	private String nameAccount;
 	@ManyToOne
 	@JoinColumn(name = "account_binance_id")  // La columna que hace referencia a account_binance

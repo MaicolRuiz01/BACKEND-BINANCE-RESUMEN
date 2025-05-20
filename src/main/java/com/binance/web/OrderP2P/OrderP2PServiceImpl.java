@@ -1,7 +1,7 @@
 package com.binance.web.OrderP2P;
 
-import java.util.Calendar;
-import java.util.Date;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -35,7 +35,7 @@ public class OrderP2PServiceImpl implements OrderP2PService {
 
 	@Override
 	public List<OrderP2PDto> showOrderP2PToday(String account) {
-		Date date = getTodayDate();
+		LocalDate date = getTodayDate();
 		List<OrderP2PDto> ordenesP2P = getOrderP2P(account);
 		ordenesP2P = getOrderP2pCompleted(ordenesP2P);
 		ordenesP2P = getOrderP2pByDate(ordenesP2P, date);
@@ -44,7 +44,7 @@ public class OrderP2PServiceImpl implements OrderP2PService {
 	}
 	
 	@Override
-	public List<OrderP2PDto> showOrderP2PByDateRange(String account, Date fechaInicio, Date fechaFin) {
+	public List<OrderP2PDto> showOrderP2PByDateRange(String account, LocalDate fechaInicio, LocalDate fechaFin) {
 	    // Obtén todas las órdenes P2P en el rango de fechas
 	    List<OrderP2PDto> ordenesP2P = getAllOrderP2P(account, fechaInicio, fechaFin);
 	    
@@ -126,10 +126,10 @@ public class OrderP2PServiceImpl implements OrderP2PService {
 				.collect(Collectors.toList());
 	}
 
-	private List<OrderP2PDto> getAllOrderP2P(String account, Date fechaInicio, Date fechaFin) {
+	private List<OrderP2PDto> getAllOrderP2P(String account, LocalDate fechaInicio, LocalDate fechaFin) {
 		
-	    long startTime = fechaInicio.toInstant().toEpochMilli();
-	    long endTime = fechaFin.toInstant().toEpochMilli();
+	    long startTime = fechaInicio.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
+	    long endTime = fechaFin.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
 		
 		// Llamamos al servicio que obtiene el JSON de Binance
 		String jsonResponse = binanceService.getP2POrdersInRange(account, startTime, endTime);
@@ -157,24 +157,18 @@ public class OrderP2PServiceImpl implements OrderP2PService {
 				.collect(Collectors.toList());
 	}
 
-	private List<OrderP2PDto> getOrderP2pByDate(List<OrderP2PDto> ordenes, Date fecha) {
-		return ordenes.stream().filter(order -> isSameDay(order.getCreateTime(), fecha)).collect(Collectors.toList());
+	private List<OrderP2PDto> getOrderP2pByDate(List<OrderP2PDto> ordenes, LocalDate fecha) {
+		return ordenes.stream().filter(order -> isSameDay(order.getCreateTime().toLocalDate(), fecha)).collect(Collectors.toList());
 	}
 
-	private boolean isSameDay(Date date1, Date date2) {
-		if (date1 == null || date2 == null)
-			return false;
+	private boolean isSameDay(LocalDate date1, LocalDate date2) {
+		 if (date1 == null || date2 == null)
+		        return false;
 
-		return date1.toInstant().atZone(java.time.ZoneId.systemDefault()).toLocalDate()
-				.equals(date2.toInstant().atZone(java.time.ZoneId.systemDefault()).toLocalDate());
+		    return date1.equals(date2);
 	}
 	
-	 private Date getTodayDate() {
-	        Calendar calendar = Calendar.getInstance();
-	        calendar.set(Calendar.HOUR_OF_DAY, 0);
-	        calendar.set(Calendar.MINUTE, 0);
-	        calendar.set(Calendar.SECOND, 0);
-	        calendar.set(Calendar.MILLISECOND, 0);
-	        return calendar.getTime();
+	 private LocalDate getTodayDate() {
+	        return LocalDate.now();
 	    }
 }
