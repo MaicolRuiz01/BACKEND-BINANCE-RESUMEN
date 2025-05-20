@@ -55,7 +55,7 @@ public class BalanceServiceImpl implements BalanceService {
 		Double deuda = getSupplierDebt();
 		Double gastos = 0.0;
 		Double pesos = calculatePesos(date, usdt);
-		Double Saldo = 0.0;
+		Double Saldo = pesos - deuda;
 		Balance balance = new Balance();
 		balance.setDate(date.atStartOfDay());
 		balance.setDeuda(deuda);
