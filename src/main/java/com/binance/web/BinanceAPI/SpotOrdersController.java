@@ -1,14 +1,11 @@
 package com.binance.web.BinanceAPI;
 
-import java.util.Date;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -16,11 +13,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import lombok.RequiredArgsConstructor;
 
-import com.binance.web.BuyDollars.BuyDollarsService;
 import com.binance.web.Entity.AccountBinance;
-import com.binance.web.Entity.BuyDollars;
 import com.binance.web.Entity.SaleP2P;
-import com.binance.web.Entity.SellDollars;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -36,7 +30,6 @@ import com.binance.web.Repository.SellDollarsRepository;
 public class SpotOrdersController {
 
 	private final BinanceService            binanceService;
-    private final BuyDollarsService        buyDollarsService;
     private final SellDollarsRepository    sellDollarsRepository;
     private final BuyDollarsRepository     buyDollarsRepository;
     private final OrderP2PService          orderP2PService;

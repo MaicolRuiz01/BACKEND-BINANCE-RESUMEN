@@ -1,9 +1,9 @@
 package com.binance.web.balance.saleP2P;
 
-import java.util.Date;
+import java.time.LocalDate;
 
 public interface BalanceSaleP2PService {
 
-	public BalanceSaleP2PDto balanceSaleP2PDay(Date fehca);
+	public BalanceSaleP2PDto balanceSaleP2PDay(LocalDate fehca);
 	
 }

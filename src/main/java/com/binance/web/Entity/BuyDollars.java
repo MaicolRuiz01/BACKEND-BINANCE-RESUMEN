@@ -1,6 +1,6 @@
 package com.binance.web.Entity;
 
-import java.util.Date;
+import java.time.LocalDateTime;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -28,7 +28,7 @@ public class BuyDollars {
 	@ManyToOne
 	@JoinColumn(name = "supplier_id")
 	private Supplier supplier;
-	private Date date;
+	private LocalDateTime date;
 	private String nameAccount;
 	private String idDeposit;
 	@ManyToOne

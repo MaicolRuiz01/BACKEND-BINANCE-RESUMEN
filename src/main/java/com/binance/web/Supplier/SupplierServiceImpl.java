@@ -1,8 +1,7 @@
 package com.binance.web.Supplier;
 
+import java.time.LocalDate;
 import java.time.ZoneId;
-import java.util.Calendar;
-import java.util.Date;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -39,7 +38,7 @@ public class SupplierServiceImpl implements SupplierService {
 	}
 
 	@Override
-	public void subtractSupplierDebt(Double pesosCop, String taxType, Date date) {
+	public void subtractSupplierDebt(Double pesosCop, String taxType, LocalDate date) {
 		Supplier supplier = supplierRepository.findByName("Deuda");
 //		if(taxType.contentEquals("2x")) {
 //			pesosCop = pesosCop * 0.998;
@@ -51,7 +50,7 @@ public class SupplierServiceImpl implements SupplierService {
 		
 		Double balance = supplier.getBalance() - pesosCop;
 		supplier.setBalance(balance);
-		supplier.setLastPaymentDate(date);
+		supplier.setLastPaymentDate(date.atStartOfDay());
 		saveSupplier(supplier);
 	}
 	
@@ -59,10 +58,10 @@ public class SupplierServiceImpl implements SupplierService {
 	public Double subtractAllSalesFromSupplier() {
 		Supplier supplier = supplierRepository.findByName("Deuda");
 		Double ventasNoAsignadas = 0.0;
-		Date endDate = getTodayDate();
-		Date startDate = Date.from(
+		LocalDate endDate = getTodayDate();
+		LocalDate startDate = LocalDate.from(
 			    supplier.getLastPaymentDate()
-			        .toInstant()
+			        .toInstant(null)
 			        .atZone(ZoneId.systemDefault())
 			        .toLocalDate()
 			        .atStartOfDay(ZoneId.systemDefault())
@@ -85,13 +84,8 @@ public class SupplierServiceImpl implements SupplierService {
                   .collect(Collectors.toList());
 	}
 	
-	 private Date getTodayDate() {
-	        Calendar calendar = Calendar.getInstance();
-	        calendar.set(Calendar.HOUR_OF_DAY, 0);
-	        calendar.set(Calendar.MINUTE, 0);
-	        calendar.set(Calendar.SECOND, 0);
-	        calendar.set(Calendar.MILLISECOND, 0);
-	        return calendar.getTime();
+	 private LocalDate getTodayDate() {
+		 return LocalDate.now();
 	    }
 	 
 	 @Override

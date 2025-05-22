@@ -5,7 +5,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 
-import java.util.Date;
+import java.time.LocalDateTime;
 
 @Data
 @NoArgsConstructor
@@ -15,7 +15,7 @@ public class BuyDollarsDto {
     private Double dollars;      // Monto de dólares a comprar
     private Double tasa;         // Tasa de cambio aplicada
     private String nameAccount;  // Nombre de la cuenta
-    private Date date;           // Fecha de la operación
+    private LocalDateTime date;           // Fecha de la operación
     private String idDeposit;
     private Double pesos;
     private Integer accountBinanceId;

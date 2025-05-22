@@ -1,6 +1,6 @@
 package com.binance.web.Repository;
 
-import java.util.Date;
+import java.time.LocalDate;
 import java.util.List;
 
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -12,5 +12,5 @@ import com.binance.web.Entity.BuyDollars;
 @Repository
 public interface BuyDollarsRepository extends JpaRepository<BuyDollars, Integer>{
 	@Query(value = "SELECT * FROM buy_dollars WHERE DATE(date) = DATE(:fecha)", nativeQuery = true)
-	List<BuyDollars> findByDateWithoutTime(Date fecha);
+	List<BuyDollars> findByDateWithoutTime(LocalDate fecha);
 }

@@ -1,6 +1,6 @@
 package com.binance.web.Entity;
 
-import java.util.Date;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -28,7 +28,7 @@ public class SaleP2P {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
     private String numberOrder;
-    private Date date;
+    private LocalDateTime date;
     private Double commission;
     private Double pesosCop;
     private Double dollarsUs;

@@ -1,13 +1,13 @@
 package com.binance.web.Supplier;
 
-import java.util.Date;
+import java.time.LocalDate;
 
 import com.binance.web.Entity.BuyDollars;
 import com.binance.web.Entity.Supplier;
 
 public interface SupplierService {
 	void saveSupplier(Supplier supplier);
-	void subtractSupplierDebt(Double pesosCop, String taxType, Date date);
+	void subtractSupplierDebt(Double pesosCop, String taxType, LocalDate date);
 	Double subtractAllSalesFromSupplier();
 	Supplier getSupplierById(int id);
 	void addBuyDollars(BuyDollars buyDollars);

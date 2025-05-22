@@ -7,7 +7,6 @@ import org.springframework.transaction.annotation.Transactional;
 import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.SellDollars;
 import com.binance.web.Repository.AccountBinanceRepository;
-import com.binance.web.Repository.BuyDollarsRepository;
 import com.binance.web.Repository.SellDollarsRepository;
 
 import lombok.RequiredArgsConstructor;

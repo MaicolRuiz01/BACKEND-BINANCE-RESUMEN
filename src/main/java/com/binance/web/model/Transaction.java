@@ -7,7 +7,7 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.util.Date;
+import java.time.LocalDateTime;
 
 @Data
 @AllArgsConstructor
@@ -18,7 +18,7 @@ public class Transaction {
 	private Long binanceId;
     private String transactionId;
     private Double amount;
-    private Date transactionTime;
+    private LocalDateTime transactionTime;
     
     @JsonProperty("payerInfo")
     private PayerInfo payerInfo;  // Clase interna para información del pagador
@@ -44,11 +44,11 @@ public class Transaction {
         this.amount = amount;
     }
 
-    public Date getTransactionTime() {
+    public LocalDateTime getTransactionTime() {
         return transactionTime;
     }
 
-    public void setTransactionTime(Date transactionTime) {
+    public void setTransactionTime(LocalDateTime transactionTime) {
         this.transactionTime = transactionTime;
     }
 

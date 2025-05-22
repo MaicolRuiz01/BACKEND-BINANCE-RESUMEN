@@ -1,6 +1,6 @@
 package com.binance.web.OrderP2P;
 
-import java.util.Date;
+import java.time.LocalDateTime;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
 
@@ -16,7 +16,7 @@ public class OrderP2PDto {
 	    private String orderStatus;
 	    
 	    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss", timezone = "America/Bogota")
-	    private Date createTime;
+	    private LocalDateTime createTime;
 
 	    
 	    private Double commission;

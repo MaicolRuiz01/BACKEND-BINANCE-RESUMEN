@@ -1,6 +1,6 @@
 package com.binance.web.SellDollars;
 
-import java.util.Date;
+import java.time.LocalDateTime;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -14,7 +14,7 @@ public class SellDollarsDto {
     private Double tasa;
     private Double dollars;
     private Double pesos;
-    private Date date;
+    private LocalDateTime date;
     private String nameAccount;
     private Integer accountBinanceId;
 

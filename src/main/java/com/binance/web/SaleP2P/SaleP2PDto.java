@@ -1,6 +1,6 @@
 package com.binance.web.SaleP2P;
 
-import java.util.Date;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -9,7 +9,7 @@ import lombok.Data;
 @Data
 public class SaleP2PDto {
 	private String numberOrder;
-	private Date date;
+	private LocalDateTime date;
 	private Double commission;
 	private Double pesosCop;
 	private List<Integer> accountCopIds; 

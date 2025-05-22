@@ -1,6 +1,6 @@
 package com.binance.web.balance.saleP2P;
 
-import java.util.Date;
+import java.time.LocalDate;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,7 +20,7 @@ public class BalanceSaleP2PServiceImpl implements BalanceSaleP2PService{
 	@Autowired
 	private PurchaseRateRepository purchaseRateRepository;
 	
-	public BalanceSaleP2PDto balanceSaleP2PDay(Date fecha) {
+	public BalanceSaleP2PDto balanceSaleP2PDay(LocalDate fecha) {
 		List<SaleP2P> daySales = generateListSaleP2PDay(fecha);
 		BalanceSaleP2PDto  balanceSaleP2P = createBalanceSaleP2PDto(daySales, fecha);
 		
@@ -28,12 +28,12 @@ public class BalanceSaleP2PServiceImpl implements BalanceSaleP2PService{
 		return balanceSaleP2P;
 	}
 	
-	private List<SaleP2P> generateListSaleP2PDay(Date fecha) {
+	private List<SaleP2P> generateListSaleP2PDay(LocalDate fecha) {
 		return p2pRepository.findByDateWithoutTime(fecha);
 	}
 	
 
-	private BalanceSaleP2PDto createBalanceSaleP2PDto(List<SaleP2P> daySales, Date fecha) {
+	private BalanceSaleP2PDto createBalanceSaleP2PDto(List<SaleP2P> daySales, LocalDate fecha) {
 
 		BalanceSaleP2PDto  balanceSaleP2P = new BalanceSaleP2PDto();
 		Double vendidos = 0.0;
@@ -60,7 +60,7 @@ public class BalanceSaleP2PServiceImpl implements BalanceSaleP2PService{
 		return balanceSaleP2P;
 	}
 	
-	private Double getPurchaseRateDay(Date fecha) {
+	private Double getPurchaseRateDay(LocalDate fecha) {
 		PurchaseRate purchaseRate = purchaseRateRepository.findByDateWithoutTime(fecha);
 		return purchaseRate.getRate();
 	}
