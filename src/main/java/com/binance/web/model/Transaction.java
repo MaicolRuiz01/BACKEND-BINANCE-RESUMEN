@@ -1,7 +1,9 @@
 package com.binance.web.model;
 
+import com.binance.web.config.CustomLocalDateTimeDeserializer;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -18,7 +20,9 @@ public class Transaction {
 	private Long binanceId;
     private String transactionId;
     private Double amount;
+    @JsonDeserialize(using = CustomLocalDateTimeDeserializer.class)
     private LocalDateTime transactionTime;
+
     
     @JsonProperty("payerInfo")
     private PayerInfo payerInfo;  // Clase interna para información del pagador
