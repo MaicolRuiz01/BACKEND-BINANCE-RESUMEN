@@ -24,36 +24,38 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 	private AccountBinanceRepository accountBinanceRepository;
 
 	@Override
-	@Transactional // asegura que las operaciones se hagan en una sola transacción
-	public BuyDollars createBuyDollars(BuyDollarsDto dto) {
-		// 1. Obtener el supplier con ID 1 desde la base de datos
-		Supplier supplier = supplierRepository.findById(1)
-				.orElseThrow(() -> new RuntimeException("Supplier with ID 1 not found"));
+    @Transactional
+    public BuyDollars createBuyDollars(BuyDollarsDto dto) {
+        Supplier supplier = supplierRepository.findById(1)
+                .orElseThrow(() -> new RuntimeException("Supplier with ID 1 not found"));
 
-		// Obtener la cuenta de Binance correspondiente
-		AccountBinance accountBinance = accountBinanceRepository.findById(dto.getAccountBinanceId())
-				.orElseThrow(() -> new RuntimeException("Account not found"));
+        AccountBinance accountBinance = accountBinanceRepository.findById(dto.getAccountBinanceId())
+                .orElseThrow(() -> new RuntimeException("Account not found"));
 
-		// 2. Mapear los campos del DTO a la entidad BuyDollars
-		BuyDollars buy = new BuyDollars();
-		buy.setDollars(dto.getDollars());
-		buy.setTasa(dto.getTasa());
-		buy.setNameAccount(dto.getNameAccount());
-		buy.setDate(dto.getDate());
-		buy.setSupplier(supplier);
-		buy.setAccountBinance(accountBinance);
-		buy.setPesos(dto.getPesos());
-		buy.setIdDeposit(dto.getIdDeposit());
+        BuyDollars buy = new BuyDollars();
+        buy.setDollars(dto.getDollars());
+        buy.setTasa(dto.getTasa());
+        buy.setNameAccount(dto.getNameAccount());
+        buy.setDate(dto.getDate());
+        buy.setSupplier(supplier);
+        buy.setAccountBinance(accountBinance);
+        buy.setPesos(dto.getPesos());
+        buy.setIdDeposit(dto.getIdDeposit());
 
-		// 3. Actualizar el balance del supplier sumando el monto de la compra
-		double montoSumar = dto.getDollars() * dto.getTasa();
-		supplier.setBalance(supplier.getBalance() + montoSumar);
+        // Valores protegidos contra null
+        Double dollars = dto.getDollars() != null ? dto.getDollars() : 0.0;
+        Double tasa = dto.getTasa() != null ? dto.getTasa() : 0.0;
+        Double supplierBalance = supplier.getBalance() != null ? supplier.getBalance() : 0.0;
+        Double accountBalance = accountBinance.getBalance() != null ? accountBinance.getBalance() : 0.0;
 
-		// 4. Guardar los cambios en la base de datos
-		supplierRepository.save(supplier); // actualiza el supplier con el nuevo balance
-		BuyDollars saved = buyDollarsRepository.save(buy); // guarda la nueva compra de dólares
+        double montoSumar = dollars * tasa;
+        supplier.setBalance(supplierBalance + montoSumar);
+        accountBinance.setBalance(accountBalance + dollars);
 
-		return saved;
-	}
+        accountBinanceRepository.save(accountBinance);
+        supplierRepository.save(supplier);
+
+        return buyDollarsRepository.save(buy);
+    }
 
 }

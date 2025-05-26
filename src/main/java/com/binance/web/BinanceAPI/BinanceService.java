@@ -1,6 +1,8 @@
 package com.binance.web.BinanceAPI;
 
+import com.google.gson.Gson;
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.springframework.stereotype.Service;
@@ -12,7 +14,11 @@ import java.io.InputStreamReader;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+
 
 @Service
 public class BinanceService {
@@ -217,6 +223,35 @@ public class BinanceService {
             return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
         }
     }
+    
+ // En BinanceService.java
+    public String getAllSpotTradeOrdersTRXUSDT() {
+        try {
+            List<JsonObject> allTrades = new ArrayList<>();
+
+            for (String[] accountEntry : apiKeys) {
+                String account = accountEntry[0];
+                String apiKey = accountEntry[1];
+                String secretKey = accountEntry[2];
+
+                // Consultar solo TRXUSDT con límite 100
+                String response = getSpotOrders(account, "TRXUSDT", 1000);
+                JsonArray tradesArray = JsonParser.parseString(response).getAsJsonArray();
+
+                for (JsonElement el : tradesArray) {
+                    JsonObject trade = el.getAsJsonObject();
+                    trade.addProperty("account", account);
+                    allTrades.add(trade);
+                }
+            }
+
+            return new Gson().toJson(allTrades);
+
+        } catch (Exception e) {
+            return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
+        }
+    }
+
 
     public String getSpotOrders(String account, String symbol, int limit) {
         try {

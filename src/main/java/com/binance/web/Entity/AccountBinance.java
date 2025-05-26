@@ -20,6 +20,7 @@ public class AccountBinance {
 	private Integer id;
 	private String name;
 	private String referenceAccount;
+	//sera en dolares el balance
 	private Double balance;
 	private String correo;
 	private String userBinance;
