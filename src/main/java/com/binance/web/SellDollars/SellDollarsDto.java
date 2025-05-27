@@ -17,7 +17,7 @@ public class SellDollarsDto {
     private LocalDateTime date;
     private String nameAccount;
     private Integer accountBinanceId;
-    //esto solo sera para cuando haya una venta TRX
+    //esto solo sera para cuando haya una orden trade de TRX
     private Double equivalenteciaTRX;
 
 }
