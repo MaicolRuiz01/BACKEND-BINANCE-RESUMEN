@@ -1,5 +1,7 @@
 package com.binance.web.BinanceAPI;
 
+import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -10,6 +12,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 
 import lombok.RequiredArgsConstructor;
 
@@ -23,6 +29,7 @@ import com.binance.web.Repository.AccountBinanceRepository;
 import com.binance.web.Repository.BuyDollarsRepository;
 import com.binance.web.Repository.SaleP2PRepository;
 import com.binance.web.Repository.SellDollarsRepository;
+import com.binance.web.SellDollars.SellDollarsDto;
 
 @RestController
 @RequestMapping("/api/spot-orders")
@@ -170,6 +177,63 @@ public class SpotOrdersController {
 	            .filter(Objects::nonNull)
 	            .collect(Collectors.toSet());
 	    }
+	    
+	    @GetMapping("/trades")
+	    public ResponseEntity<List<SellDollarsDto>> getAllSpotTradeOrdersAsSellDollarsDto() {
+	        try {
+	            // 1) Obtener el conjunto de pares "idWithdrawals|nameAccount" ya guardados
+	            Set<String> assignedIdsAccounts = sellDollarsRepository.findAll().stream()
+	                .filter(sd -> sd.getIdWithdrawals() != null && sd.getNameAccount() != null)
+	                .map(sd -> sd.getIdWithdrawals() + "|" + sd.getNameAccount())
+	                .collect(Collectors.toSet());
+
+	            // 2) Obtener todas las órdenes desde Binance
+	            String json = binanceService.getAllSpotTradeOrdersTRXUSDT();
+	            JsonArray array = JsonParser.parseString(json).getAsJsonArray();
+
+	            List<SellDollarsDto> list = new ArrayList<>();
+
+	            // 3) Filtrar y mapear solo si la combinación id+account no existe en la BD
+	            for (JsonElement el : array) {
+	                JsonObject obj = el.getAsJsonObject();
+	                String orderId = obj.get("orderId").getAsString();
+	                String account = obj.get("account").getAsString();
+
+	                String key = orderId + "|" + account;
+	                if (!assignedIdsAccounts.contains(key)) {
+	                    SellDollarsDto dto = new SellDollarsDto();
+	                    dto.setIdWithdrawals(orderId);
+	                    dto.setTasa(null);
+	                    dto.setDollars(obj.get("cummulativeQuoteQty").getAsDouble());
+	                    dto.setPesos(null);
+	                    dto.setDate(LocalDateTime.ofEpochSecond(obj.get("time").getAsLong() / 1000, 0, java.time.ZoneOffset.UTC));
+	                    dto.setNameAccount(account);
+	                    dto.setAccountBinanceId(null);
+	                    dto.setEquivalenteciaTRX(obj.get("origQty").getAsDouble());
+
+	                    list.add(dto);
+	                }
+	            }
+
+	            return ResponseEntity.ok(list);
+	        } catch (Exception e) {
+	            return ResponseEntity.internalServerError().build();
+	        }
+	    }
+
+
+	    
+	    @GetMapping("/debug-milton")
+	    public ResponseEntity<String> debugMilton() {
+	        try {
+	            String response = binanceService.getSpotOrders("MILTON", "TRXUSDT", 50);
+	            return ResponseEntity.ok(response);
+	        } catch (Exception e) {
+	            return ResponseEntity.internalServerError().body("{\"error\": \"" + e.getMessage() + "\"}");
+	        }
+	    }
+
+
 
 	    
 

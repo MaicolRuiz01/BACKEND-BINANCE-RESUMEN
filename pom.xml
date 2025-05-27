@@ -76,6 +76,11 @@
 			<artifactId>gson</artifactId>
 			<version>2.10.1</version> <!-- Usa la versión más reciente -->
 		</dependency>
+		<dependency>
+  <groupId>com.fasterxml.jackson.datatype</groupId>
+  <artifactId>jackson-datatype-jsr310</artifactId>
+</dependency>
+
 	</dependencies>
 
 	<build>
