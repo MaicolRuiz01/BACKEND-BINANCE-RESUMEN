@@ -18,7 +18,6 @@ public class OrderP2PDto {
 	    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss", timezone = "America/Bogota")
 	    private LocalDateTime createTime;
 
-	    
 	    private Double commission;
 	    private String counterPartNickName;
 	    private String payMethodName;

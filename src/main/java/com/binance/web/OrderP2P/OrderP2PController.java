@@ -19,11 +19,11 @@ public class OrderP2PController {
 	        this.orderP2PService = orderP2PService;
 	    }
 
-	    @GetMapping
-	    public ResponseEntity<List<OrderP2PDto>> getP2POrders(@RequestParam String account) {
-	    	  List<OrderP2PDto> ordenes = orderP2PService.showOrderP2PToday(account);
-	    	  return ResponseEntity.ok(ordenes);
-	    }
+//	    @GetMapping
+//	    public ResponseEntity<List<OrderP2PDto>> getP2POrders(@RequestParam String account) {
+//	    	  List<OrderP2PDto> ordenes = orderP2PService.showOrderP2PToday(account);
+//	    	  return ResponseEntity.ok(ordenes);
+//	    }
 	    
 	    @GetMapping("/date-range")
 	    public ResponseEntity<List<OrderP2PDto>> getOrdersByDateRange(

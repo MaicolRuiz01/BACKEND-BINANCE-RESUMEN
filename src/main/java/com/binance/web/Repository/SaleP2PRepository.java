@@ -16,5 +16,7 @@ public interface SaleP2PRepository extends JpaRepository<SaleP2P, Integer>{
 	List<SaleP2P> findByBinanceAccount(AccountBinance accountBinance);
 	@Query(value = "SELECT * FROM sale_p2p WHERE DATE(date) = DATE(:fecha)", nativeQuery = true)
 	List<SaleP2P> findByDateWithoutTime(@Param("fecha") LocalDate fecha);
+	@Query("SELECT s FROM SaleP2P s WHERE DATE(s.date) = :date AND s.binanceAccount.id = :binanceAccountId")
+	List<SaleP2P> findByDateAndBinanceAccount(@Param("date") LocalDate date, @Param("binanceAccountId") Integer binanceAccountId);
 
 }
