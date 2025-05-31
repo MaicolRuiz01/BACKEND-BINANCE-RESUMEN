@@ -13,11 +13,14 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 
 @Service
@@ -34,6 +37,13 @@ public class BinanceService {
             {"SONIA", "N0lUyNy3rlgNxq6XKlKdjxVLppvBwPl1Bxi7FeDZ82G7X47oL2tor20vprJaLZLk", "Nqhxi7XMzNmQMk4phC442bkA368L8Toi0EAidGOJhal2f72olp5FMhOY7OoaehUg"},
             {"BERNANDA","UxPVjnvpZBgKgxHV6Qbds15TlTtFrBgyOycsw1Enj2ybiZFDc6ewk51ys3Sxvgxm","GCliNB78z1FJkx5542QeY3PXsUBqJJMPQNZ6MmKAeEUjhItMLIhwKNhUw6pSCH8E"}
     };
+    
+    public List<String> getAllAccountNames() {
+        return Arrays.stream(apiKeys)
+                     .map(keys -> keys[0])
+                     .collect(Collectors.toList());
+    }
+
 
     public String getPaymentHistory(String account) {
         try {
@@ -411,5 +421,34 @@ public class BinanceService {
 	        return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
 	    }
 	}
+	
+	
+	//este metodo busca el valor de los trx en una fecha que le mandamos, esto lo uso para pasar los trx a usdt 
+	//en traspasos y ventas, podemos ver en el spotcontroller que se usa este metodo
+	
+	public Double getHistoricalPriceTRXUSDT(LocalDateTime fecha) {
+	    try {
+	        long startTime = fecha.atZone(ZoneId.of("UTC")).toInstant().toEpochMilli();
+	        long endTime = startTime + 60000; // +1 minuto
+
+	        String url = "https://api.binance.com/api/v3/klines?symbol=TRXUSDT&interval=1m&startTime=" + startTime + "&endTime=" + endTime;
+
+	        String response = sendBinanceRequestWithProxy(url, null);
+
+	        JsonArray klines = JsonParser.parseString(response).getAsJsonArray();
+	        if (klines.size() > 0) {
+	            JsonArray firstKline = klines.get(0).getAsJsonArray();
+	            String closePriceStr = firstKline.get(4).getAsString(); // índice 4 = precio de cierre
+	            return Double.parseDouble(closePriceStr);
+	        }
+
+	    } catch (Exception e) {
+	        // Log error si quieres
+	    }
+	    return null; // si falla o no encuentra precio
+	}
+
+	
+	
 
 }

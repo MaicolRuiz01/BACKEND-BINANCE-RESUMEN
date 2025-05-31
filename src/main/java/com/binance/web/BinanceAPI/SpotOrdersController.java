@@ -1,11 +1,17 @@
 package com.binance.web.BinanceAPI;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
+
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -30,6 +36,8 @@ import com.binance.web.Repository.BuyDollarsRepository;
 import com.binance.web.Repository.SaleP2PRepository;
 import com.binance.web.Repository.SellDollarsRepository;
 import com.binance.web.SellDollars.SellDollarsDto;
+import com.binance.web.transacciones.TransaccionesDTO;
+import com.binance.web.transacciones.TransaccionesRepository;
 
 @RestController
 @RequestMapping("/api/spot-orders")
@@ -42,6 +50,8 @@ public class SpotOrdersController {
     private final OrderP2PService          orderP2PService;
     private final SaleP2PRepository        saleP2PRepository;
     private final AccountBinanceRepository accountBinanceRepository;
+    private final TransaccionesRepository transaccionesRepository;
+
     // ----------------- P2P Orders (filtradas) -----------------
     @GetMapping
     public ResponseEntity<List<OrderP2PDto>> getP2POrders(@RequestParam String account) {
@@ -145,8 +155,11 @@ public class SpotOrdersController {
 	            for (JsonNode withdrawal : sourceArray) {
 	                String id      = withdrawal.path("id").asText();
 	                String address = withdrawal.path("address").asText(null);
+	                String coin = withdrawal.path("coin").asText("");
 	                if (!assignedIds.contains(id)
-	                        && (address == null || !blockedAddresses.contains(address))) {
+	                        && (address == null || !blockedAddresses.contains(address)) 
+	                		&& !coin.equalsIgnoreCase("TRX"))
+	                {
 	                    filtered.add(withdrawal);
 	                }
 	            }
@@ -220,22 +233,233 @@ public class SpotOrdersController {
 	            return ResponseEntity.internalServerError().build();
 	        }
 	    }
+	    
+	    
+	    
+	    
+	    @GetMapping("/withdrawals-registrados")
+	    public ResponseEntity<String> getWithdrawalsTRXRegistrados(
+	            @RequestParam(defaultValue = "100") int limit) {
+
+	        ObjectMapper mapper = new ObjectMapper();
+	        ArrayNode allFilteredWithdrawals = mapper.createArrayNode();
+
+	        try {
+	            // Obtener todos los IDs ya registrados
+	            Set<String> assignedIds = transaccionesRepository.findAll().stream()
+	                    .map(t -> t.getIdtransaccion())
+	                    .collect(Collectors.toSet());
+
+	            // Iterar sobre todas las cuentas
+	            for (String account : binanceService.getAllAccountNames()) {
+	                String response = binanceService.getSpotWithdrawals(account, limit);
+	                JsonNode root = mapper.readTree(response);
+
+	                ArrayNode sourceArray;
+	                if (root.isArray()) {
+	                    sourceArray = (ArrayNode) root;
+	                } else {
+	                    JsonNode dataNode = root.path("data");
+	                    if (!dataNode.isArray()) {
+	                        continue;
+	                    }
+	                    sourceArray = (ArrayNode) dataNode;
+	                }
+
+	                // Filtrar retiros no registrados y añadir campo "account"
+	                for (JsonNode withdrawal : sourceArray) {
+	                    String id = withdrawal.path("id").asText();
+	                    if (!assignedIds.contains(id)) {
+	                        ObjectNode withdrawalObj = (ObjectNode) withdrawal;
+	                        withdrawalObj.put("account", account); // Añadir campo
+	                        allFilteredWithdrawals.add(withdrawalObj);
+	                    }
+	                }
+	            }
+
+	            // Devolver la lista consolidada
+	            ObjectNode result = mapper.createObjectNode();
+	            result.set("data", allFilteredWithdrawals);
+	            return ResponseEntity.ok(mapper.writeValueAsString(result));
+
+	        } catch (Exception e) {
+	            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+	                                 .body("{\"error\": \"Error al procesar los retiros.\"}");
+	        }
+	    }
+
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+
+	    private static final DateTimeFormatter FORMATO_FECHA = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+	    private LocalDateTime parseFechaDesdeString(String fechaStr) {
+	        try {
+	            return LocalDateTime.parse(fechaStr, FORMATO_FECHA);
+	        } catch (DateTimeParseException e) {
+	            System.err.println("Error parseando fecha: " + fechaStr);
+	            return null;
+	        }
+	    }
+	    
+	    private class ClasificacionMovimientos {
+	        List<SellDollarsDto> ventas = new ArrayList<>();
+	        List<TransaccionesDTO> traspasos = new ArrayList<>();
+	    }
+
+	    private ClasificacionMovimientos obtenerMovimientosClasificados(int limit) throws Exception {
+	        ObjectMapper mapper = new ObjectMapper();
+	        ClasificacionMovimientos resultado = new ClasificacionMovimientos();
+
+	        Set<String> registeredAddresses = getRegisteredAddresses();
+	        Set<String> assignedIds = transaccionesRepository.findAll().stream()
+	                .map(t -> t.getIdtransaccion())
+	                .collect(Collectors.toSet());
+
+	        for (String account : binanceService.getAllAccountNames()) {
+	            String response = binanceService.getSpotWithdrawals(account, limit);
+	            JsonNode root = mapper.readTree(response);
+
+	            ArrayNode sourceArray;
+	            if (root.isArray()) {
+	                sourceArray = (ArrayNode) root;
+	            } else {
+	                JsonNode dataNode = root.path("data");
+	                if (!dataNode.isArray()) {
+	                    continue;
+	                }
+	                sourceArray = (ArrayNode) dataNode;
+	            }
+
+	            for (JsonNode withdrawal : sourceArray) {
+	                String id = withdrawal.path("id").asText();
+	                String address = withdrawal.path("address").asText(null);
+	                String coin = withdrawal.path("coin").asText("");
+	                String timestampStr = withdrawal.path("applyTime").asText(null);
+
+	                if (assignedIds.contains(id)) continue;
+
+	                LocalDateTime fecha = null;
+	                if (timestampStr != null) {
+	                    try {
+	                        long ts = Long.parseLong(timestampStr);
+	                        fecha = parseFechaDesdeTimestamp(ts);
+	                    } catch (NumberFormatException e) {
+	                        fecha = parseFechaDesdeString(timestampStr);
+	                    }
+	                }
+
+	                if (address != null && registeredAddresses.contains(address)) {
+	                    TransaccionesDTO traspaso = new TransaccionesDTO();
+	                    traspaso.setIdtransaccion(id);
+	                    traspaso.setCuentaFrom(account);
+	                    traspaso.setCuentaTo(address);
+	                    traspaso.setFecha(fecha);
+
+	                    if (coin.equalsIgnoreCase("TRX") && fecha != null) {
+	                        Double tasaTRXUSDT = binanceService.getHistoricalPriceTRXUSDT(fecha);
+	                        traspaso.setMonto(withdrawal.path("amount").asDouble(0) * (tasaTRXUSDT != null ? tasaTRXUSDT : 1));
+	                        traspaso.setTipo(String.format("TRX (tasa: %s USDT)", tasaTRXUSDT != null ? tasaTRXUSDT : "N/A"));
+	                    } else {
+	                        traspaso.setMonto(withdrawal.path("amount").asDouble(0));
+	                        traspaso.setTipo(coin);
+	                    }
+	                    resultado.traspasos.add(traspaso);
+
+	                } else {
+	                    SellDollarsDto venta = new SellDollarsDto();
+	                    venta.setIdWithdrawals(id);
+	                    venta.setNameAccount(account);
+	                    venta.setDate(fecha);
+
+	                    if (coin.equalsIgnoreCase("TRX") && fecha != null) {
+	                        Double tasaTRXUSDT = binanceService.getHistoricalPriceTRXUSDT(fecha);
+	                        venta.setEquivalenteciaTRX(withdrawal.path("amount").asDouble(0));
+	                        venta.setDollars(withdrawal.path("amount").asDouble(0) * (tasaTRXUSDT != null ? tasaTRXUSDT : 1));
+	                    } else {
+	                        venta.setDollars(withdrawal.path("amount").asDouble(0));
+	                        venta.setEquivalenteciaTRX(null);
+	                    }
+
+	                    resultado.ventas.add(venta);
+	                }
+	            }
+	        }
+	        return resultado;
+	    }
+
+
+	    private LocalDateTime parseFechaDesdeTimestamp(long timestamp) {
+	        if (timestamp > 1_000_000_000_000_000L) {
+	            timestamp = timestamp / 1000; // microsegundos a milisegundos
+	        }
+	        return LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp), ZoneId.of("America/Bogota"));
+	    }
 
 
 	    
-	    @GetMapping("/debug-milton")
-	    public ResponseEntity<String> debugMilton() {
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+	    @GetMapping("/ventas-no-registradas")
+	    public ResponseEntity<?> getVentasNoRegistradas(@RequestParam(defaultValue = "100") int limit) {
 	        try {
-	            String response = binanceService.getSpotOrders("MILTON", "TRXUSDT", 50);
-	            return ResponseEntity.ok(response);
+	            ClasificacionMovimientos movimientos = obtenerMovimientosClasificados(limit);
+	            return ResponseEntity.ok(movimientos.ventas);
 	        } catch (Exception e) {
-	            return ResponseEntity.internalServerError().body("{\"error\": \"" + e.getMessage() + "\"}");
+	            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+	                .body("{\"error\":\"" + e.getMessage() + "\"}");
 	        }
 	    }
 
 
+	    @GetMapping("/traspasos-no-registrados")
+	    public ResponseEntity<List<TransaccionesDTO>> getTraspasosNoRegistrados(
+	            @RequestParam(defaultValue = "100") int limit) {
+	        try {
+	            ClasificacionMovimientos movimientos = obtenerMovimientosClasificados(limit);
+	            return ResponseEntity.ok(movimientos.traspasos);
+	        } catch (Exception e) {
+	            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+	                    .body(new ArrayList<>());
+	        }
+	    }
 
-	    
 
 }
-
