@@ -31,43 +31,29 @@ public class OrderP2PServiceImpl implements OrderP2PService {
 
 	@Autowired
 	private AccountBinanceRepository accountBinanceRepository;
-	
 
 	@Override
-	public List<OrderP2PDto> showOrderP2PToday(String account) {
-		LocalDate date = getTodayDate();
+	public List<OrderP2PDto> showOrderP2PToday(String account, LocalDate today) {
+		LocalDate date = today;
 		List<OrderP2PDto> ordenesP2P = getOrderP2P(account);
 		ordenesP2P = getOrderP2pCompleted(ordenesP2P);
 		ordenesP2P = getOrderP2pByDate(ordenesP2P, date);
-		ordenesP2P = assignAccountIfExists(ordenesP2P, account);
 		return ordenesP2P;
 	}
-	
+
 	@Override
 	public List<OrderP2PDto> showOrderP2PByDateRange(String account, LocalDate fechaInicio, LocalDate fechaFin) {
 	    // Obtén todas las órdenes P2P en el rango de fechas
 	    List<OrderP2PDto> ordenesP2P = getAllOrderP2P(account, fechaInicio, fechaFin);
-	    
-	    // Filtra las órdenes P2P que ya han sido convertidas a SaleP2P
-	    List<String> convertedOrderNumbers = saleP2PRepository.findAll().stream()
-	            .map(SaleP2P::getNumberOrder)
-	            .collect(Collectors.toList());
-	    
 	    // Filtra las órdenes P2P, excluyendo las que ya están en SaleP2P
-	    ordenesP2P = ordenesP2P.stream()
-	            .filter(order -> !convertedOrderNumbers.contains(order.getOrderNumber()))
-	            .collect(Collectors.toList());
-
+	    ordenesP2P = filterNewsSales(ordenesP2P);
 	    // Filtra las órdenes que ya han sido completadas
 	    ordenesP2P = getOrderP2pCompleted(ordenesP2P);
-	    
 	    // Asigna la cuenta asociada a la orden
 	    ordenesP2P = assignAccountIfExists(ordenesP2P, account);
-	    
 	    return ordenesP2P;
 	}
 
-	
 	@Override
 	public List<OrderP2PDto> showAllOrderP2(String account) {
 		  List<OrderP2PDto> ordenesP2P = getOrderP2P(account);
@@ -75,7 +61,19 @@ public class OrderP2PServiceImpl implements OrderP2PService {
 		    ordenesP2P = assignAccountIfExists(ordenesP2P, account);
 		    return ordenesP2P;
 	}
-	
+
+	private List<OrderP2PDto> filterNewsSales(List<OrderP2PDto> ordenesP2P) {
+		  List<String> convertedOrderNumbers = saleP2PRepository.findAll().stream()
+		            .map(SaleP2P::getNumberOrder)
+		            .collect(Collectors.toList());
+		    
+		    // Filtra las órdenes P2P, excluyendo las que ya están en SaleP2P
+		    ordenesP2P = ordenesP2P.stream()
+		            .filter(order -> !convertedOrderNumbers.contains(order.getOrderNumber()))
+		            .collect(Collectors.toList());
+		return ordenesP2P;
+	}
+
 	private List<OrderP2PDto> assignAccountIfExists(List<OrderP2PDto> ordenes, String accountName) {
 	    // Buscar la cuenta de Binance por nombre
 	    AccountBinance accountBinance = accountBinanceRepository.findByName(accountName);
@@ -100,7 +98,6 @@ public class OrderP2PServiceImpl implements OrderP2PService {
 	            // Agrega más modificaciones aquí si necesitas otros valores de sale
 	        }
 	    });
-
 	    return ordenes;
 	}
 	
@@ -167,8 +164,4 @@ public class OrderP2PServiceImpl implements OrderP2PService {
 
 		    return date1.equals(date2);
 	}
-	
-	 private LocalDate getTodayDate() {
-	        return LocalDate.now();
-	    }
 }

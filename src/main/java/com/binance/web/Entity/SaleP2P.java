@@ -41,12 +41,11 @@ public class SaleP2P {
     )
     @JsonIgnore
     private List<AccountCop> accountCops;  // Cambié de "accountCop" a una lista de cuentas
-
     private String nameAccount;
-    
     @ManyToOne
     @JoinColumn(name = "binance_account_id")
     private AccountBinance binanceAccount;
+    private Double utilidad;
 
 }
 

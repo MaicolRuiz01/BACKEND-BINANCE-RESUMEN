@@ -8,6 +8,7 @@ import lombok.Data;
 
 @Data
 public class SaleP2PDto {
+	private Integer id;
 	private String numberOrder;
 	private LocalDateTime date;
 	private Double commission;
