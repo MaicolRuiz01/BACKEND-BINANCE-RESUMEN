@@ -18,6 +18,8 @@ import java.time.LocalDateTime;
 public class Transaction {
 
 	private Long binanceId;
+    private String orderId;
+    @JsonProperty("transactionId")
     private String transactionId;
     private Double amount;
     @JsonDeserialize(using = CustomLocalDateTimeDeserializer.class)
@@ -32,13 +34,7 @@ public class Transaction {
 
     // Getters y setters
 
-    public String getTransactionId() {
-        return transactionId;
-    }
-
-    public void setTransactionId(String transactionId) {
-        this.transactionId = transactionId;
-    }
+    
 
     public Double getAmount() {
         return amount;
