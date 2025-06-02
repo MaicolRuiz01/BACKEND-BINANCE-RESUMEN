@@ -44,6 +44,10 @@ public class BinanceService {
                      .collect(Collectors.toList());
     }
 
+    
+    
+    
+    //metodo para obtener los movimientos de binancepay las que se hacen por correo
 
     public String getPaymentHistory(String account) {
         try {
@@ -64,6 +68,12 @@ public class BinanceService {
             return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
         }
     }
+    
+    
+    
+    
+    
+    
 
     public String getP2POrdersInRange(String account, long startTime, long endTime) {
         try {
@@ -262,7 +272,7 @@ public class BinanceService {
         }
     }
 
-
+    //
     public String getSpotOrders(String account, String symbol, int limit) {
         try {
             String[] credentials = getApiCredentials(account);
@@ -286,7 +296,7 @@ public class BinanceService {
             return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
         }
     }
-
+  //estp es para futures
     public String getFuturesOrders(String account, String symbol, int limit) {
         try {
             String[] credentials = getApiCredentials(account);
@@ -310,7 +320,7 @@ public class BinanceService {
             return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
         }
     }
-
+    //estp es para futures
     public String getFuturesPositions(String account) {
         try {
             String[] credentials = getApiCredentials(account);

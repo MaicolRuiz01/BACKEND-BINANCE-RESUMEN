@@ -24,38 +24,43 @@ public class TransaccionesServiceImpl implements TransaccionesService {
     }
 
     @Override
-	public Transacciones guardarTransaccion(TransaccionesDTO dto) throws IllegalArgumentException {
-	// Buscar cuentaTo por address
-	Optional<AccountBinance> cuentaToOpt = accountBinanceRepository.findAll().stream()
-	.filter(a -> a.getAddress() != null && a.getAddress().equals(dto.getCuentaTo()))
-	.findFirst();
+    public Transacciones guardarTransaccion(TransaccionesDTO dto) throws IllegalArgumentException {
+        AccountBinance cuentaTo;
+        AccountBinance cuentaFrom = accountBinanceRepository.findByName(dto.getCuentaFrom());
 
-	// Buscar cuentaFrom por name
-	AccountBinance cuentaFrom = accountBinanceRepository.findByName(dto.getCuentaFrom());
+        if (dto.getTipo().equalsIgnoreCase("BINANCEPAY")) {
+            cuentaTo = accountBinanceRepository.findByUserBinance(dto.getCuentaTo());
+        } else {
+            Optional<AccountBinance> cuentaToOpt = accountBinanceRepository.findAll().stream()
+                .filter(a -> a.getAddress() != null && a.getAddress().equals(dto.getCuentaTo()))
+                .findFirst();
+            cuentaTo = cuentaToOpt.orElse(null);
+        }
 
-	if (cuentaToOpt.isEmpty() || cuentaFrom == null) {
-		throw new IllegalArgumentException("CuentaTo o CuentaFrom no encontrada");
-	}
+        if (cuentaTo == null || cuentaFrom == null) {
+            throw new IllegalArgumentException("CuentaTo o CuentaFrom no encontrada");
+        }
 
-	AccountBinance cuentaTo = cuentaToOpt.get();
+        Transacciones transaccion = new Transacciones();
+        transaccion.setCantidad(dto.getMonto());
+        transaccion.setIdtransaccion(dto.getIdtransaccion());
+        transaccion.setFecha(dto.getFecha());
+        transaccion.setTipo(dto.getTipo());
+        transaccion.setCuentaTo(cuentaTo);
+        transaccion.setCuentaFrom(cuentaFrom);
 
-	Transacciones transaccion = new Transacciones();
-	transaccion.setCantidad(dto.getMonto());
-	transaccion.setIdtransaccion(dto.getIdtransaccion());
-	transaccion.setFecha(dto.getFecha());
-	transaccion.setTipo(dto.getTipo());
-	transaccion.setCuentaTo(cuentaTo);
-	transaccion.setCuentaFrom(cuentaFrom);
-	
-	
-	Double montoTo= cuentaTo.getBalance();
-	Double montoFrom = cuentaFrom.getBalance();
-	cuentaTo.setBalance(montoTo + dto.getMonto());
-	cuentaFrom.setBalance(montoFrom-dto.getMonto());
-	accountBinanceRepository.save(cuentaTo);
-	accountBinanceRepository.save(cuentaFrom);
+        // Ajustar balances
+        Double montoTo = cuentaTo.getBalance();
+        Double montoFrom = cuentaFrom.getBalance();
 
-	return transaccionesRepository.save(transaccion);
-}
+        cuentaTo.setBalance(montoTo + dto.getMonto());
+        cuentaFrom.setBalance(montoFrom - dto.getMonto());
+
+        accountBinanceRepository.save(cuentaTo);
+        accountBinanceRepository.save(cuentaFrom);
+
+        return transaccionesRepository.save(transaccion);
+    }
+
 
 }

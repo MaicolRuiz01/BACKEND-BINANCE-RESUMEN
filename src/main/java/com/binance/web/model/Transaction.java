@@ -19,6 +19,8 @@ public class Transaction {
 
 	private Long binanceId;
     private String orderId;
+    @JsonProperty("transactionId")
+    private String transactionId;
     private Double amount;
     @JsonDeserialize(using = CustomLocalDateTimeDeserializer.class)
     private LocalDateTime transactionTime;
@@ -32,13 +34,7 @@ public class Transaction {
 
     // Getters y setters
 
-    public String getTransactionId() {
-        return orderId;
-    }
-
-    public void setTransactionId(String orderId) {
-        this.orderId = orderId;
-    }
+    
 
     public Double getAmount() {
         return amount;
