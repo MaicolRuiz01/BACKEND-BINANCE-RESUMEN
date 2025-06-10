@@ -23,6 +23,5 @@ public class PurchaseRate {
 	private Integer id;
 	private LocalDateTime date;
 	private Double dolares;
-	private Double Pesos;
 	private Double rate;
 }
