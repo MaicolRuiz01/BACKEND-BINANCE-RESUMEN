@@ -7,7 +7,7 @@ import com.binance.web.Entity.Supplier;
 
 public interface SupplierService {
 	void saveSupplier(Supplier supplier);
-	void subtractSupplierDebt(Double pesosCop, String taxType, LocalDate date);
+	void subtractSupplierDebt(Double pesosCop, Integer supplierId, Integer accountCopId);
 	Double subtractAllSalesFromSupplier();
 	Supplier getSupplierById(int id);
 	void addBuyDollars(BuyDollars buyDollars);

@@ -6,4 +6,6 @@ public interface BuyDollarsService {
 
 	BuyDollars createBuyDollars(BuyDollarsDto buyDollarsDto);
 
+	BuyDollars getLastBuyDollars();
+
 }

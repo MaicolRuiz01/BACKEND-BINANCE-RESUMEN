@@ -50,7 +50,7 @@ public class OrderP2PServiceImpl implements OrderP2PService {
 	    // Filtra las órdenes que ya han sido completadas
 	    ordenesP2P = getOrderP2pCompleted(ordenesP2P);
 	    // Asigna la cuenta asociada a la orden
-	    ordenesP2P = assignAccountIfExists(ordenesP2P, account);
+//	    ordenesP2P = assignAccountIfExists(ordenesP2P, account);
 	    return ordenesP2P;
 	}
 
@@ -58,7 +58,7 @@ public class OrderP2PServiceImpl implements OrderP2PService {
 	public List<OrderP2PDto> showAllOrderP2(String account) {
 		  List<OrderP2PDto> ordenesP2P = getOrderP2P(account);
 		    ordenesP2P = getOrderP2pCompleted(ordenesP2P);
-		    ordenesP2P = assignAccountIfExists(ordenesP2P, account);
+//		    ordenesP2P = assignAccountIfExists(ordenesP2P, account);
 		    return ordenesP2P;
 	}
 
@@ -74,32 +74,32 @@ public class OrderP2PServiceImpl implements OrderP2PService {
 		return ordenesP2P;
 	}
 
-	private List<OrderP2PDto> assignAccountIfExists(List<OrderP2PDto> ordenes, String accountName) {
-	    // Buscar la cuenta de Binance por nombre
-	    AccountBinance accountBinance = accountBinanceRepository.findByName(accountName);
-	    
-	    if (accountBinance == null) {
-	        // Si no se encuentra la cuenta, devolver las órdenes sin cambios
-	        return ordenes;
-	    }
-	    // 1. Obtener todas las ventas asociadas a la cuenta de Binance
-	    List<SaleP2P> salesByAccount = saleP2PRepository.findByBinanceAccount(accountBinance);
-
-	    // Convertir la lista de resultados en un Mapa para búsqueda O(1)
-	    Map<String, SaleP2P> saleMap = salesByAccount.stream()
-	        .collect(Collectors.toMap(sale -> String.valueOf(sale.getNumberOrder()), sale -> sale));
-
-	    // Recorrer las órdenes y asignar la cuenta si existe en el mapa
-	    ordenes.forEach(order -> {
-	        SaleP2P sale = saleMap.get(order.getOrderNumber());
-	        if (sale != null) {
-	            order.setNameAccount(sale.getNameAccount()); // Asignar el nombre de la cuenta
-	            order.setAccountAmount(sale.getPesosCop()); // Asignar el monto de la cuenta asociada
-	            // Agrega más modificaciones aquí si necesitas otros valores de sale
-	        }
-	    });
-	    return ordenes;
-	}
+//	private List<OrderP2PDto> assignAccountIfExists(List<OrderP2PDto> ordenes, String accountName) {
+//	    // Buscar la cuenta de Binance por nombre
+//	    AccountBinance accountBinance = accountBinanceRepository.findByName(accountName);
+//	    
+//	    if (accountBinance == null) {
+//	        // Si no se encuentra la cuenta, devolver las órdenes sin cambios
+//	        return ordenes;
+//	    }
+//	    // 1. Obtener todas las ventas asociadas a la cuenta de Binance
+//	    List<SaleP2P> salesByAccount = saleP2PRepository.findByBinanceAccount(accountBinance);
+//
+//	    // Convertir la lista de resultados en un Mapa para búsqueda O(1)
+//	    Map<String, SaleP2P> saleMap = salesByAccount.stream()
+//	        .collect(Collectors.toMap(sale -> String.valueOf(sale.getNumberOrder()), sale -> sale));
+//
+//	    // Recorrer las órdenes y asignar la cuenta si existe en el mapa
+//	    ordenes.forEach(order -> {
+//	        SaleP2P sale = saleMap.get(order.getOrderNumber());
+//	        if (sale != null) {
+//	            order.setNameAccount(sale.getNameAccount()); // Asignar el nombre de la cuenta
+//	            order.setAccountAmount(sale.getPesosCop()); // Asignar el monto de la cuenta asociada
+//	            // Agrega más modificaciones aquí si necesitas otros valores de sale
+//	        }
+//	    });
+//	    return ordenes;
+//	}
 	
 	private List<OrderP2PDto> getOrderP2P(String account) {
 		// Llamamos al servicio que obtiene el JSON de Binance

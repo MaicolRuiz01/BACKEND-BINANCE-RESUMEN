@@ -23,6 +23,12 @@ public class BalanceController {
 		return ResponseEntity.ok(balances);
 	}
 
+	@GetMapping("/live")
+	public ResponseEntity<BalanceDTO> getLiveBalanceToday() {
+		BalanceDTO dto = balanceService.showLiveBalanceToday();
+		return ResponseEntity.ok(dto);
+	}
+
 	@PostMapping("/save")
 	public ResponseEntity<Void> createBalance(
 			@RequestParam(DATE2) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {

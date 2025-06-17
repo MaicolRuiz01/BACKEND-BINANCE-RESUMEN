@@ -5,5 +5,8 @@ import java.util.List;
 
 public interface BalanceService {
 	public void createBalance(LocalDate date);
-	public List<BalanceDTO> showBalances();
+
+	List<BalanceDTO> showBalances();
+
+	BalanceDTO showLiveBalanceToday();
 }

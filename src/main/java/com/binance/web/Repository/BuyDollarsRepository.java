@@ -13,4 +13,5 @@ import com.binance.web.Entity.BuyDollars;
 public interface BuyDollarsRepository extends JpaRepository<BuyDollars, Integer>{
 	@Query(value = "SELECT * FROM buy_dollars WHERE DATE(date) = DATE(:fecha)", nativeQuery = true)
 	List<BuyDollars> findByDateWithoutTime(LocalDate fecha);
+	BuyDollars findTopByOrderByDateDesc();
 }
