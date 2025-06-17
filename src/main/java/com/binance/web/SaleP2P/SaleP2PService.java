@@ -13,6 +13,6 @@ public interface SaleP2PService {
     void updateSaleP2P(Integer id, SaleP2P sale);
     void deleteSaleP2P(Integer id);
     List<SaleP2P> obtenerVentasEntreFechas(LocalDateTime inicio, LocalDateTime fin);
-    String processAssignAccountCop(SaleP2PDto sale);
+    String processAssignAccountCop(Integer saleId, List<AssignAccountDto> accounts);
     void saveUtilitydefinitive(List<SaleP2P> rangeSales, Double averageRate);
 }

@@ -3,7 +3,6 @@ package com.binance.web.SaleP2P;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -16,12 +15,12 @@ import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.AccountCop;
 import com.binance.web.Entity.PurchaseRate;
 import com.binance.web.Entity.SaleP2P;
+import com.binance.web.Entity.SaleP2pAccountCop;
 import com.binance.web.OrderP2P.OrderP2PDto;
 import com.binance.web.OrderP2P.OrderP2PService;
 import com.binance.web.Repository.AccountBinanceRepository;
 import com.binance.web.Repository.PurchaseRateRepository;
 import com.binance.web.Repository.SaleP2PRepository;
-import com.binance.web.Supplier.SupplierService;
 
 @Service
 public class SaleP2PServiceImpl implements SaleP2PService {
@@ -34,9 +33,6 @@ public class SaleP2PServiceImpl implements SaleP2PService {
 
 	@Autowired
 	private AccountCopService accountCopService;
-
-	@Autowired
-	private SupplierService supplierService;
 
 	@Autowired
 	private OrderP2PService orderP2PService;
@@ -124,12 +120,15 @@ public class SaleP2PServiceImpl implements SaleP2PService {
 		return utilidad;
 	}
 
-	private SaleP2P generateNewUtility(SaleP2P sale) {
-		if (sale.getAccountCops().isEmpty()) {
-			Double impuesto = sale.getPesosCop() * 0.004;
-			sale.setUtilidad(sale.getUtilidad() + impuesto);
+	private Double generateTax(SaleP2P sale) {
+		Double impuesto = 0.0;
+		List<SaleP2pAccountCop> accountCop = sale.getAccountCopsDetails();
+		for (SaleP2pAccountCop account : accountCop) {
+			if (account.getAccountCop() == null) {
+				impuesto += account.getAmount() * 0.004;
+			}
 		}
-		return sale;
+		return impuesto;
 	}
 
 	public void saveUtilitydefinitive(List<SaleP2P> rangeSales, Double averageRate) {
@@ -140,48 +139,42 @@ public class SaleP2PServiceImpl implements SaleP2PService {
 			pesosUsdtVendidos = sale.getPesosCop();
 			usdtVendidos = sale.getDollarsUs() + sale.getCommission();
 			utilidad = pesosUsdtVendidos - (usdtVendidos * averageRate);
-			if (!sale.getAccountCops().isEmpty()) {
-				utilidad = utilidad - (sale.getPesosCop() * 0.004);
-			}
+			utilidad = utilidad - generateTax(sale);
 			sale.setUtilidad(utilidad);
 			saleP2PRepository.save(sale);
 		}
 	}
 
 	@Override
-	public String processAssignAccountCop(SaleP2PDto saleDto) {
-		SaleP2P sale = saleP2PRepository.findById(saleDto.getId()).orElse(null);
+	public String processAssignAccountCop(Integer saleId, List<AssignAccountDto> accounts) {
+		SaleP2P sale = saleP2PRepository.findById(saleId).orElse(null);
 		if (sale == null)
-			return "No se realizo la asignacion de cuenta, No se encontro la venta con id" + saleDto.getId();
-
-		if (!saleDto.getAccountCopIds().isEmpty()) {
-			sale = assignAccountCop(saleDto.getAccountCopIds(), sale);
+			return "No se realizo la asignacion de cuenta, No se encontro la venta con id" + saleId;
+		if (!accounts.isEmpty()) {
+			sale = assignAccountCop(accounts, sale);
 		}
-		accountBinanceService.subtractBalance(saleDto.getNameAccountBinance(), sale.getDollarsUs());
-		if (saleDto.getAccountCopIds() != null) {
-			for (Integer accountId : saleDto.getAccountCopIds()) {
-				Double amount = saleDto.getAccountAmounts().get(accountId);
-				AccountCop account = accountCopService.findByIdAccountCop(accountId);
-				if (account != null && amount != null) {
-					account.setBalance(account.getBalance() + amount);
-					accountCopService.updateAccountCop(account.getId(), account);
-				}
-			}
-		}
-		sale = generateNewUtility(sale);
+		accountBinanceService.subtractBalance(sale.getBinanceAccount().getName(), sale.getDollarsUs());
+		sale.setUtilidad(sale.getUtilidad() + generateTax(sale));
 		saleP2PRepository.save(sale);
 		return "Asignacion de cuenta realizada con exito";
 	}
 
-	private SaleP2P assignAccountCop(List<Integer> accountCopIds, SaleP2P sale) {
-		List<AccountCop> accountCops = new ArrayList<>();
-		for (Integer accountCopId : accountCopIds) {
-			AccountCop accountCop = accountCopService.findByIdAccountCop(accountCopId);
-			if (accountCop != null) {
-				accountCops.add(accountCop);
+	private SaleP2P assignAccountCop(List<AssignAccountDto> accounts, SaleP2P sale) {
+		List<SaleP2pAccountCop> accountCops = new ArrayList<>();
+		for (AssignAccountDto account : accounts) {
+			SaleP2pAccountCop assignAccount = new SaleP2pAccountCop();
+			assignAccount.setSaleP2p(sale);
+			assignAccount.setAmount(account.getAmount());
+			assignAccount.setNameAccount(account.getNameAccount());
+			if (account.getAccountCop() != null) {
+				AccountCop accountCop = accountCopService.findByIdAccountCop(account.getAccountCop());
+				assignAccount.setAccountCop(accountCop);
+				accountCop.setBalance(accountCop.getBalance() + account.getAmount());
+				accountCopService.saveAccountCop(accountCop);
 			}
+			accountCops.add(assignAccount);
 		}
-		sale.setAccountCops(accountCops);
+		sale.setAccountCopsDetails(accountCops);
 		return sale;
 	}
 
@@ -204,19 +197,11 @@ public class SaleP2PServiceImpl implements SaleP2PService {
 		dto.setCommission(sale.getCommission());
 		dto.setPesosCop(sale.getPesosCop());
 		dto.setDollarsUs(sale.getDollarsUs());
-		dto.setNameAccount(sale.getNameAccount());
 		dto.setNameAccountBinance(getBinanceAccountName(sale));
-		dto.setAccountCopIds(getAccountCopIds(sale));
 		return dto;
 	}
 
 	private String getBinanceAccountName(SaleP2P sale) {
 		return sale.getBinanceAccount() != null ? sale.getBinanceAccount().getName() : null;
-	}
-
-	private List<Integer> getAccountCopIds(SaleP2P sale) {
-		if (sale.getAccountCops() == null)
-			return Collections.emptyList();
-		return sale.getAccountCops().stream().map(AccountCop::getId).collect(Collectors.toList());
 	}
 }
