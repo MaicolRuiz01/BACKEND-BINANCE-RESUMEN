@@ -160,23 +160,36 @@ public class SaleP2PServiceImpl implements SaleP2PService {
 	}
 
 	private SaleP2P assignAccountCop(List<AssignAccountDto> accounts, SaleP2P sale) {
-		List<SaleP2pAccountCop> accountCops = new ArrayList<>();
-		for (AssignAccountDto account : accounts) {
-			SaleP2pAccountCop assignAccount = new SaleP2pAccountCop();
-			assignAccount.setSaleP2p(sale);
-			assignAccount.setAmount(account.getAmount());
-			assignAccount.setNameAccount(account.getNameAccount());
-			if (account.getAccountCop() != null) {
-				AccountCop accountCop = accountCopService.findByIdAccountCop(account.getAccountCop());
-				assignAccount.setAccountCop(accountCop);
-				accountCop.setBalance(accountCop.getBalance() + account.getAmount());
-				accountCopService.saveAccountCop(accountCop);
-			}
-			accountCops.add(assignAccount);
-		}
-		sale.setAccountCopsDetails(accountCops);
-		return sale;
+	    // Aseguramos que la lista ya está inicializada
+	    if (sale.getAccountCopsDetails() == null) {
+	        sale.setAccountCopsDetails(new ArrayList<>());
+	    } else {
+	        // Eliminar correctamente las relaciones inversas para evitar errores
+	        for (SaleP2pAccountCop acc : sale.getAccountCopsDetails()) {
+	            acc.setSaleP2p(null);
+	        }
+	        sale.getAccountCopsDetails().clear();
+	    }
+
+	    for (AssignAccountDto account : accounts) {
+	        SaleP2pAccountCop assignAccount = new SaleP2pAccountCop();
+	        assignAccount.setSaleP2p(sale);
+	        assignAccount.setAmount(account.getAmount());
+	        assignAccount.setNameAccount(account.getNameAccount());
+
+	        if (account.getAccountCop() != null) {
+	            AccountCop accountCop = accountCopService.findByIdAccountCop(account.getAccountCop());
+	            assignAccount.setAccountCop(accountCop);
+	            accountCop.setBalance(accountCop.getBalance() + account.getAmount());
+	            accountCopService.saveAccountCop(accountCop);
+	        }
+
+	        sale.getAccountCopsDetails().add(assignAccount);
+	    }
+
+	    return sale;
 	}
+
 
 	private SaleP2P assignAccountBinance(SaleP2P sale, String name) {
 		AccountBinance accountBinance = accountBinanceRepository.findByName(name);
@@ -192,6 +205,7 @@ public class SaleP2PServiceImpl implements SaleP2PService {
 
 	private SaleP2PDto convertToDto(SaleP2P sale) {
 		SaleP2PDto dto = new SaleP2PDto();
+		dto.setId(sale.getId());
 		dto.setNumberOrder(sale.getNumberOrder());
 		dto.setDate(sale.getDate());
 		dto.setCommission(sale.getCommission());

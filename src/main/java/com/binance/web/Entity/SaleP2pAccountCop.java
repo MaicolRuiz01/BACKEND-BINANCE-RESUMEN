@@ -24,7 +24,7 @@ public class SaleP2pAccountCop {
 	private String nameAccount;
 
 	@ManyToOne
-	@JoinColumn(name = "account_cop_id")
+	@JoinColumn(name = "account_cop_id", nullable = true) 
 	private AccountCop accountCop;
 
 	@ManyToOne

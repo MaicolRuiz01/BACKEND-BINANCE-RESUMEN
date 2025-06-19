@@ -1,5 +1,7 @@
 package com.binance.web.Supplier;
 
+import java.util.List;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -20,6 +22,12 @@ public class SupplierController {
 
 	@Autowired
 	private SupplierService supplierService;
+	
+	@GetMapping(produces = "application/json")
+	public ResponseEntity<List<Supplier>> getAllSuppliers(){
+		List<Supplier> Suppliers = supplierService.findAllSuppliers();
+		return ResponseEntity.ok(Suppliers);
+	}
 
 	@GetMapping("/{id}")
 	public ResponseEntity<Supplier> getSupplierById(@PathVariable Integer id) {

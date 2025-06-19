@@ -85,4 +85,10 @@ public class SupplierServiceImpl implements SupplierService {
 		existingSupplier.setLastPaymentDate(supplier.getLastPaymentDate());
 		return supplierRepository.save(existingSupplier);
 	}
+
+	@Override
+	public List<Supplier> findAllSuppliers() {
+		List<Supplier> suppliers = supplierRepository.findAll();
+		return suppliers;
+	}
 }
