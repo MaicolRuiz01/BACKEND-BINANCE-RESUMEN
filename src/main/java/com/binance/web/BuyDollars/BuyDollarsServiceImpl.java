@@ -30,8 +30,8 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 	@Override
 	@Transactional
 	public BuyDollars createBuyDollars(BuyDollarsDto dto) {
-		Supplier supplier = supplierRepository.findById(1)
-				.orElseThrow(() -> new RuntimeException("Supplier with ID 1 not found"));
+		Supplier supplier = supplierRepository.findById(dto.getSupplierId())
+				.orElseThrow(() -> new RuntimeException("Supplier with ID " + dto.getSupplierId() + "not found"));
 
 		AccountBinance accountBinance = accountBinanceRepository.findById(dto.getAccountBinanceId())
 				.orElseThrow(() -> new RuntimeException("Account not found"));

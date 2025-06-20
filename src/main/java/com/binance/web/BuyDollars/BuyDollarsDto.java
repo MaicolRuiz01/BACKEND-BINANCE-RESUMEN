@@ -19,5 +19,5 @@ public class BuyDollarsDto {
     private String idDeposit;
     private Double pesos;
     private Integer accountBinanceId;
-	
+	private Integer supplierId;
 }

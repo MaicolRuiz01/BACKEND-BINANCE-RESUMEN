@@ -36,8 +36,8 @@ public class SaleP2PController {
 	@PostMapping("/assign-account-cop")
 	public ResponseEntity<String> assignAccountCop(@RequestParam Integer saleId,
 			@RequestBody List<AssignAccountDto> accounts) {
-		String result = saleP2PService.processAssignAccountCop(saleId, accounts);
-		return ResponseEntity.ok(result);
+		saleP2PService.processAssignAccountCop(saleId, accounts);
+		return ResponseEntity.noContent().build();
 	}
 
 	@PutMapping("/{id}")
