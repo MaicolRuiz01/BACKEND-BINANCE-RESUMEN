@@ -62,4 +62,29 @@ public class AccountBinanceController {
         AccountBinance account = accountBinanceService.findByName(name);
         return account != null ? ResponseEntity.ok(account.getBalance()) : ResponseEntity.notFound().build();
     }
+    
+    @GetMapping("/balance-usdt")
+    public ResponseEntity<String> getUSDTBalance(@RequestParam String name) {
+        System.out.println("🟢 Consultando balance USDT de: " + name);
+        String usdtBalance = accountBinanceService.getUSDTBalance(name);
+        return ResponseEntity.ok(usdtBalance);
+    }
+    
+    @GetMapping("/balance-estimado")
+    public ResponseEntity<Double> getEstimatedBalance(@RequestParam String name) {
+        Double estimate = accountBinanceService.getEstimatedUSDTBalance(name);
+        if (estimate == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        }
+        return ResponseEntity.ok(estimate);
+    }
+    
+    @GetMapping("/funding-usdt")
+    public ResponseEntity<Double> getFundingUsdt(@RequestParam String name) {
+        Double bal = accountBinanceService.getFundingUSDTBalance(name);
+        return (bal != null)
+             ? ResponseEntity.ok(bal)
+             : ResponseEntity.notFound().build();
+    }
+
 }

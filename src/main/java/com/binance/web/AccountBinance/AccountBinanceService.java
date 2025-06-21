@@ -12,4 +12,10 @@ public interface AccountBinanceService {
     void deleteAccountBinance(Integer id);
     AccountBinance findByName(String name);
     void subtractBalance(String name, Double amount);
+    String getUSDTBalance(String name);
+    Double getEstimatedUSDTBalance(String name);
+    
+    //esto para borrar
+    Double getFundingUSDTBalance(String name);
+    
 }

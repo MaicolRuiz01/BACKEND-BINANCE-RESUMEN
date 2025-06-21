@@ -10,6 +10,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import com.binance.web.Entity.AccountBinance;
+import com.binance.web.Entity.AccountCop;
 import com.binance.web.Entity.SaleP2P;
 
 @Repository
@@ -24,5 +25,6 @@ public interface SaleP2PRepository extends JpaRepository<SaleP2P, Integer> {
 			@Param("binanceAccountId") Integer binanceAccountId);
 
 	List<SaleP2P> findByDateBetween(LocalDateTime start, LocalDateTime end);
+
 
 }

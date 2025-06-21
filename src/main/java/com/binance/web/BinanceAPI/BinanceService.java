@@ -11,14 +11,17 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -458,7 +461,386 @@ public class BinanceService {
 	    return null; // si falla o no encuentra precio
 	}
 
+	/*
+	 * public String getGeneralBalance(String account) { try { String[] credentials
+	 * = getApiCredentials(account); if (credentials == null) return
+	 * "{\"error\": \"Cuenta no válida.\"}";
+	 * 
+	 * String apiKey = credentials[0]; String secretKey = credentials[1];
+	 * 
+	 * long timestamp = getServerTime(); String query = "timestamp=" + timestamp +
+	 * "&recvWindow=60000"; String signature = hmacSha256(secretKey, query); String
+	 * url = "https://api.binance.com/api/v3/account?" + query + "&signature=" +
+	 * signature;
+	 * 
+	 * // Realiza la solicitud GET al endpoint de cuenta general String response =
+	 * sendBinanceRequestWithProxy(url, apiKey); JsonObject accountData =
+	 * JsonParser.parseString(response).getAsJsonObject();
+	 * 
+	 * JsonArray balances = accountData.getAsJsonArray("balances");
+	 * 
+	 * double totalBalanceInUSDT = 0.0;
+	 * 
+	 * // Recorremos todos los balances for (int i = 0; i < balances.size(); i++) {
+	 * JsonObject balance = balances.get(i).getAsJsonObject(); String asset =
+	 * balance.get("asset").getAsString();
+	 * 
+	 * // Solo continuamos si el balance no es cero if
+	 * (!balance.get("free").getAsString().equals("0.00000000")) { double amount =
+	 * balance.get("free").getAsDouble();
+	 * 
+	 * // Si la moneda es USDT, la agregamos directamente if
+	 * (asset.equalsIgnoreCase("USDT")) { totalBalanceInUSDT += amount; } else { //
+	 * Si no es USDT, obtenemos su precio actual en USDT double priceInUSDT =
+	 * getPriceOfAssetInUSDT(asset); totalBalanceInUSDT += amount * priceInUSDT; } }
+	 * }
+	 * 
+	 * return "{\"total_balance\": \"" + totalBalanceInUSDT + "\"}"; // Total
+	 * balance en USDT
+	 * 
+	 * } catch (Exception e) { return "{\"error\": \"Error interno: " +
+	 * e.getMessage() + "\"}"; } }
+	 * 
+	 * private double getPriceOfAssetInUSDT(String asset) { try { // Hacemos una
+	 * solicitud a la API de Binance para obtener el precio actual de la moneda en
+	 * USDT String url = "https://api.binance.com/api/v3/ticker/price?symbol=" +
+	 * asset + "USDT"; String response = sendBinanceRequestWithProxy(url, null);
+	 * JsonObject priceData = JsonParser.parseString(response).getAsJsonObject();
+	 * return priceData.get("price").getAsDouble(); } catch (Exception e) { return
+	 * 0.0; // Si no conseguimos el precio, lo devolvemos como 0 } }
+	 */
+
+
+	public String getGeneralBalance(String account) {
+	    try {
+	        // 1) Credenciales
+	        String[] creds = getApiCredentials(account);
+	        if (creds == null) {
+	            return "{\"error\": \"Cuenta no válida.\"}";
+	        }
+
+	        // 2) Spot
+	        String spotResp = getSpotBalance(account);
+	        JsonObject spotJson = JsonParser.parseString(spotResp).getAsJsonObject();
+	        double spotBalance = getJsonDouble(spotJson, "totalBalance");
+
+	        // 3) Futures
+	        String futResp = getFuturesBalance(account);
+	        JsonObject futJson = JsonParser.parseString(futResp).getAsJsonObject();
+	        double futuresBalance = getJsonDouble(futJson, "totalBalance");
+
+	        // 4) Funding (free + freeze)
+	        double fundingBalance = getFundingAssetBalance(account, "USDT");
+
+	        // 5) Sumar todo
+	        double totalBalance = spotBalance + futuresBalance + fundingBalance;
+
+	        // 6) Devolver JSON
+	        return String.valueOf(totalBalance);
+
+
+	    } catch (Exception e) {
+	        return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
+	    }
+	}
+
+
+	// Método auxiliar para manejar conversiones de valores de JSON a Double con validación
+	private double getJsonDouble(JsonObject object, String key) {
+	    if (object.has(key) && !object.get(key).isJsonNull()) {
+	        return object.get(key).getAsDouble();
+	    } else {
+	        // Si el valor no existe o es null, devuelve 0.0
+	        System.out.println("Clave '" + key + "' no existe o es null.");
+	        return 0.0;
+	    }
+	}
+
+	
+
+
+	private String getSpotBalance(String account) {
+	    try {
+	        String[] credentials = getApiCredentials(account);
+	        if (credentials == null) return "{\"error\": \"Cuenta no válida.\"}";
+
+	        String apiKey = credentials[0];
+	        String secretKey = credentials[1];
+
+	        long timestamp = getServerTime();
+	        String query = "timestamp=" + timestamp + "&recvWindow=60000";
+	        String signature = hmacSha256(secretKey, query);
+	        String url = "https://api.binance.com/api/v3/account?" + query + "&signature=" + signature;
+
+	        String response = sendBinanceRequestWithProxy(url, apiKey);
+
+	        // Verificar si la respuesta es válida y no nula
+	        if (response == null || response.isEmpty()) {
+	            return "{\"error\": \"La respuesta de Spot Wallet está vacía o nula.\"}";
+	        }
+
+	        // Parseamos la respuesta como un JSON Object
+	        JsonObject accountData = JsonParser.parseString(response).getAsJsonObject();
+	        if (accountData == null || !accountData.isJsonObject()) {
+	            return "{\"error\": \"Error al analizar la respuesta de Spot Wallet.\"}";
+	        }
+
+	        // Verificar que la clave "balances" exista y que sea válida
+	        if (accountData.has("balances") && accountData.get("balances").isJsonArray()) {
+	            JsonArray balances = accountData.getAsJsonArray("balances");
+	            double totalBalance = 0;
+	            for (JsonElement element : balances) {
+	                JsonObject balance = element.getAsJsonObject();
+
+	                double freeBalance = getJsonDouble(balance, "free");
+	                double lockedBalance = getJsonDouble(balance, "locked");
+
+	                // Sumar balance disponible y bloqueado para obtener el balance total
+	                totalBalance += freeBalance + lockedBalance;
+	            }
+
+	            return "{\"totalBalance\": " + totalBalance + "}";
+	        } else {
+	            return "{\"error\": \"La clave 'balances' no se encuentra en la respuesta.\"}";
+	        }
+
+	    } catch (Exception e) {
+	        return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
+	    }
+	}
+
+
+
+
+
+	private String getFuturesBalance(String account) {
+	    try {
+	        String[] credentials = getApiCredentials(account);
+	        if (credentials == null) return "{\"error\": \"Cuenta no válida.\"}";
+
+	        String apiKey = credentials[0];
+	        String secretKey = credentials[1];
+
+	        long timestamp = getServerTime();
+	        String query = "timestamp=" + timestamp + "&recvWindow=60000";
+	        String signature = hmacSha256(secretKey, query);
+	        String url = "https://fapi.binance.com/fapi/v2/balance?" + query + "&signature=" + signature;
+
+	        String response = sendBinanceRequestWithProxy(url, apiKey);
+
+	        // Verificar si la respuesta es válida y no nula
+	        if (response == null || response.isEmpty()) {
+	            return "{\"error\": \"La respuesta de Futures Wallet está vacía o nula.\"}";
+	        }
+
+	        // Imprimir la respuesta para depuración
+	        System.out.println("Response Futures Wallet: " + response);
+
+	        // Parseamos la respuesta como un JSON Array
+	        JsonArray balanceArray = JsonParser.parseString(response).getAsJsonArray();
+	        if (balanceArray == null || balanceArray.size() == 0) {
+	            return "{\"error\": \"La respuesta de Futures Wallet está vacía.\"}";
+	        }
+
+	        double totalBalance = 0;
+	        for (JsonElement element : balanceArray) {
+	            JsonObject balance = element.getAsJsonObject();
+	            double availableBalance = balance.has("availableBalance") ? balance.get("availableBalance").getAsDouble() : 0;
+	            double balanceTotal = balance.has("balance") ? balance.get("balance").getAsDouble() : 0;
+
+	            // Sumar balance total, disponible
+	            totalBalance += balanceTotal + availableBalance;
+	        }
+
+	        return "{\"totalBalance\": " + totalBalance + "}";
+
+	    } catch (Exception e) {
+	        return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
+	    }
+	}
+
+
+	private double calculateTotalBalance(JsonObject balanceData) {
+	    double total = 0;
+
+	    // Si el balanceData contiene una lista de balances de spot o futuros, sumamos todos
+	    if (balanceData.has("balances")) {
+	        JsonArray balances = balanceData.getAsJsonArray("balances");
+	        for (int i = 0; i < balances.size(); i++) {
+	            JsonObject balance = balances.get(i).getAsJsonObject();
+	            double freeBalance = balance.get("free").getAsDouble();
+	            double lockedBalance = balance.get("locked").getAsDouble();
+
+	            // Sumar balance libre y bloqueado
+	            total += freeBalance + lockedBalance;
+	        }
+	    } else if (balanceData.has("totalWalletBalance")) {
+	        // En el caso de futuros, obtenemos el balance total de la wallet
+	        total = balanceData.get("totalWalletBalance").getAsDouble();
+	    }
+
+	    return total;
+	}
+
+
+
 	
 	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	public Double getEstimatedSpotBalance(String account) {
+	    try {
+	        // 1) Credenciales
+	        String[] creds = getApiCredentials(account);
+	        if (creds == null) throw new RuntimeException("Cuenta no válida");
+	        String apiKey = creds[0], secret = creds[1];
+
+	        // 2) Obtengo balances
+	        long ts = getServerTime();
+	        String q = "timestamp=" + ts + "&recvWindow=60000";
+	        String sig = hmacSha256(secret, q);
+	        String accUrl = "https://api.binance.com/api/v3/account?" + q + "&signature=" + sig;
+	        String rawAcc = sendBinanceRequestWithProxy(accUrl, apiKey);
+	        JsonArray balances = JsonParser
+	            .parseString(rawAcc)
+	            .getAsJsonObject()
+	            .getAsJsonArray("balances");
+
+	        // 3) Obtengo todos los precios USDT de golpe
+	        Map<String, Double> priceMap = fetchAllPriceUsdt();
+
+	        // 4) Sumo solo activos que valgan >= 1 USD
+	        double totalUsdt = 0.0;
+	        for (JsonElement el : balances) {
+	            JsonObject b = el.getAsJsonObject();
+	            double free   = b.get("free").getAsDouble();
+	            double locked = b.get("locked").getAsDouble();
+	            double qty    = free + locked;
+	            if (qty <= 0) continue;
+
+	            String asset = b.get("asset").getAsString();
+	            Double price = priceMap.get(asset);
+	            if (price == null) {
+	                // activo sin par USDT
+	                continue;
+	            }
+	            double valUsd = qty * price;
+	            if (valUsd < 1.0) {
+	                // imita “Ocultar activos inferiores a 1 USD”
+	                continue;
+	            }
+	            totalUsdt += valUsd;
+	        }
+
+	        return totalUsdt;
+	    } catch (Exception e) {
+	        throw new RuntimeException("Error al calcular balance estimado: " + e.getMessage(), e);
+	    }
+	}
+
+
+    /** 
+     * Consulta el precio de mercado de asset en USDT.
+     * Para USDT devuelve 1.0 directamente.
+     */
+	private double getPriceInUsdt(String asset) {
+	    if ("USDT".equalsIgnoreCase(asset)) {
+	        return 1.0;
+	    }
+	    String symbol = asset + "USDT";
+	    String url = "https://api.binance.com/api/v3/ticker/price?symbol=" + symbol;
+	    try {
+	        String resp = sendBinanceRequestWithProxy(url, null);
+	        JsonObject obj = JsonParser.parseString(resp).getAsJsonObject();
+	        return obj.get("price").getAsDouble();
+	    } catch (RuntimeException re) {
+	        // Si devuelve 400 o cualquier fallo, lo atrapamos y retornamos 0 para continuar
+	        System.out.println("⚠️ No pude obtener precio de " + symbol + ": " + re.getMessage());
+	        return 0.0;
+	    } catch (Exception e) {
+	        throw new RuntimeException("Error inesperado al pedir precio " + symbol, e);
+	    }
+	}
+	
+	/**
+	 * Llama a GET /api/v3/ticker/price (sin symbol) y construye un Map:
+	 *    key = símbolo base (ej. "BTC", "LINK", …)
+	 *    value = precio en USDT
+	 */
+	private Map<String, Double> fetchAllPriceUsdt() throws Exception {
+	    String url = "https://api.binance.com/api/v3/ticker/price";
+	    String resp = sendBinanceRequestWithProxy(url, null);
+	    JsonArray tickers = JsonParser.parseString(resp).getAsJsonArray();
+
+	    Map<String, Double> priceMap = new HashMap<>();
+	    for (JsonElement el : tickers) {
+	        JsonObject o = el.getAsJsonObject();
+	        String sym = o.get("symbol").getAsString();
+	        if (sym.endsWith("USDT")) {
+	            String asset = sym.substring(0, sym.length() - 4);
+	            double price = o.get("price").getAsDouble();
+	            priceMap.put(asset, price);
+	        }
+	    }
+	    // Aseguramos que USDT → 1.0
+	    priceMap.put("USDT", 1.0);
+	    return priceMap;
+	}
+	
+	public double getFundingAssetBalance(String account, String asset) {
+	    try {
+	        String[] creds = getApiCredentials(account);
+	        if (creds == null) throw new RuntimeException("Cuenta no válida");
+	        String apiKey    = creds[0];
+	        String secretKey = creds[1];
+
+	        long ts = getServerTime();
+	        String params    = "asset=" + asset + "&timestamp=" + ts + "&recvWindow=60000";
+	        String signature = hmacSha256(secretKey, params);
+
+	        URL url = new URL("https://api.binance.com/sapi/v1/asset/get-funding-asset");
+	        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+	        conn.setRequestMethod("POST");
+	        conn.setDoOutput(true);
+	        conn.setRequestProperty("X-MBX-APIKEY", apiKey);
+	        try (OutputStream os = conn.getOutputStream()) {
+	            os.write((params + "&signature=" + signature).getBytes(StandardCharsets.UTF_8));
+	        }
+
+	        if (conn.getResponseCode() != 200) {
+	            throw new RuntimeException("Error HTTP Funding Wallet: " + conn.getResponseCode());
+	        }
+
+	        String resp = new BufferedReader(new InputStreamReader(conn.getInputStream()))
+	                          .lines().collect(Collectors.joining());
+	        JsonArray arr = JsonParser.parseString(resp).getAsJsonArray();
+
+	        for (JsonElement el : arr) {
+	            JsonObject o = el.getAsJsonObject();
+	            if (asset.equalsIgnoreCase(o.get("asset").getAsString())) {
+	                double free   = o.get("free").getAsDouble();
+	                // aquí leo "freeze" en vez de "locked"
+	                double freeze = o.has("freeze")
+	                                ? o.get("freeze").getAsDouble()
+	                                : 0d;
+	                return free + freeze;
+	            }
+	        }
+	        return 0.0;
+	    } catch (Exception e) {
+	        throw new RuntimeException("Error al obtener Funding balance de " + asset + ": " + e.getMessage(), e);
+	    }
+	}
+
+
+
+
 
 }

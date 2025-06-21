@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.binance.web.Entity.AccountCop;
+import com.binance.web.Entity.SaleP2P;
 
 @RestController
 @RequestMapping("/cuenta-cop")
@@ -58,4 +59,10 @@ public class AccountCopController {
 		AccountCopService.deleteAccountCop(id);
 		return ResponseEntity.noContent().build();
 	}
+	
+	@GetMapping("/{id}/sales")
+    public ResponseEntity<List<SaleP2P>> getSalesByAccountCop(@PathVariable Integer id) {
+        List<SaleP2P> sales = AccountCopService.getSalesByAccountCopId(id);
+        return ResponseEntity.ok(sales);
+    }
 }
