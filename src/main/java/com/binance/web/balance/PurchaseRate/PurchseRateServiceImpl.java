@@ -38,8 +38,13 @@ public class PurchseRateServiceImpl implements PurchaseRateService {
 		saleP2PService.saveUtilitydefinitive(rangeSales, lastRate.getRate());
 
 		for (SaleP2P sale : rangeSales) {
-			dolaresVendidos += sale.getDollarsUs();
+		    if (sale.getDollarsUs() == null) {
+		        sale.setDollarsUs(0.0);  // O algún valor predeterminado que haga sentido
+		    }
+		    dolaresVendidos += sale.getDollarsUs();
 		}
+
+
 		Double dolaresSobrantes = lastRate.getDolares() - dolaresVendidos;
 		Double averageRate = ((dolaresSobrantes * lastRate.getRate()) + lastBuy.getPesos())
 				/ (dolaresSobrantes + lastBuy.getDollars());

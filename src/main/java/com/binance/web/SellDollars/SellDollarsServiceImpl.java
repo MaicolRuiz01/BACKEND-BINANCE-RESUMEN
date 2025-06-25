@@ -30,7 +30,9 @@ public class SellDollarsServiceImpl implements SellDollarsService{
         AccountBinance accountBinance = accountBinanceRepository.findById(dto.getAccountBinanceId())
                 .orElseThrow(() -> new RuntimeException("AccountBinance not found"));
 
-        Supplier supplier = supplierRepository.findById(1).orElseThrow(() -> new RuntimeException("Account not found"));
+        Supplier supplier = supplierRepository.findById(dto.getSupplier()).orElseThrow(() -> new RuntimeException("Supplier no encontrado"));
+        System.out.println("Supplier ID: " + dto.getSupplier());
+
 
         SellDollars sale = new SellDollars();
         sale.setIdWithdrawals(dto.getIdWithdrawals());
@@ -40,6 +42,7 @@ public class SellDollarsServiceImpl implements SellDollarsService{
         sale.setNameAccount(dto.getNameAccount());
         sale.setAccountBinance(accountBinance);
         sale.setPesos(dto.getPesos());
+        sale.setSupplier(supplier);
 
         // Convertir null a 0 para evitar NullPointerException en las operaciones
         Double accountBalance = accountBinance.getBalance() != null ? accountBinance.getBalance() : 0.0;

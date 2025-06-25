@@ -34,5 +34,8 @@ public class SellDollars {
 	@ManyToOne
 	@JoinColumn(name = "account_binance_id")  // La columna que hace referencia a account_binance
 	private AccountBinance accountBinance;
+	@ManyToOne
+	@JoinColumn(name = "supplier_id")
+	private Supplier supplier;
 
 }

@@ -27,6 +27,7 @@ public class SellDollarsController {
     @PostMapping
     public ResponseEntity<SellDollars> create(@RequestBody SellDollarsDto sellDollarsDto) {
         // Buscar la cuenta de Binance que coincida con el nombre proporcionado
+    	System.out.println("Datos recibidos: " + sellDollarsDto);
         AccountBinance accountBinance = accountBinanceRepository.findByName(sellDollarsDto.getNameAccount());
         
         if (accountBinance == null) {

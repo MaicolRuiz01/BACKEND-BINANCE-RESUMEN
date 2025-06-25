@@ -58,6 +58,7 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 
 		accountBinanceRepository.save(accountBinance);
 		supplierRepository.save(supplier);
+		//desactivo esto porque da error
 		purchaseRateService.addPurchaseRate(buy);
 
 		return buyDollarsRepository.save(buy);

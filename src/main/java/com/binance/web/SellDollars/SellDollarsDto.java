@@ -19,5 +19,6 @@ public class SellDollarsDto {
     private Integer accountBinanceId;
     //esto solo sera para cuando haya una orden trade de TRX
     private Double equivalenteciaTRX;
+    private Integer supplier;
 
 }
