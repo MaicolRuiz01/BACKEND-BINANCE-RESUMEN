@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 
@@ -200,8 +201,29 @@ public class TronScanService {
         }
         return result;
     }
+    
+    
+    
+    
+    //OBTIENE EL SALDO DE LA CUENTA EN USDT
+    public double getTotalAssetTokenOverview(String walletAddress) {
+        try {
+            String url = "https://apilist.tronscanapi.com/api/account/token_asset_overview?address=" + walletAddress;
+            HttpHeaders headers = new HttpHeaders();
+            // Si tienes API key de Tronscan, añádela aquí:
+            // headers.set("TRON-PRO-API-KEY", "TU_API_KEY");
+            HttpEntity<Void> entity = new HttpEntity<>(headers);
 
+            ResponseEntity<String> resp = restTemplate.exchange(
+                url, HttpMethod.GET, entity, String.class);
 
+            JsonNode root = objectMapper.readTree(resp.getBody());
+            return root.path("totalAssetInUsd").asDouble(0.0);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return 0.0;
+        }
+    }
 
 }
 

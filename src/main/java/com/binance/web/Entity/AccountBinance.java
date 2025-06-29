@@ -25,5 +25,7 @@ public class AccountBinance {
 	private String correo;
 	private String userBinance;
 	//esto se usa para identificar a las cuentas en la parte de traspasos en billetra spot
-	private String address; 
+	private String address;
+	//esto es para diferencial si es de binance o truswallet
+	private String tipo;
 }

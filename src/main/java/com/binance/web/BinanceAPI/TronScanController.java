@@ -82,7 +82,7 @@ public class TronScanController {
     //me las trae en bruto todas las usdt de trusWallet
     @GetMapping("/usdt-trc20-trongrid")
     public ResponseEntity<String> getTRC20TransfersUsingTronGrid() {
-        String walletAddress = "TJjK97sE4anv35hBQGwGEZEo5FYxToxFQM";  // O recibir por parámetro
+        String walletAddress = "TPDNfJ72Fh6Hrfk6faYVps1rN78NB8LQGu";  // O recibir por parámetro
         String response = tronScanService.getTRC20TransfersUsingTronGrid(walletAddress);
         return ResponseEntity.ok(response);
     }
@@ -90,7 +90,7 @@ public class TronScanController {
     
     @GetMapping("/usdt-entradas")
     public ResponseEntity<List<BuyDollarsDto>> getUSDTIncomingTransfers() {
-        String walletAddress = "TJjK97sE4anv35hBQGwGEZEo5FYxToxFQM";
+        String walletAddress = "TPDNfJ72Fh6Hrfk6faYVps1rN78NB8LQGu";
         Set<String> assignedIds = buyDollarsRepository.findAll().stream()
                 .map(BuyDollars::getIdDeposit)
                 .collect(Collectors.toSet());
@@ -102,7 +102,7 @@ public class TronScanController {
 
     @GetMapping("/usdt-salidas")
     public ResponseEntity<List<SellDollarsDto>> getUSDTOutgoingTransfers() {
-        String walletAddress = "TJjK97sE4anv35hBQGwGEZEo5FYxToxFQM";
+        String walletAddress = "TPDNfJ72Fh6Hrfk6faYVps1rN78NB8LQGu";
         Set<String> assignedIds = sellDollarsRepository.findAll().stream()
                 .map(SellDollars::getIdWithdrawals)  // Ajusta según nombre campo ID
                 .collect(Collectors.toSet());
@@ -115,7 +115,7 @@ public class TronScanController {
     
     @GetMapping("/trust-transacciones-salientes")
     public ResponseEntity<List<TransaccionesDTO>> getTrustOutgoingTransfers() {
-        String walletAddress = "TJjK97sE4anv35hBQGwGEZEo5FYxToxFQM";
+        String walletAddress = "TPDNfJ72Fh6Hrfk6faYVps1rN78NB8LQGu";
 
         // IDs ya registrados en transacciones
         Set<String> registeredIds = transaccionesRepository.findAll().stream()
@@ -173,8 +173,14 @@ public class TronScanController {
 
         return ResponseEntity.ok(result);
     }
-
-
+    
+    //OBTIENE EL SALDO DE LA BILLETERA EN USDT
+    @GetMapping("/wallet-total-assets")
+    public ResponseEntity<Double> getWalletTotalAssets() {
+        String walletAddress = "TPDNfJ72Fh6Hrfk6faYVps1rN78NB8LQGu";
+        double totalUsd = tronScanService.getTotalAssetTokenOverview(walletAddress);
+        return ResponseEntity.ok(totalUsd);
+    }
 
 }
 

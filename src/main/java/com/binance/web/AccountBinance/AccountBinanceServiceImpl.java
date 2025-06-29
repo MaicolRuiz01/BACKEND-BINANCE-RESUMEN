@@ -4,6 +4,7 @@ import java.util.List;
 import org.springframework.stereotype.Service;
 
 import com.binance.web.BinanceAPI.BinanceService;
+import com.binance.web.BinanceAPI.TronScanService;
 import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Repository.AccountBinanceRepository;
 
@@ -15,10 +16,15 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
 
 	 private final BinanceService binanceService; 
     private final AccountBinanceRepository accountBinanceRepository;
+    private final TronScanService tronScanService;
 
-    public AccountBinanceServiceImpl(AccountBinanceRepository accountBinanceRepository, BinanceService binanceService) {
+    public AccountBinanceServiceImpl(
+            AccountBinanceRepository accountBinanceRepository,
+            BinanceService binanceService,
+            TronScanService tronScanService) {
         this.accountBinanceRepository = accountBinanceRepository;
         this.binanceService = binanceService;
+        this.tronScanService = tronScanService;
     }
 
     @Override
@@ -71,11 +77,24 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
     @Override
     public String getUSDTBalance(String name) {
         AccountBinance account = accountBinanceRepository.findByName(name);
-        if (account != null) {
-            // Llamamos al servicio de Binance para obtener el balance de USDT de la cuenta
-            return binanceService.getGeneralBalance(name);  // Método que consulta el balance de USDT
+        if (account == null) {
+            return "{\"error\": \"Cuenta no encontrada.\"}";
         }
-        return "{\"error\": \"Cuenta no encontrada.\"}";
+
+        String tipo = account.getTipo();
+        if ("BINANCE".equalsIgnoreCase(tipo)) {
+            // Cuenta Binance: delegamos al servicio de Binance
+            return binanceService.getGeneralBalance(name);
+        }
+        else if ("TRUST".equalsIgnoreCase(tipo)) {
+            // Cuenta TRON/TRUST: usamos TronScanService para obtener total assets en USD
+            double balanceUsd = tronScanService.getTotalAssetTokenOverview(account.getAddress());
+            return String.valueOf(balanceUsd);
+        }
+        else {
+            // Tipo no reconocido
+            return "{\"error\": \"Tipo de cuenta no soportado: " + tipo + "\"}";
+        }
     }
     
     @Override

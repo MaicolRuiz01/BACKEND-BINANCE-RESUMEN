@@ -30,4 +30,8 @@ public class AccountCop {
 	@OneToMany(mappedBy = "accountCop", cascade = CascadeType.ALL, orphanRemoval = true)
 	@JsonIgnore
 	private List<SaleP2pAccountCop> saleP2pDetails;
+	
+	@OneToMany(mappedBy = "accountCop", cascade = CascadeType.ALL, orphanRemoval = true)
+	@JsonIgnore
+    private List<SellDollarsAccountCop> sellDollars;
 }
