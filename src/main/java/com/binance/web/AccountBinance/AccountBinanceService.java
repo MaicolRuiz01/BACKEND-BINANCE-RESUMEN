@@ -1,5 +1,6 @@
 package com.binance.web.AccountBinance;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 import com.binance.web.Entity.AccountBinance;
@@ -14,6 +15,8 @@ public interface AccountBinanceService {
     void subtractBalance(String name, Double amount);
     String getUSDTBalance(String name);
     Double getEstimatedUSDTBalance(String name);
+    BigDecimal getTotalBalance();
+
     
     //esto para borrar
     Double getFundingUSDTBalance(String name);
