@@ -45,5 +45,7 @@ public class SellDollars {
 	@OneToMany(mappedBy = "sellDollars", cascade = CascadeType.ALL, orphanRemoval = true)
 	@JsonIgnore
     private List<SellDollarsAccountCop> sellDollarsAccounts;
+	private Double utilidad;
+	private Boolean asignado;
 
 }

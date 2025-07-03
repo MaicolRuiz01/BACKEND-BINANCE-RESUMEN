@@ -8,8 +8,10 @@ import org.springframework.stereotype.Service;
 import com.binance.web.Entity.BuyDollars;
 import com.binance.web.Entity.PurchaseRate;
 import com.binance.web.Entity.SaleP2P;
+import com.binance.web.Entity.SellDollars;
 import com.binance.web.Repository.PurchaseRateRepository;
 import com.binance.web.SaleP2P.SaleP2PService;
+import com.binance.web.SellDollars.SellDollarsService;
 
 @Service
 public class PurchseRateServiceImpl implements PurchaseRateService {
@@ -19,6 +21,9 @@ public class PurchseRateServiceImpl implements PurchaseRateService {
 
 	@Autowired
 	private SaleP2PService saleP2PService;
+	
+	@Autowired
+	private SellDollarsService sellDollarsService;
 
 	@Override
 	public void addPurchaseRate(BuyDollars lastBuy) {
@@ -36,6 +41,9 @@ public class PurchseRateServiceImpl implements PurchaseRateService {
 
 		List<SaleP2P> rangeSales = saleP2PService.obtenerVentasEntreFechas(lastRate.getDate(), lastBuy.getDate());
 		saleP2PService.saveUtilitydefinitive(rangeSales, lastRate.getRate());
+		
+		List<SellDollars> rangeSellDolars = sellDollarsService.obtenerVentasEntreFechas(lastRate.getDate(), lastBuy.getDate());
+		sellDollarsService.saveUtilityDefinitive(rangeSellDolars, lastRate.getRate());
 
 		for (SaleP2P sale : rangeSales) {
 		    if (sale.getDollarsUs() == null) {
@@ -43,6 +51,14 @@ public class PurchseRateServiceImpl implements PurchaseRateService {
 		    }
 		    dolaresVendidos += sale.getDollarsUs();
 		}
+		
+		for (SellDollars venta : rangeSellDolars) {
+		    if (venta.getDollars() == null) {
+		        venta.setDollars(0.0);
+		    }
+		    dolaresVendidos += venta.getDollars();
+		}
+
 
 
 		Double dolaresSobrantes = lastRate.getDolares() - dolaresVendidos;

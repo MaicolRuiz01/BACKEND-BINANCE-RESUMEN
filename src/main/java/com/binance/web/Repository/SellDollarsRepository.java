@@ -1,6 +1,7 @@
 package com.binance.web.Repository;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -16,4 +17,7 @@ public interface SellDollarsRepository extends JpaRepository<SellDollars, Intege
 	List<SellDollars> findByDateWithoutTime(@Param("fecha") LocalDate fecha);
 	
 	Supplier findById(int id);
+	List<SellDollars> findByAsignadoFalse();
+	
+	List<SellDollars> findByDateBetween(LocalDateTime start, LocalDateTime end);
 }

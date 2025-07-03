@@ -53,7 +53,7 @@ public class PaymentController {
 		return ResponseEntity.ok().body(response);
 	}
 
-	private List<Transaction> parseTransactions(String response) {
+	public List<Transaction> parseTransactions(String response) {
 		// Asumiendo que la respuesta es un JSON, usa alguna librería como Jackson para
 		// convertir el JSON en objetos de tipo Transaction
 		ObjectMapper objectMapper = new ObjectMapper();

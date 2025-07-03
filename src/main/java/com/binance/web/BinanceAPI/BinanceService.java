@@ -38,7 +38,8 @@ public class BinanceService {
             {"CESAR", "Ho474mufN8vTwvrZLjj8DdZHxa88JYlCrcPHp1r7UAhwc197So9vmUG9tRhM3XNr", "Ns41sTlvAM3nUzD0qMPE4PW57omuSxOPKdcngudgqVPphExjJC3tWX8kcxwibXDz"},
             {"MARCEL", "vtNXEFCDEYxWpGGipXG210zzq5i2FnJAqmK5LJtRGiq5NRMCJqCQEOcR85SAunUP", "J9eIUXMxwFggHvU2HHp2EiWfNaXGvShSx5UihepHmW1gIjIBe3waZC3JvMUPBfga"},
             {"SONIA", "N0lUyNy3rlgNxq6XKlKdjxVLppvBwPl1Bxi7FeDZ82G7X47oL2tor20vprJaLZLk", "Nqhxi7XMzNmQMk4phC442bkA368L8Toi0EAidGOJhal2f72olp5FMhOY7OoaehUg"},
-            {"BERNANDA","UxPVjnvpZBgKgxHV6Qbds15TlTtFrBgyOycsw1Enj2ybiZFDc6ewk51ys3Sxvgxm","GCliNB78z1FJkx5542QeY3PXsUBqJJMPQNZ6MmKAeEUjhItMLIhwKNhUw6pSCH8E"}
+            {"BERNANDA","UxPVjnvpZBgKgxHV6Qbds15TlTtFrBgyOycsw1Enj2ybiZFDc6ewk51ys3Sxvgxm","GCliNB78z1FJkx5542QeY3PXsUBqJJMPQNZ6MmKAeEUjhItMLIhwKNhUw6pSCH8E"},
+            {"RIK", "vMSWVD5tca6o73oCOLcxefK0W4FA30nwUvAFhrRlpEfmOyX1Jv6Y94llAYJJT9HU", "nknvsAdsO1BWApJ7119jJKWTHWbT2HCGP0PJNrXsFiRR8GlWxHqmt25DyhNxu7Gw"}
     };
     
     public List<String> getAllAccountNames() {

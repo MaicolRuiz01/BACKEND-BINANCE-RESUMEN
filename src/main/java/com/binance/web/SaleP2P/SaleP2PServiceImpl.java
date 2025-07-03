@@ -70,7 +70,8 @@ public class SaleP2PServiceImpl implements SaleP2PService {
 	public void deleteSaleP2P(Integer id) {
 		saleP2PRepository.deleteById(id);
 	}
-
+	
+	//este metodo ya no se impementa en el fronted mas sin embargo se deja por si acaso
 	@Override
 	public List<SaleP2P> obtenerVentasEntreFechas(LocalDateTime inicio, LocalDateTime fin) {
 		return saleP2PRepository.findByDateBetween(inicio, fin);
@@ -98,6 +99,7 @@ public class SaleP2PServiceImpl implements SaleP2PService {
 		return ordenesToday;
 	}
 
+	//este metodo comvierte la inforamcion que traigo atravez de la api de binance y lo paso por el dto
 	private void orderP2pDtoToSaleP2p(List<OrderP2PDto> ordenesToday, String account) {
 		for (OrderP2PDto orderP2p : ordenesToday) {
 			SaleP2P sale = new SaleP2P();
@@ -214,7 +216,7 @@ public class SaleP2PServiceImpl implements SaleP2PService {
 		dto.setNameAccountBinance(getBinanceAccountName(sale));
 		return dto;
 	}
-
+	
 	private String getBinanceAccountName(SaleP2P sale) {
 		return sale.getBinanceAccount() != null ? sale.getBinanceAccount().getName() : null;
 	}

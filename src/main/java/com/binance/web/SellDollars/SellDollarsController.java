@@ -1,8 +1,13 @@
 package com.binance.web.SellDollars;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -12,6 +17,7 @@ import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.SellDollars;
 import com.binance.web.Repository.AccountBinanceRepository;
 
+import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 
 @RestController
@@ -42,4 +48,15 @@ public class SellDollarsController {
 
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
+    
+    
+    
+    @GetMapping("/no-asignadas")
+    public ResponseEntity<List<SellDollars>> getVentasNoAsignadas() {
+        List<SellDollars> ventas = service.registrarYObtenerVentasNoAsignadas();
+        return ResponseEntity.ok(ventas);
+    }
+
+
+
 }
