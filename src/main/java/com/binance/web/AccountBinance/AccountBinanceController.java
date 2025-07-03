@@ -1,6 +1,9 @@
 package com.binance.web.AccountBinance;
 
+import java.math.BigDecimal;
 import java.util.List;
+
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -35,7 +38,8 @@ public class AccountBinanceController {
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<AccountBinance> updateAccount(@PathVariable Integer id, @RequestBody AccountBinance accountBinance) {
+    public ResponseEntity<AccountBinance> updateAccount(@PathVariable Integer id,
+            @RequestBody AccountBinance accountBinance) {
         AccountBinance existing = accountBinanceService.findByIdAccountBinance(id);
         if (existing == null) {
             return ResponseEntity.notFound().build();
@@ -49,25 +53,31 @@ public class AccountBinanceController {
         accountBinanceService.deleteAccountBinance(id);
         return ResponseEntity.noContent().build();
     }
-    
+
     @GetMapping("/buscar")
     public ResponseEntity<AccountBinance> getAccountByName(@RequestParam String name) {
         AccountBinance account = accountBinanceService.findByName(name);
         return account != null ? ResponseEntity.ok(account) : ResponseEntity.notFound().build();
     }
-    
+
     @GetMapping("/balance")
     public ResponseEntity<Double> getBalanceByName(@RequestParam String name) {
-        System.out.println("🟢 Consultando balance de: " + name);  // <- agrega esto para probar si entra
+        System.out.println("🟢 Consultando balance de: " + name); // <- agrega esto para probar si entra
         AccountBinance account = accountBinanceService.findByName(name);
         return account != null ? ResponseEntity.ok(account.getBalance()) : ResponseEntity.notFound().build();
     }
-    
+
     @GetMapping("/balance-usdt")
     public ResponseEntity<String> getUSDTBalance(@RequestParam String name) {
         System.out.println("🟢 Consultando balance USDT de: " + name);
         String usdtBalance = accountBinanceService.getUSDTBalance(name);
         return ResponseEntity.ok(usdtBalance);
+    }
+
+    @GetMapping("/total-balance")
+    public ResponseEntity<BigDecimal> getTotalBalanceMultiplied() {
+        BigDecimal result = accountBinanceService.getTotalBalance();
+        return ResponseEntity.ok(result);
     }
 
 }
