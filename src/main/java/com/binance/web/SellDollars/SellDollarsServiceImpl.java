@@ -73,7 +73,7 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 
 	    // Restar dólares y pesos
 	    accountBinance.setBalance((accountBinance.getBalance() != null ? accountBinance.getBalance() : 0.0) - dto.getDollars());
-	    supplier.setBalance((supplier.getBalance() != null ? supplier.getBalance() : 0.0) - dto.getPesos());
+	   // supplier.setBalance((supplier.getBalance() != null ? supplier.getBalance() : 0.0) - dto.getPesos());
 	    
 	    // Manejo de cuentas COP asignadas
 	    List<SellDollarsAccountCop> detalles = new ArrayList<>();
@@ -223,6 +223,4 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 		return impuesto;
 	}
 	
-
-
 }
