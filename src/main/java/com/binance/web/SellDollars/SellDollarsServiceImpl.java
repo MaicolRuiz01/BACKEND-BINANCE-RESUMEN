@@ -53,12 +53,13 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 	@Override
 	@Transactional
 	public SellDollars createSellDollars(SellDollarsDto dto) {
+	    // 1. Cargar entidades base
 	    AccountBinance accountBinance = accountBinanceRepository.findById(dto.getAccountBinanceId())
 	            .orElseThrow(() -> new RuntimeException("AccountBinance not found"));
-
 	    Supplier supplier = supplierRepository.findById(dto.getSupplier())
 	            .orElseThrow(() -> new RuntimeException("Supplier no encontrado"));
 
+	    // 2. Construir la entidad SellDollars
 	    SellDollars sale = new SellDollars();
 	    sale.setIdWithdrawals(dto.getIdWithdrawals());
 	    sale.setTasa(dto.getTasa());
@@ -71,30 +72,46 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 	    sale.setUtilidad(utilidad(sale));
 	    sale.setAsignado(true);
 
-	    // Restar dólares y pesos
-	    accountBinance.setBalance((accountBinance.getBalance() != null ? accountBinance.getBalance() : 0.0) - dto.getDollars());
-	   // supplier.setBalance((supplier.getBalance() != null ? supplier.getBalance() : 0.0) - dto.getPesos());
-	    
-	    // Manejo de cuentas COP asignadas
+	    // 3. Ajustar saldo de la cuenta Binance (USDT)
+	    double currentBinanceBalance = accountBinance.getBalance() != null ? accountBinance.getBalance() : 0.0;
+	    accountBinance.setBalance(currentBinanceBalance - dto.getDollars());
+
+	    // 4. Distribuir el monto en PESOS entre cuentas COP y proveedor
+	    double totalAsignadoACuentas = 0.0;
 	    List<SellDollarsAccountCop> detalles = new ArrayList<>();
-	    if (dto.getAccounts() != null) {
+	    if (dto.getAccounts() != null && !dto.getAccounts().isEmpty()) {
 	        for (AssignAccountDto assignDto : dto.getAccounts()) {
+	            // 4.1. Aumentar balance de cada AccountCop
 	            AccountCop acc = accountCopService.findByIdAccountCop(assignDto.getAccountCop());
-	            acc.setBalance((acc.getBalance() != null ? acc.getBalance() : 0.0) + assignDto.getAmount());
+	            double currentCopBalance = acc.getBalance() != null ? acc.getBalance() : 0.0;
+	            acc.setBalance(currentCopBalance + assignDto.getAmount());
 	            accountCopService.saveAccountCop(acc);
 
+	            // 4.2. Crear el detalle de la relación
 	            SellDollarsAccountCop detalle = new SellDollarsAccountCop();
 	            detalle.setSellDollars(sale);
 	            detalle.setAccountCop(acc);
 	            detalle.setAmount(assignDto.getAmount());
 	            detalle.setNameAccount(assignDto.getNameAccount());
-
 	            detalles.add(detalle);
+
+	            totalAsignadoACuentas += assignDto.getAmount();
 	        }
 	    }
 
-	    sale.setSellDollarsAccounts(detalles); // ← Relación en SellDollars
+	    // 4.3. Calcular cuánto queda para el proveedor
+	    double montoEnPesos = dto.getPesos() != null
+	        ? dto.getPesos()
+	        : dto.getDollars() * dto.getTasa();
+	    double restanteParaProveedor = montoEnPesos - totalAsignadoACuentas;
 
+	    if (restanteParaProveedor > 0.0) {
+	        double currentSupplierBalance = supplier.getBalance() != null ? supplier.getBalance() : 0.0;
+	        supplier.setBalance(currentSupplierBalance - restanteParaProveedor);
+	    }
+
+	    // 5. Guardar relaciones y entidades
+	    sale.setSellDollarsAccounts(detalles);
 	    accountBinanceRepository.save(accountBinance);
 	    supplierRepository.save(supplier);
 
