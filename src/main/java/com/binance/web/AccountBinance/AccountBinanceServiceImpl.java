@@ -6,6 +6,7 @@ import java.util.Objects;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.web.bind.annotation.GetMapping;
 
 import com.binance.web.BinanceAPI.BinanceService;
 import com.binance.web.BinanceAPI.TronScanService;
@@ -13,6 +14,7 @@ import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.PurchaseRate;
 import com.binance.web.Repository.AccountBinanceRepository;
 import com.binance.web.Repository.PurchaseRateRepository;
+import com.binance.web.balance.PurchaseRate.PurchaseRateService;
 
 import jakarta.transaction.Transactional;
 
@@ -24,6 +26,7 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
     private final AccountBinanceRepository accountBinanceRepository;
     private final TronScanService tronScanService;
 
+
     public AccountBinanceServiceImpl(
             AccountBinanceRepository accountBinanceRepository,
             BinanceService binanceService,
@@ -31,6 +34,7 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
         this.accountBinanceRepository = accountBinanceRepository;
         this.binanceService = binanceService;
         this.tronScanService = tronScanService;
+
     }
 
     @Override
@@ -134,5 +138,7 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
 
         return totalBalance.multiply(BigDecimal.valueOf(latestRate.getRate()));
     }
+    
+    
 
 }

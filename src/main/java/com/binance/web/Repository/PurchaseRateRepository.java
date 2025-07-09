@@ -1,6 +1,7 @@
 package com.binance.web.Repository;
 
 import java.time.LocalDate;
+import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -17,4 +18,7 @@ public interface PurchaseRateRepository extends JpaRepository<PurchaseRate, Inte
 	// Método para obtener la última tasa de compra ordenada por fecha (más
 	// reciente)
 	PurchaseRate findTopByOrderByDateDesc();
+	Optional<PurchaseRate> findTopOptionalByOrderByDateDesc();
+	PurchaseRate findTopByOrderByIdDesc();
+
 }

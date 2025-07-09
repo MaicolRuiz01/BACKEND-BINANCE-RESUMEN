@@ -9,12 +9,14 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import com.binance.web.Entity.AccountBinance;
+import com.binance.web.Repository.PurchaseRateRepository;
 
 @RestController
 @RequestMapping("/cuenta-binance")
 public class AccountBinanceController {
 
     private final AccountBinanceService accountBinanceService;
+
 
     public AccountBinanceController(AccountBinanceService accountBinanceService) {
         this.accountBinanceService = accountBinanceService;
@@ -59,21 +61,23 @@ public class AccountBinanceController {
         AccountBinance account = accountBinanceService.findByName(name);
         return account != null ? ResponseEntity.ok(account) : ResponseEntity.notFound().build();
     }
-
+    //TRAE EL BALANCE INTERNO DE UNA CUENTA BINANCE
     @GetMapping("/balance")
     public ResponseEntity<Double> getBalanceByName(@RequestParam String name) {
         System.out.println("🟢 Consultando balance de: " + name); // <- agrega esto para probar si entra
         AccountBinance account = accountBinanceService.findByName(name);
         return account != null ? ResponseEntity.ok(account.getBalance()) : ResponseEntity.notFound().build();
     }
-
+    
+    //TRAE EL BALANCE externo DE UNA CUENTA BINANCE
     @GetMapping("/balance-usdt")
     public ResponseEntity<String> getUSDTBalance(@RequestParam String name) {
         System.out.println("🟢 Consultando balance USDT de: " + name);
         String usdtBalance = accountBinanceService.getUSDTBalance(name);
         return ResponseEntity.ok(usdtBalance);
     }
-
+    
+    //este me da todos los dalos de la cuetnas binance pasado a pesos
     @GetMapping("/total-balance")
     public ResponseEntity<BigDecimal> getTotalBalanceMultiplied() {
         BigDecimal result = accountBinanceService.getTotalBalance();
