@@ -39,7 +39,8 @@ public class BinanceService {
             {"MARCEL", "vtNXEFCDEYxWpGGipXG210zzq5i2FnJAqmK5LJtRGiq5NRMCJqCQEOcR85SAunUP", "J9eIUXMxwFggHvU2HHp2EiWfNaXGvShSx5UihepHmW1gIjIBe3waZC3JvMUPBfga"},
             {"SONIA", "N0lUyNy3rlgNxq6XKlKdjxVLppvBwPl1Bxi7FeDZ82G7X47oL2tor20vprJaLZLk", "Nqhxi7XMzNmQMk4phC442bkA368L8Toi0EAidGOJhal2f72olp5FMhOY7OoaehUg"},
             {"BERNANDA","UxPVjnvpZBgKgxHV6Qbds15TlTtFrBgyOycsw1Enj2ybiZFDc6ewk51ys3Sxvgxm","GCliNB78z1FJkx5542QeY3PXsUBqJJMPQNZ6MmKAeEUjhItMLIhwKNhUw6pSCH8E"},
-            {"RIK", "vMSWVD5tca6o73oCOLcxefK0W4FA30nwUvAFhrRlpEfmOyX1Jv6Y94llAYJJT9HU", "nknvsAdsO1BWApJ7119jJKWTHWbT2HCGP0PJNrXsFiRR8GlWxHqmt25DyhNxu7Gw"}
+            {"RIK", "vMSWVD5tca6o73oCOLcxefK0W4FA30nwUvAFhrRlpEfmOyX1Jv6Y94llAYJJT9HU", "nknvsAdsO1BWApJ7119jJKWTHWbT2HCGP0PJNrXsFiRR8GlWxHqmt25DyhNxu7Gw"},
+            {"JULIO","M2GxXbjasdJPx6oWXhr3aKoeUB6WnfhFDZ02RmdTEhJlFkWMZkWqUCgfynM5iakd", "CDOTuuPusPaZSZakDmISILjjmSNfW6v9A3QGqdh7F43OwD7MT5LQgJowto2VFBlt"}
     };
     
     public List<String> getAllAccountNames() {
@@ -461,55 +462,6 @@ public class BinanceService {
 	    }
 	    return null; // si falla o no encuentra precio
 	}
-
-	/*
-	 * public String getGeneralBalance(String account) { try { String[] credentials
-	 * = getApiCredentials(account); if (credentials == null) return
-	 * "{\"error\": \"Cuenta no válida.\"}";
-	 * 
-	 * String apiKey = credentials[0]; String secretKey = credentials[1];
-	 * 
-	 * long timestamp = getServerTime(); String query = "timestamp=" + timestamp +
-	 * "&recvWindow=60000"; String signature = hmacSha256(secretKey, query); String
-	 * url = "https://api.binance.com/api/v3/account?" + query + "&signature=" +
-	 * signature;
-	 * 
-	 * // Realiza la solicitud GET al endpoint de cuenta general String response =
-	 * sendBinanceRequestWithProxy(url, apiKey); JsonObject accountData =
-	 * JsonParser.parseString(response).getAsJsonObject();
-	 * 
-	 * JsonArray balances = accountData.getAsJsonArray("balances");
-	 * 
-	 * double totalBalanceInUSDT = 0.0;
-	 * 
-	 * // Recorremos todos los balances for (int i = 0; i < balances.size(); i++) {
-	 * JsonObject balance = balances.get(i).getAsJsonObject(); String asset =
-	 * balance.get("asset").getAsString();
-	 * 
-	 * // Solo continuamos si el balance no es cero if
-	 * (!balance.get("free").getAsString().equals("0.00000000")) { double amount =
-	 * balance.get("free").getAsDouble();
-	 * 
-	 * // Si la moneda es USDT, la agregamos directamente if
-	 * (asset.equalsIgnoreCase("USDT")) { totalBalanceInUSDT += amount; } else { //
-	 * Si no es USDT, obtenemos su precio actual en USDT double priceInUSDT =
-	 * getPriceOfAssetInUSDT(asset); totalBalanceInUSDT += amount * priceInUSDT; } }
-	 * }
-	 * 
-	 * return "{\"total_balance\": \"" + totalBalanceInUSDT + "\"}"; // Total
-	 * balance en USDT
-	 * 
-	 * } catch (Exception e) { return "{\"error\": \"Error interno: " +
-	 * e.getMessage() + "\"}"; } }
-	 * 
-	 * private double getPriceOfAssetInUSDT(String asset) { try { // Hacemos una
-	 * solicitud a la API de Binance para obtener el precio actual de la moneda en
-	 * USDT String url = "https://api.binance.com/api/v3/ticker/price?symbol=" +
-	 * asset + "USDT"; String response = sendBinanceRequestWithProxy(url, null);
-	 * JsonObject priceData = JsonParser.parseString(response).getAsJsonObject();
-	 * return priceData.get("price").getAsDouble(); } catch (Exception e) { return
-	 * 0.0; // Si no conseguimos el precio, lo devolvemos como 0 } }
-	 */
 
 
 	public String getGeneralBalance(String account) {

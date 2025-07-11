@@ -1,8 +1,11 @@
 
 package com.binance.web.BinanceAPI;
 
+import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
@@ -78,7 +81,7 @@ public class SpotOrdersController {
     @GetMapping("/depositos")
     public ResponseEntity<String> getSpotDeposits(
             @RequestParam String account,
-            @RequestParam(defaultValue = "1000") int limit) {
+            @RequestParam(defaultValue = "50") int limit) {
 
         String response = binanceService.getSpotDeposits(account, limit);
 
@@ -140,7 +143,15 @@ public class SpotOrdersController {
 	    
 	    
 	    
-	    
+	    private boolean esCoincidenteConTransaccion(BuyDollarsDto dto, List<Transacciones> txsHoy) {
+	        LocalDateTime fechaDto = dto.getDate();
+	        return txsHoy.stream().anyMatch(tx -> {
+	            if (Double.compare(tx.getCantidad(), dto.getDollars()) != 0) return false;
+	            long diffSeconds = Math.abs(Duration.between(tx.getFecha(), fechaDto).toSeconds());
+	            return diffSeconds <= 60;
+	        });
+	    }
+
 	    
 	    
 	    
@@ -152,55 +163,50 @@ public class SpotOrdersController {
 	        ObjectMapper mapper = new ObjectMapper();
 	        List<BuyDollarsDto> resultado = new ArrayList<>();
 
+	        // 1) IDs ya usados en compras (solo se carga una vez)
 	        Set<String> assignedIds = buyDollarsRepository.findAll().stream()
 	                .map(BuyDollars::getIdDeposit)
 	                .collect(Collectors.toSet());
 
-	        Set<String> usedTransactionIds = transaccionesRepository.findAll().stream()
-	                .map(Transacciones::getIdtransaccion)
-	                .filter(Objects::nonNull)
-	                .collect(Collectors.toSet());
+	        // 2) Transacciones de hoy (o cambia tu rango si lo necesitas)
+	        LocalDateTime inicio = LocalDate.now().atStartOfDay();
+	        LocalDateTime fin    = LocalDate.now().atTime(LocalTime.MAX);
+	        List<Transacciones> txsHoy = transaccionesRepository.findByFechaBetween(inicio, fin);
 
+	        // 3) Trae todos los depósitos Spot
 	        for (String account : binanceService.getAllAccountNames()) {
 	            String response = binanceService.getSpotDeposits(account, limit);
 	            JsonNode root = mapper.readTree(response);
 
-
 	            ArrayNode sourceArray;
 	            if (root.isArray()) {
-
 	                sourceArray = (ArrayNode) root;
 	            } else {
 	                JsonNode dataNode = root.path("data");
 	                if (!dataNode.isArray()) continue;
-
-
 	                sourceArray = (ArrayNode) dataNode;
 	            }
 
 	            for (JsonNode deposit : sourceArray) {
-	                String id = deposit.path("id").asText();
-	                double amount = deposit.path("amount").asDouble(0);
-	                String timestampStr = deposit.path("insertTime").asText(null);
+	                String id          = deposit.path("id").asText();
+	                double amount      = deposit.path("amount").asDouble(0);
+	                String tsStr       = deposit.path("insertTime").asText(null);
 
-	                if (assignedIds.contains(id)) continue;
-	                if (usedTransactionIds.contains(id)) continue;
-	                if (amount <= 0) continue;
+	                // 4) Filtros básicos
+	                if (assignedIds.contains(id) || amount <= 0) continue;
 
+	                // 5) Parsear fecha
 	                LocalDateTime fecha = null;
-	                if (timestampStr != null) {
+	                if (tsStr != null) {
 	                    try {
-	                        long ts = Long.parseLong(timestampStr);
+	                        long ts = Long.parseLong(tsStr);
 	                        fecha = parseFechaDesdeTimestamp(ts);
-	                    } catch (NumberFormatException e) {
-	                        fecha = parseFechaDesdeString(timestampStr);
+	                    } catch (NumberFormatException ex) {
+	                        fecha = parseFechaDesdeString(tsStr);
 	                    }
-
-
-
 	                }
 
-
+	                // 6) Construir DTO
 	                BuyDollarsDto compra = new BuyDollarsDto();
 	                compra.setIdDeposit(id);
 	                compra.setNameAccount(account);
@@ -208,23 +214,24 @@ public class SpotOrdersController {
 	                compra.setDollars(amount);
 	                resultado.add(compra);
 	            }
-
-
-
 	        }
 
-
-	        return resultado;
-
+	        // 7) Filtrar los que coinciden (monto + fecha ±60s) con txsHoy
+	        return resultado.stream()
+	                .filter(dto -> {
+	                    LocalDateTime dtoFecha = dto.getDate();
+	                    return txsHoy.stream().noneMatch(tx -> {
+	                        // comparar monto
+	                        if (Double.compare(tx.getCantidad(), dto.getDollars()) != 0) {
+	                            return false;
+	                        }
+	                        // comparar fecha dentro de ±60s
+	                        long diffSec = Math.abs(Duration.between(tx.getFecha(), dtoFecha).toSeconds());
+	                        return diffSec <= 60;
+	                    });
+	                })
+	                .collect(Collectors.toList());
 	    }
-
-
-
-
-
-
-
-
 
 	    private static final DateTimeFormatter FORMATO_FECHA = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 

@@ -1,27 +1,47 @@
 package com.binance.web.transacciones;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
+import com.binance.web.BinanceAPI.BinanceService;
+import com.binance.web.BinanceAPI.PaymentController;
+import com.binance.web.BinanceAPI.SpotOrdersController;
+import com.binance.web.BinanceAPI.TronScanController;
+import com.binance.web.BinanceAPI.TronScanService;
 import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.Transacciones;
 import com.binance.web.Repository.AccountBinanceRepository;
+import com.binance.web.Repository.BuyDollarsRepository;
+import com.binance.web.Repository.SellDollarsRepository;
 
 import jakarta.transaction.Transactional;
+import lombok.RequiredArgsConstructor;
 
 @Service
 @Transactional
+@RequiredArgsConstructor
 public class TransaccionesServiceImpl implements TransaccionesService {
 	
 	private final TransaccionesRepository transaccionesRepository;
     private final AccountBinanceRepository accountBinanceRepository;
+    private final TronScanService tronScanService;
+    private final TronScanController            tronController;
+    private final SpotOrdersController          spotController;
+    private final PaymentController             payController;
 
-    public TransaccionesServiceImpl(TransaccionesRepository transaccionesRepository,
-            AccountBinanceRepository accountBinanceRepository) {
-    	this.transaccionesRepository = transaccionesRepository;
-    	this.accountBinanceRepository = accountBinanceRepository;
-    }
+    private final TransaccionesRepository     transRepo;
+
+
+   
 
     @Override
     public Transacciones guardarTransaccion(TransaccionesDTO dto) throws IllegalArgumentException {
@@ -61,6 +81,50 @@ public class TransaccionesServiceImpl implements TransaccionesService {
 
         return transaccionesRepository.save(transaccion);
     }
+    
+    @Override
+    public List<TransaccionesDTO> saveAndFetchTodayTraspasos() {
+        LocalDate today = LocalDate.now();
+        LocalDateTime inicio = today.atStartOfDay();
+        LocalDateTime fin    = today.atTime(LocalTime.MAX);
+
+        // 1) IDs ya guardados
+        Set<String> existingIds = transRepo.findAll()
+            .stream()
+            .map(Transacciones::getIdtransaccion)
+            .collect(Collectors.toSet());
+
+        // 2) Llamada a controladores y extracción de body
+        List<TransaccionesDTO> all = new ArrayList<>();
+
+        ResponseEntity<List<TransaccionesDTO>> respTron  = tronController.getTrustOutgoingTransfers();
+        ResponseEntity<List<TransaccionesDTO>> respSpot  = spotController.getTraspasosNoRegistrados(100);
+        ResponseEntity<List<TransaccionesDTO>> respPay   = payController.getTransaccionesNoRegistradas();
+
+        if (respTron.hasBody()) all.addAll(respTron.getBody());
+        if (respSpot.hasBody()) all.addAll(respSpot.getBody());
+        if (respPay .hasBody()) all.addAll(respPay .getBody());
+
+        // 3) Filtra solo hoy y no duplicados, y guarda cada uno
+        for (TransaccionesDTO dto : all) {
+            if (dto.getFecha().toLocalDate().equals(today)
+             && !existingIds.contains(dto.getIdtransaccion())) {
+                try {
+                    guardarTransaccion(dto);
+                    existingIds.add(dto.getIdtransaccion());
+                } catch (Exception ignored) {}
+            }
+        }
+
+        // 4) Recupera de BD todas las de hoy y convierte a DTO
+        return transRepo.findByFechaBetween(inicio, fin)
+                        .stream()
+                        .map(TransaccionesDTO::fromEntity)
+                        .collect(Collectors.toList());
+    }
+
+    
+    
 
 
 }

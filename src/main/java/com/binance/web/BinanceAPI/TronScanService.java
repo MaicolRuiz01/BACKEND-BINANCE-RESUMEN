@@ -40,7 +40,7 @@ public class TronScanService {
     }
     
     public String getTRC20TransfersUsingTronGrid(String address) {
-        String url = "https://api.trongrid.io/v1/accounts/" + address + "/transactions/trc20?limit=50";
+        String url = "https://api.trongrid.io/v1/accounts/" + address + "/transactions/trc20?limit=100";
         HttpHeaders headers = new HttpHeaders();
         headers.set("TRON-PRO-API-KEY", "a2932898-5552-453f-88f7-7f4615aa1c08");
         HttpEntity<String> entity = new HttpEntity<>(headers);
