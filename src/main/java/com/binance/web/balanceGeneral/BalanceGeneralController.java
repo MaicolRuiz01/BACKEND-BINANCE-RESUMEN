@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/api/balance-general")
+@RequestMapping("/balance-general")
 public class BalanceGeneralController {
 	
     @Autowired
@@ -31,5 +31,15 @@ public class BalanceGeneralController {
     public BalanceGeneral obtener(@RequestParam("fecha") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fecha) {
         return balanceService.obtenerPorFecha(fecha);
     }
+    
+    
+    //trae todos los balces ademas de calcular el de hoy
+    @GetMapping("/hoy")
+    public List<BalanceGeneral> calcularHoyYListar() {
+        LocalDate today = LocalDate.now();
+        balanceService.calcularOBalancear(today);
+        return balanceService.listarTodos();
+    }
+
 
 }
