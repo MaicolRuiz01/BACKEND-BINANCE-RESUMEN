@@ -32,6 +32,7 @@ public class Transacciones {
     private AccountBinance cuentaFrom;
     private String tipo;
     private String idtransaccion;
+    private String txId;
 	
 	
 

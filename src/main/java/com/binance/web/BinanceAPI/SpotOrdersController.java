@@ -11,6 +11,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -119,6 +120,49 @@ public class SpotOrdersController {
 
         } catch (Exception e) {
             return ResponseEntity.ok(response);
+        }
+    }
+    
+    @GetMapping("/retiros")
+    public ResponseEntity<String> getSpotWithdrawals(
+            @RequestParam String account,
+            @RequestParam(defaultValue = "50") int limit) {
+
+        String response = binanceService.getSpotWithdrawals(account, limit);
+
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            JsonNode root     = mapper.readTree(response);
+            JsonNode dataNode = root.path("data");
+            if (!dataNode.isArray()) {
+                return ResponseEntity.ok(response);
+            }
+            ArrayNode sourceArray = (ArrayNode) dataNode;
+
+            // IDs ya registrados como venta
+            Set<String> assignedIds = sellDollarsRepository.findAll().stream()
+                .map(s -> s.getIdWithdrawals())
+                .collect(Collectors.toSet());
+
+            // Direcciones internas (no queremos mostrar traspasos internos aquí)
+            Set<String> internalAddresses = getRegisteredAddresses();
+
+            // Filtramos
+            ArrayNode filtered = mapper.createArrayNode();
+            for (JsonNode withdrawal : sourceArray) {
+                String id      = withdrawal.path("id").asText();
+                String address = withdrawal.path("address").asText(null);
+                if (!assignedIds.contains(id)
+                        && (address == null || !internalAddresses.contains(address))) {
+                    filtered.add(withdrawal);
+                }
+            }
+
+            ((ObjectNode) root).set("data", filtered);
+            return ResponseEntity.ok(mapper.writeValueAsString(root));
+
+        } catch (Exception e) {
+            return ResponseEntity.ok(response);  // Devuelve original en caso de error
         }
     }
 
@@ -237,12 +281,16 @@ public class SpotOrdersController {
 
 	    private LocalDateTime parseFechaDesdeString(String fechaStr) {
 	        try {
-	            return LocalDateTime.parse(fechaStr, FORMATO_FECHA);
+	            // Primero parseamos como UTC
+	            LocalDateTime utcDateTime = LocalDateTime.parse(fechaStr, FORMATO_FECHA);
+	            // Luego lo convertimos a la hora local (sin sumar manualmente)
+	            return utcDateTime.atZone(ZoneId.of("UTC")).withZoneSameInstant(ZoneId.of("America/Bogota")).toLocalDateTime();
 	        } catch (DateTimeParseException e) {
 	            System.err.println("Error parseando fecha: " + fechaStr);
 	            return null;
 	        }
 	    }
+
 
 	    private class ClasificacionMovimientos {
 	        List<SellDollarsDto> ventas = new ArrayList<>();
@@ -339,7 +387,11 @@ public class SpotOrdersController {
 	        if (timestamp > 1_000_000_000_000_000L) {
 	            timestamp = timestamp / 1000; // microsegundos a milisegundos
 	        }
-	        return LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp), ZoneId.of("America/Bogota"));
+	        //return LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp), ZoneId.of("America/Bogota"));
+	        //return Instant.ofEpochMilli(timestamp).atZone(ZoneId.of("UTC")).toLocalDateTime();
+	        return LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp), ZoneId.of("UTC"));
+
+
 	    }
 
 
@@ -351,40 +403,240 @@ public class SpotOrdersController {
 
 
 
-	    @GetMapping("/ventas-no-registradas")
-	    public ResponseEntity<?> getVentasNoRegistradas(@RequestParam(defaultValue = "100") int limit) {
-	        try {
-	            ClasificacionMovimientos movimientos = obtenerMovimientosClasificados(limit);
-	            return ResponseEntity.ok(movimientos.ventas);
-	        } catch (Exception e) {
-	            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-	                .body("{\"error\":\"" + e.getMessage() + "\"}");
-	        }
-	    }
-
-
-	    @GetMapping("/traspasos-no-registrados")
-	    public ResponseEntity<List<TransaccionesDTO>> getTraspasosNoRegistrados(
-	            @RequestParam(defaultValue = "100") int limit) {
-	        try {
-	            ClasificacionMovimientos movimientos = obtenerMovimientosClasificados(limit);
-	            return ResponseEntity.ok(movimientos.traspasos);
-	        } catch (Exception e) {
-	            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-	                    .body(new ArrayList<>());
-	        }
-	    }
+		/*
+		 * @GetMapping("/ventas-no-registradas") public ResponseEntity<?>
+		 * getVentasNoRegistradas(@RequestParam(defaultValue = "100") int limit) { try {
+		 * ClasificacionMovimientos movimientos = obtenerMovimientosClasificados(limit);
+		 * return ResponseEntity.ok(movimientos.ventas); } catch (Exception e) { return
+		 * ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR) .body("{\"error\":\""
+		 * + e.getMessage() + "\"}"); } }
+		 * 
+		 * 
+		 * @GetMapping("/traspasos-no-registrados") public
+		 * ResponseEntity<List<TransaccionesDTO>> getTraspasosNoRegistrados(
+		 * 
+		 * @RequestParam(defaultValue = "100") int limit) { try {
+		 * ClasificacionMovimientos movimientos = obtenerMovimientosClasificados(limit);
+		 * return ResponseEntity.ok(movimientos.traspasos); } catch (Exception e) {
+		 * return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR) .body(new
+		 * ArrayList<>()); } }
+		 * 
+		 * @GetMapping("/compras-no-registradas") public
+		 * ResponseEntity<List<BuyDollarsDto>> getComprasNoRegistradas(
+		 * 
+		 * @RequestParam(defaultValue = "100") int limit) { try { List<BuyDollarsDto>
+		 * compras = obtenerComprasNoRegistradas(limit); return
+		 * ResponseEntity.ok(compras); } catch (Exception e) { return
+		 * ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+		 * .body(Collections.emptyList()); } }
+		 */
 	    
 	    @GetMapping("/compras-no-registradas")
 	    public ResponseEntity<List<BuyDollarsDto>> getComprasNoRegistradas(
-	            @RequestParam(defaultValue = "100") int limit) {
-	        try {
-	            List<BuyDollarsDto> compras = obtenerComprasNoRegistradas(limit);
-	            return ResponseEntity.ok(compras);
-	        } catch (Exception e) {
-	            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-	                    .body(Collections.emptyList());
+	            @RequestParam(defaultValue = "100") int limit) throws Exception {
+
+	        Set<String> comprasIds = buyDollarsRepository.findAll().stream()
+	            .map(BuyDollars::getIdDeposit).collect(Collectors.toSet());
+
+	        Set<String> retiroTxIds = transaccionesRepository.findAll().stream()
+	        	    .map(Transacciones::getTxId)
+	        	    .filter(Objects::nonNull)
+	        	    .collect(Collectors.toSet());
+
+
+	        List<BuyDollarsDto> resultado = new ArrayList<>();
+	        ObjectMapper mapper = new ObjectMapper();
+
+	        for (String account : binanceService.getAllAccountNames()) {
+	            String resp = binanceService.getSpotDeposits(account, limit);
+	            JsonNode root = mapper.readTree(resp);
+	            ArrayNode arr;
+
+	            if (root.isArray()) {
+	                arr = (ArrayNode) root;
+	            } else {
+	                JsonNode dataNode = root.path("data");
+	                if (!dataNode.isArray()) continue;
+	                arr = (ArrayNode) dataNode;
+	            }
+
+	            for (JsonNode dep : arr) {
+	                String id = dep.path("id").asText();
+	                String txId = dep.path("txId").asText(null);
+	                double amount = dep.path("amount").asDouble(0);
+	                String tsStr = dep.path("insertTime").asText(null);
+
+	                if (comprasIds.contains(id)) continue;
+	                if (txId != null && retiroTxIds.contains(txId)) continue;
+
+	                LocalDateTime fecha = null;
+	                if (tsStr != null) {
+	                    try {
+	                        long ts = Long.parseLong(tsStr); // insertTime es milisegundos
+	                        fecha = Instant.ofEpochMilli(ts).atZone(ZoneId.systemDefault()).toLocalDateTime();
+	                    } catch (NumberFormatException ex) {
+	                        // Si por alguna razón insertTime viene como texto, usamos el parser string
+	                        fecha = parseFechaDesdeString(tsStr);
+	                    }
+	                }
+
+
+	                BuyDollarsDto dto = new BuyDollarsDto();
+	                dto.setIdDeposit(id);
+	                dto.setNameAccount(account);
+	                dto.setDollars(amount);
+	                dto.setDate(fecha);
+	                resultado.add(dto);
+	            }
 	        }
+
+	        return ResponseEntity.ok(resultado);
+	    }
+
+
+
+	    /**
+	     * Retorna retiros (ventas) que no son traspasos internos.
+	     */
+	    @GetMapping("/ventas-no-registradas")
+	    public ResponseEntity<List<SellDollarsDto>> getVentasNoRegistradas(
+	            @RequestParam(defaultValue = "100") int limit) throws Exception {
+
+	        Set<String> ventasIds = sellDollarsRepository.findAll()
+	            .stream().map(s -> s.getIdWithdrawals()).collect(Collectors.toSet());
+	        Set<String> internalAddrs = accountBinanceRepository.findAll()
+	            .stream().map(a -> a.getAddress()).filter(Objects::nonNull).collect(Collectors.toSet());
+
+	        List<SellDollarsDto> result = new ArrayList<>();
+	        ObjectMapper mapper = new ObjectMapper();
+
+	        for (String account : binanceService.getAllAccountNames()) {
+	            String resp = binanceService.getSpotWithdrawals(account, limit);
+	            JsonNode root = mapper.readTree(resp);
+	            ArrayNode arr;
+
+	            if (root.isArray()) {
+	                arr = (ArrayNode) root;
+	            } else {
+	                JsonNode dataNode = root.path("data");
+	                if (!dataNode.isArray()) continue;
+	                arr = (ArrayNode) dataNode;
+	            }
+
+	            for (JsonNode wd : arr) {
+	                String id = wd.path("id").asText();
+	                String addr = wd.path("address").asText(null);
+	                String coin = wd.path("coin").asText("");
+	                String tsStr = wd.path("applyTime").asText(null);
+
+	                if (ventasIds.contains(id)) continue;
+	                if (addr != null && internalAddrs.contains(addr)) continue;
+
+	                LocalDateTime fecha = null;
+	                if (tsStr != null) {
+	                    try {
+	                        long ts = Long.parseLong(tsStr);
+	                        fecha = parseFechaDesdeTimestamp(ts); // usa tu método centralizado ya existente
+	                    } catch (NumberFormatException ex) {
+	                        fecha = parseFechaDesdeString(tsStr);
+	                    }
+	                }
+
+	                SellDollarsDto dto = new SellDollarsDto();
+	                dto.setIdWithdrawals(id);
+	                dto.setNameAccount(account);
+	                dto.setDate(fecha);
+
+	                double amount = wd.path("amount").asDouble(0);
+	                if (coin.equalsIgnoreCase("TRX") && fecha != null) {
+	                    Double tasa = binanceService.getHistoricalPriceTRXUSDT(fecha);
+	                    dto.setEquivalenteciaTRX(amount);
+	                    dto.setDollars(amount * (tasa != null ? tasa : 1));
+	                } else {
+	                    dto.setDollars(amount);
+	                    dto.setEquivalenteciaTRX(null);
+	                }
+
+	                result.add(dto);
+	            }
+	        }
+
+	        return ResponseEntity.ok(result);
+	    }
+
+
+
+
+	    /**
+	     * Retorna traspasos detectados a partir de retiros hacia cuentas internas.
+	     */
+	    @GetMapping("/traspasos-no-registrados")
+	    public ResponseEntity<List<TransaccionesDTO>> getTraspasosNoRegistrados(
+	            @RequestParam(defaultValue = "100") int limit) throws Exception {
+
+	        Set<String> transIds = transaccionesRepository.findAll()
+	            .stream().map(t -> t.getIdtransaccion()).collect(Collectors.toSet());
+	        Set<String> internalAddrs = accountBinanceRepository.findAll()
+	            .stream().map(a -> a.getAddress()).filter(Objects::nonNull).collect(Collectors.toSet());
+
+	        List<TransaccionesDTO> result = new ArrayList<>();
+	        ObjectMapper mapper = new ObjectMapper();
+
+	        for (String account : binanceService.getAllAccountNames()) {
+	            String resp = binanceService.getSpotWithdrawals(account, limit);
+	            JsonNode root = mapper.readTree(resp);
+	            ArrayNode arr;
+	            if (root.isArray()) {
+	                arr = (ArrayNode) root;
+	            } else {
+	                JsonNode dataNode = root.path("data");
+	                if (!dataNode.isArray()) continue;
+	                arr = (ArrayNode) dataNode;
+	            }
+
+	            for (JsonNode wd : arr) {
+	                String id = wd.path("id").asText();
+	                String addr = wd.path("address").asText(null);
+	                if (transIds.contains(id)) continue;
+	                if (addr == null || !internalAddrs.contains(addr)) continue;
+
+	                String coin = wd.path("coin").asText("");
+	                double amount = wd.path("amount").asDouble(0);
+	                String tsStr = wd.path("applyTime").asText(null);
+	                LocalDateTime fecha = null;
+	                if (tsStr != null) {
+	                    try {
+	                        long ts = Long.parseLong(tsStr);
+	                        fecha = parseFechaDesdeTimestamp(ts);
+	                    } catch (NumberFormatException ex) {
+	                        fecha = parseFechaDesdeString(tsStr);
+	                    }
+	                }
+
+	                TransaccionesDTO dto = new TransaccionesDTO();
+	                dto.setIdtransaccion(id);
+	                dto.setCuentaFrom(account);
+	                dto.setCuentaTo(addr);
+	                dto.setFecha(fecha);
+	                String txId = wd.path("txId").asText(null);
+	                dto.setTxId(txId);
+
+
+	                if (coin.equalsIgnoreCase("TRX") && fecha != null) {
+	                    Double tasa = binanceService.getHistoricalPriceTRXUSDT(fecha);
+	                    double montoUsdt = amount * (tasa != null ? tasa : 1);
+	                    dto.setMonto(montoUsdt);
+	                    dto.setTipo(String.format("TRX (tasa: %s USDT)", tasa != null ? tasa : "N/A"));
+	                } else {
+	                    dto.setMonto(amount);
+	                    dto.setTipo(coin);
+	                }
+
+	                result.add(dto);
+	            }
+	        }
+
+	        return ResponseEntity.ok(result);
 	    }
 
 

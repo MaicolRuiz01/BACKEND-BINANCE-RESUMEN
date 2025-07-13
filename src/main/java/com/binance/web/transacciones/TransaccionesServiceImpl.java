@@ -88,24 +88,28 @@ public class TransaccionesServiceImpl implements TransaccionesService {
         LocalDateTime inicio = today.atStartOfDay();
         LocalDateTime fin    = today.atTime(LocalTime.MAX);
 
-        // 1) IDs ya guardados
         Set<String> existingIds = transRepo.findAll()
             .stream()
             .map(Transacciones::getIdtransaccion)
             .collect(Collectors.toSet());
 
-        // 2) Llamada a controladores y extracción de body
         List<TransaccionesDTO> all = new ArrayList<>();
 
-        ResponseEntity<List<TransaccionesDTO>> respTron  = tronController.getTrustOutgoingTransfers();
-        ResponseEntity<List<TransaccionesDTO>> respSpot  = spotController.getTraspasosNoRegistrados(100);
-        ResponseEntity<List<TransaccionesDTO>> respPay   = payController.getTransaccionesNoRegistradas();
+        ResponseEntity<List<TransaccionesDTO>> respTron = tronController.getTrustOutgoingTransfers();
+        ResponseEntity<List<TransaccionesDTO>> respSpot = null; // Declara antes del try
+        try {
+            respSpot = spotController.getTraspasosNoRegistrados(100);
+            if (respSpot.hasBody()) all.addAll(respSpot.getBody());
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        ResponseEntity<List<TransaccionesDTO>> respPay = payController.getTransaccionesNoRegistradas();
 
         if (respTron.hasBody()) all.addAll(respTron.getBody());
-        if (respSpot.hasBody()) all.addAll(respSpot.getBody());
-        if (respPay .hasBody()) all.addAll(respPay .getBody());
+        if (respSpot != null && respSpot.hasBody()) all.addAll(respSpot.getBody());
+        if (respPay.hasBody()) all.addAll(respPay.getBody());
 
-        // 3) Filtra solo hoy y no duplicados, y guarda cada uno
         for (TransaccionesDTO dto : all) {
             if (dto.getFecha().toLocalDate().equals(today)
              && !existingIds.contains(dto.getIdtransaccion())) {
@@ -116,7 +120,6 @@ public class TransaccionesServiceImpl implements TransaccionesService {
             }
         }
 
-        // 4) Recupera de BD todas las de hoy y convierte a DTO
         return transRepo.findByFechaBetween(inicio, fin)
                         .stream()
                         .map(TransaccionesDTO::fromEntity)

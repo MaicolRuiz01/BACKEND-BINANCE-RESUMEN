@@ -19,6 +19,7 @@ public class TransaccionesDTO {
 	private String cuentaFrom;
 	private LocalDateTime fecha;
 	private String tipo;
+	private String txId;
 	
 	public static TransaccionesDTO fromEntity(Transacciones t) {
         return new TransaccionesDTO(
@@ -27,7 +28,8 @@ public class TransaccionesDTO {
             t.getCuentaTo().getName(),     // cuentaTo
             t.getCuentaFrom().getName(),   // cuentaFrom
             t.getFecha(),                  // fecha
-            t.getTipo()                    // tipo
+            t.getTipo(),                    // tipo
+            t.getTxId()
         );
     }
 	
