@@ -1,5 +1,6 @@
 package com.binance.web.SellDollars;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -10,5 +11,9 @@ public interface SellDollarsService {
 	List<SellDollars> registrarYObtenerVentasNoAsignadas();
 	List<SellDollars> obtenerVentasEntreFechas(LocalDateTime inicio, LocalDateTime fin);
 	void saveUtilityDefinitive(List<SellDollars> rangoSell, Double averageRate);
+	List<SellDollars> obtenerVentasPorFecha(LocalDate fecha);
+
+
+
 
 }

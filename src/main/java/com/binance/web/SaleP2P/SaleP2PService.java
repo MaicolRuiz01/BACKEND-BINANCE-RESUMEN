@@ -1,5 +1,6 @@
 package com.binance.web.SaleP2P;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -15,4 +16,7 @@ public interface SaleP2PService {
     List<SaleP2P> obtenerVentasEntreFechas(LocalDateTime inicio, LocalDateTime fin);
     String processAssignAccountCop(Integer saleId, List<AssignAccountDto> accounts);
     void saveUtilitydefinitive(List<SaleP2P> rangeSales, Double averageRate);
+    List<SaleP2P> obtenerVentasPorFecha(LocalDate fecha);
+    Double obtenerComisionesPorFecha(LocalDate fecha);
+
 }

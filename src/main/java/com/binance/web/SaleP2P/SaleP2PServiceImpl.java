@@ -220,4 +220,23 @@ public class SaleP2PServiceImpl implements SaleP2PService {
 	private String getBinanceAccountName(SaleP2P sale) {
 		return sale.getBinanceAccount() != null ? sale.getBinanceAccount().getName() : null;
 	}
+	
+	@Override
+	public List<SaleP2P> obtenerVentasPorFecha(LocalDate fecha) {
+	    LocalDateTime start = fecha.atStartOfDay();
+	    LocalDateTime end = start.plusDays(1);
+	    return saleP2PRepository.findByDateBetween(start, end);
+	}
+	
+	@Override
+	public Double obtenerComisionesPorFecha(LocalDate fecha) {
+	    LocalDateTime start = fecha.atStartOfDay();
+	    LocalDateTime end = start.plusDays(1);
+	    return saleP2PRepository.findByDateBetween(start, end).stream()
+	        .mapToDouble(SaleP2P::getCommission)
+	        .sum();
+	}
+
+	
+
 }

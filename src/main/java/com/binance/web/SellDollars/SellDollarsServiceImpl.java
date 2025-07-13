@@ -240,4 +240,15 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 		return impuesto;
 	}
 	
+
+	
+	@Override
+	public List<SellDollars> obtenerVentasPorFecha(LocalDate fecha) {
+	    LocalDateTime start = fecha.atStartOfDay();
+	    LocalDateTime end = fecha.plusDays(1).atStartOfDay();
+	    return sellDollarsRepository.findByDateBetween(start, end);
+	}
+
+
+
 }

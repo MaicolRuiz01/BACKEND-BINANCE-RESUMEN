@@ -84,6 +84,7 @@ public class SpotOrdersController {
             @RequestParam String account,
             @RequestParam(defaultValue = "50") int limit) {
 
+
         String response = binanceService.getSpotDeposits(account, limit);
 
         try {
@@ -403,6 +404,7 @@ public class SpotOrdersController {
 
 
 
+
 		/*
 		 * @GetMapping("/ventas-no-registradas") public ResponseEntity<?>
 		 * getVentasNoRegistradas(@RequestParam(defaultValue = "100") int limit) { try {
@@ -489,8 +491,8 @@ public class SpotOrdersController {
 	                resultado.add(dto);
 	            }
 	        }
-
 	        return ResponseEntity.ok(resultado);
+	        
 	    }
 
 

@@ -260,7 +260,7 @@ public class BinanceService {
                 String secretKey = accountEntry[2];
 
                 // Consultar solo TRXUSDT con límite 100
-                String response = getSpotOrders(account, "TRXUSDT", 1000);
+                String response = getSpotOrders(account, "TRXUSDT", 20);
                 JsonArray tradesArray = JsonParser.parseString(response).getAsJsonArray();
 
                 for (JsonElement el : tradesArray) {
