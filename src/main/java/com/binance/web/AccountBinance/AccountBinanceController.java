@@ -83,5 +83,10 @@ public class AccountBinanceController {
         BigDecimal result = accountBinanceService.getTotalBalance();
         return ResponseEntity.ok(result);
     }
+    @GetMapping("/total-balance-interno")
+    public ResponseEntity<BigDecimal> getTotalBalanceInterno(){
+    	BigDecimal result = accountBinanceService.getTotalBalanceInterno();
+    	return ResponseEntity.ok(result);
+    	}
 
 }

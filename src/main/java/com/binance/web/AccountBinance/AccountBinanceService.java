@@ -21,4 +21,7 @@ public interface AccountBinanceService {
     //esto para borrar
     Double getFundingUSDTBalance(String name);
     
+    
+    BigDecimal getTotalBalanceInterno();
+    
 }

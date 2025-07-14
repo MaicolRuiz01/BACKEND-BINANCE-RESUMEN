@@ -8,4 +8,5 @@ public interface BalanceGeneralService {
     List<BalanceGeneral> listarTodos();
     BalanceGeneral obtenerPorFecha(LocalDate fecha);
 
+
 }

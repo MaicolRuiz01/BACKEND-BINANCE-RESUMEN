@@ -139,6 +139,15 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
         return totalBalance.multiply(BigDecimal.valueOf(latestRate.getRate()));
     }
     
+    @Override
+    public BigDecimal getTotalBalanceInterno() {
+        return accountBinanceRepository.findAll().stream()
+            .map(AccountBinance::getBalance)
+            .filter(Objects::nonNull)
+            .map(BigDecimal::valueOf)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+    
     
 
 }
