@@ -24,7 +24,7 @@ public class PurchaseRateController {
      */
     @GetMapping("/latest")
     public ResponseEntity<Double> getLatestRate() {
-        PurchaseRate latest = purchaseRateRepository.findTopByOrderByIdDesc();
+        PurchaseRate latest = purchaseRateRepository.findTopByOrderByDateDesc();
         return latest != null ? ResponseEntity.ok(latest.getRate()) : ResponseEntity.noContent().build();
     }
 
