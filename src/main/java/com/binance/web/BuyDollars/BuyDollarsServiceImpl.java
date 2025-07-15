@@ -4,12 +4,15 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.binance.web.AccountBinance.AccountBinanceService;
 import com.binance.web.Entity.AccountBinance;
+import com.binance.web.Entity.AverageRate;
 import com.binance.web.Entity.BuyDollars;
 import com.binance.web.Entity.Supplier;
 import com.binance.web.Repository.AccountBinanceRepository;
 import com.binance.web.Repository.BuyDollarsRepository;
 import com.binance.web.Repository.SupplierRepository;
+import com.binance.web.averageRate.AverageRateService;
 import com.binance.web.balance.PurchaseRate.PurchaseRateService;
 
 @Service
@@ -23,9 +26,15 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 
 	@Autowired
 	private AccountBinanceRepository accountBinanceRepository;
+	
+	@Autowired
+	private AccountBinanceService accountBinanceService;
 
 	@Autowired
 	private PurchaseRateService purchaseRateService;
+	
+	@Autowired
+	private AverageRateService averageRateService;
 
 	@Override
 	@Transactional
@@ -35,6 +44,8 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 
 		AccountBinance accountBinance = accountBinanceRepository.findById(dto.getAccountBinanceId())
 				.orElseThrow(() -> new RuntimeException("Account not found"));
+		
+		
 
 		BuyDollars buy = new BuyDollars();
 		buy.setDollars(dto.getDollars());
@@ -55,7 +66,19 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 		double montoSumar = dollars * tasa;
 		supplier.setBalance(supplierBalance + montoSumar);
 		accountBinance.setBalance(accountBalance + dollars);
-
+		
+		
+		AverageRate ultimaTasa =  averageRateService.getUltimaTasaPromedio();
+		Double saldoTotalInternoAnteriorUSDT = accountBinanceService.getTotalBalanceInterno().doubleValue() - dollars;
+		Double pesosAnteriores = saldoTotalInternoAnteriorUSDT * ultimaTasa.getAverageRate();
+		
+		Double pesosTotal =  pesosAnteriores + montoSumar;
+		Double usdtTotal = dollars + saldoTotalInternoAnteriorUSDT;
+		Double nuevaTasaPromedio = pesosTotal / usdtTotal;
+		Double nuevoSaldo = saldoTotalInternoAnteriorUSDT + dollars;
+		
+		averageRateService.guardarNuevaTasa(nuevaTasaPromedio, nuevoSaldo);
+		
 		accountBinanceRepository.save(accountBinance);
 		supplierRepository.save(supplier);
 		//desactivo esto porque da error
