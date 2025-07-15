@@ -1,12 +1,16 @@
 package com.binance.web.SaleP2P;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.SaleP2P;
+import com.binance.web.Repository.AccountBinanceRepository;
 
 @RestController
 @RequestMapping("/saleP2P")
@@ -14,6 +18,8 @@ public class SaleP2PController {
 
 	@Autowired
 	private SaleP2PService saleP2PService;
+	@Autowired
+	private AccountBinanceRepository accountBinanceRepository;
 
 	@GetMapping
 	public ResponseEntity<List<SaleP2P>> getAllSales() {
@@ -55,4 +61,19 @@ public class SaleP2PController {
 		saleP2PService.deleteSaleP2P(id);
 		return ResponseEntity.noContent().build();
 	}
+	
+	@GetMapping("today/all-binance")
+	public ResponseEntity<List<SaleP2PDto>> getAllSalesTodayAllBinanceAccounts() {
+	    List<SaleP2PDto> result = new ArrayList<>();
+	    List<AccountBinance> binanceAccounts = accountBinanceRepository.findAll().stream()
+	        .filter(acc -> "BINANCE".equalsIgnoreCase(acc.getTipo()))
+	        .collect(Collectors.toList());
+
+	    for (AccountBinance account : binanceAccounts) {
+	        result.addAll(saleP2PService.getLastSaleP2pToday(account.getName()));
+	    }
+
+	    return ResponseEntity.ok(result);
+	}
+
 }
