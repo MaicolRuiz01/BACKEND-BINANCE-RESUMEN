@@ -7,6 +7,6 @@ public interface BalanceGeneralService {
 	void calcularOBalancear(LocalDate fecha);
     List<BalanceGeneral> listarTodos();
     BalanceGeneral obtenerPorFecha(LocalDate fecha);
-
+    BalanceGeneral calcularHoyYRetornar();
 
 }

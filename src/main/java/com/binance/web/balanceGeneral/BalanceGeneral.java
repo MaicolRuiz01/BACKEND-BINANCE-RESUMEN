@@ -23,11 +23,12 @@ public class BalanceGeneral {
     private LocalDate date;
 
     private Double saldo; // saldo total del día
-    private Double tasaCompra;
-    private Double tasaVenta;
+    private Double tasaPromedioDelDia;
+    private Double tasaVentaDelDia;
 
-    private Double totalP2P;
-    private Double comisionesP2P;
+    private Double totalP2PdelDia;
+    private Double comisionesP2PdelDia;
+    private Double cuatroPorMilDeVentas;
     private Double totalGeneralSales;
 
 }

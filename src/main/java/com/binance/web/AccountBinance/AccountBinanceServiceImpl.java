@@ -3,6 +3,7 @@ package com.binance.web.AccountBinance;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -11,8 +12,10 @@ import org.springframework.web.bind.annotation.GetMapping;
 import com.binance.web.BinanceAPI.BinanceService;
 import com.binance.web.BinanceAPI.TronScanService;
 import com.binance.web.Entity.AccountBinance;
+import com.binance.web.Entity.AverageRate;
 import com.binance.web.Entity.PurchaseRate;
 import com.binance.web.Repository.AccountBinanceRepository;
+import com.binance.web.Repository.AverageRateRepository;
 import com.binance.web.Repository.PurchaseRateRepository;
 import com.binance.web.balance.PurchaseRate.PurchaseRateService;
 
@@ -25,6 +28,8 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
     private final BinanceService binanceService;
     private final AccountBinanceRepository accountBinanceRepository;
     private final TronScanService tronScanService;
+    @Autowired
+    private AverageRateRepository averageRateRepository;
 
 
     public AccountBinanceServiceImpl(
@@ -117,9 +122,9 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
         return binanceService.getFundingAssetBalance(name, "USDT");
     }
 
-    @Autowired
-    private PurchaseRateRepository purchaseRateRepository;
-
+    
+    
+    //obtiene el saldos de todas las cuetnas pasadas a pesos
     @Override
     public BigDecimal getTotalBalance() {
         List<AccountBinance> accounts = accountBinanceRepository.findAll();
@@ -127,16 +132,18 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
         BigDecimal totalBalance = accounts.stream()
                 .map(AccountBinance::getBalance)
                 .filter(Objects::nonNull)
-                .map(BigDecimal::valueOf) // convierte Double a BigDecimal
+                .map(BigDecimal::valueOf) // aquí sí es correcto usar valueOf porque balance es Double
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        PurchaseRate latestRate = purchaseRateRepository.findTopByOrderByDateDesc();
 
-        if (latestRate == null || latestRate.getRate() == null) {
+        AverageRate rate = averageRateRepository.findTopByOrderByIdDesc()
+                .orElseThrow(() -> new RuntimeException("No purchase rate available"));
+
+        if (rate.getAverageRate() == null) {
             throw new RuntimeException("No purchase rate available");
         }
 
-        return totalBalance.multiply(BigDecimal.valueOf(latestRate.getRate()));
+        return totalBalance.multiply(BigDecimal.valueOf(rate.getAverageRate()));
     }
     
     @Override
