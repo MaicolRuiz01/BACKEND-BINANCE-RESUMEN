@@ -44,8 +44,13 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService{
     @Override
     @Transactional
     public void calcularOBalancear(LocalDate fecha) {
-        Double tasaCompra = rateRepo.findTopByOrderByDateDesc().getRate();
 
+    	BalanceGeneral balance = balanceRepo.findByDate(fecha)
+    	        .orElseGet(() -> {
+    	            BalanceGeneral nuevo = new BalanceGeneral();
+    	            nuevo.setDate(fecha);
+    	            return nuevo;
+    	        });
         
         
         Double saldoBinanceTotalEnPesos = accountBinanceService.getTotalBalance().doubleValue();
@@ -85,7 +90,6 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService{
         Double comisionesP2P = saleP2PService.obtenerComisionesPorFecha(fecha) * tasaPromedioDelDia;
         Double cuatroPorMil = totalP2P * 0.004;
 
-        BalanceGeneral balance = balanceRepo.findByDate(fecha).orElse(new BalanceGeneral());
         balance.setDate(fecha);
         balance.setSaldo(saldoTotal);
         balance.setTasaPromedioDelDia(tasaPromedioDelDia);
