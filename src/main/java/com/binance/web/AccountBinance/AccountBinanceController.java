@@ -77,6 +77,11 @@ public class AccountBinanceController {
         return ResponseEntity.ok(usdtBalance);
     }
     
+    @GetMapping("/balance-total-externo")
+    public Double obtenerBalanceTotalExterno() {
+        return accountBinanceService.getTotalExternalBalance();
+    }
+    
     //este me da todos los dalos de la cuetnas binance pasado a pesos
     @GetMapping("/total-balance")
     public ResponseEntity<BigDecimal> getTotalBalanceMultiplied() {

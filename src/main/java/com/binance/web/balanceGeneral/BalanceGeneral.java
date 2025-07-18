@@ -29,6 +29,11 @@ public class BalanceGeneral {
     private Double totalP2PdelDia;
     private Double comisionesP2PdelDia;
     private Double cuatroPorMilDeVentas;
-    private Double totalGeneralSales;
+    private Double utilidadP2P;
+    
+    private Double totalVentasGeneralesDelDia;
+    private Double utilidadVentasGenerales;
+    
+   // private Double totalGeneralSales;
 
 }

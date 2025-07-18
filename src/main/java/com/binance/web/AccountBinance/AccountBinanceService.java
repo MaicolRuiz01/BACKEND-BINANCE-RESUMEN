@@ -23,5 +23,6 @@ public interface AccountBinanceService {
     
     
     BigDecimal getTotalBalanceInterno();
+    Double getTotalExternalBalance();
     
 }

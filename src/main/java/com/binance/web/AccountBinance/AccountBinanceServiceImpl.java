@@ -109,6 +109,29 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
             return "{\"error\": \"Tipo de cuenta no soportado: " + tipo + "\"}";
         }
     }
+    
+    @Override
+    public Double getTotalExternalBalance() {
+        List<AccountBinance> cuentas = accountBinanceRepository.findAll();
+
+        double total = 0.0;
+
+        for (AccountBinance account : cuentas) {
+            if ("BINANCE".equalsIgnoreCase(account.getTipo())) {
+                String balanceStr = binanceService.getGeneralBalance(account.getName());
+                try {
+                    total += Double.parseDouble(balanceStr);
+                } catch (NumberFormatException e) {
+                    // Si la cuenta no responde correctamente, no suma nada.
+                }
+            } else if ("TRUST".equalsIgnoreCase(account.getTipo())) {
+                total += tronScanService.getTotalAssetTokenOverview(account.getAddress());
+            }
+        }
+        return total;
+    }
+
+    
 
     @Override
     public Double getEstimatedUSDTBalance(String name) {
