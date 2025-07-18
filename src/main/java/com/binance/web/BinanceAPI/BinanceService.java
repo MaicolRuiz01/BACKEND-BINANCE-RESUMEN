@@ -635,19 +635,6 @@ public class BinanceService {
 	    return total;
 	}
 
-
-
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
 	public Double getEstimatedSpotBalance(String account) {
 	    try {
 	        // 1) Credenciales
