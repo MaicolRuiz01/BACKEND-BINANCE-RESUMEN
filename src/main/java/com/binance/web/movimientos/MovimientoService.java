@@ -11,4 +11,7 @@ public interface MovimientoService {
 	Movimiento RegistrarRetiro(Integer cuentaId, Double monto);
 	Movimiento RegistrarDeposito(Integer cuentaId, Double monto);
 	List<Movimiento> listar();
+	List<Movimiento> listarRetiros();
+	List<Movimiento> listarDepositos();
+	List<Movimiento> listarTransferencias();
 }

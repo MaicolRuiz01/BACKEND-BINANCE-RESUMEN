@@ -30,5 +30,6 @@ public class Movimiento {
 	private AccountCop cuentaDestino;
 	@ManyToOne
 	private Efectivo caja;
+	private Double comision;
 
 }

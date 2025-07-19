@@ -38,4 +38,36 @@ public class MovimientoController {
     public List<Movimiento> listar() {
         return movimientoService.listar();
     }
+    
+    @GetMapping("/retiros")
+    public List<MovimientoDTO> listarRetiros() {
+        return movimientoService.listarRetiros().stream()
+            .map(this::mapToDto)
+            .toList();
+    }
+
+    @GetMapping("/depositos")
+    public List<MovimientoDTO> listarDepositos() {
+        return movimientoService.listarDepositos().stream()
+            .map(this::mapToDto)
+            .toList();
+    }
+
+    @GetMapping("/transferencias")
+    public List<MovimientoDTO> listarTransferencias() {
+        return movimientoService.listarTransferencias().stream()
+            .map(this::mapToDto)
+            .toList();
+    }
+    
+    private MovimientoDTO mapToDto(Movimiento movimiento) {
+	    return new MovimientoDTO(
+	        movimiento.getTipo(),
+	        movimiento.getFecha(),
+	        movimiento.getMonto(),
+	        movimiento.getCuentaOrigen() != null ? movimiento.getCuentaOrigen().getName() : null,
+	        movimiento.getCuentaDestino() != null ? movimiento.getCuentaDestino().getName() : null,
+	        movimiento.getCaja() != null ? movimiento.getCaja().getName() : null
+	    );
+	}
 }
