@@ -24,13 +24,12 @@ public class Gasto {
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Integer id;
-	
-	@ManyToOne
-	@JoinColumn(name="tipo_id", nullable = false)
-	private TipoGasto tipo;
 	private String descripcion; 
 	private LocalDateTime fecha;
 	private Double monto;
-	private Boolean pagado;
+	@ManyToOne
+	private AccountCop cuentaPago;
+	@ManyToOne
+	private Efectivo pagoEfectivo;
 	
 }
