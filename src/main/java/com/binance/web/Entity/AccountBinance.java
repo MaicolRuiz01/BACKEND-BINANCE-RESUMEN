@@ -28,4 +28,7 @@ public class AccountBinance {
 	private String address;
 	//esto es para diferencial si es de binance o truswallet
 	private String tipo;
+	
+	private String apiKey;
+	private String apiSecret;
 }

@@ -1,10 +1,14 @@
 package com.binance.web.BinanceAPI;
 
+import com.binance.web.Entity.AccountBinance;
+import com.binance.web.Repository.AccountBinanceRepository;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import javax.crypto.Mac;
@@ -22,6 +26,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -31,6 +36,8 @@ public class BinanceService {
 
     private static final String PAYMENTS_API_URL = "https://api.binance.com/sapi/v1/pay/transactions";
     private static final String P2P_ORDERS_API_URL = "https://api.binance.com/sapi/v1/c2c/orderMatch/listUserOrderHistory";
+    @Autowired
+    private AccountBinanceRepository accountRepo;
 
     // Claves API de cada cuenta
     private final String[][] apiKeys = {
@@ -44,10 +51,20 @@ public class BinanceService {
     };
     
     public List<String> getAllAccountNames() {
-        return Arrays.stream(apiKeys)
-                     .map(keys -> keys[0])
-                     .collect(Collectors.toList());
+        List<String> dbAccounts = accountRepo.findByTipo("BINANCE").stream()
+                .filter(a -> a.getApiKey() != null && a.getApiSecret() != null)
+                .map(AccountBinance::getName)
+                .collect(Collectors.toList());
+
+        List<String> staticAccounts = Arrays.stream(apiKeys)
+                .map(keys -> keys[0])
+                .filter(name -> dbAccounts.stream().noneMatch(dbName -> dbName.equals(name)))
+                .collect(Collectors.toList());
+
+        dbAccounts.addAll(staticAccounts);
+        return dbAccounts;
     }
+
 
     
     
@@ -169,14 +186,24 @@ public class BinanceService {
         }
     }
 
-    private String[] getApiCredentials(String account) {
+    private String[] getApiCredentials(String accountName) {
+        AccountBinance account = accountRepo.findByName(accountName);
+        if (account != null && "BINANCE".equalsIgnoreCase(account.getTipo())) {
+            if (account.getApiKey() != null && account.getApiSecret() != null) {
+                return new String[]{account.getApiKey(), account.getApiSecret()};
+            }
+        }
+
+        // Si no está en DB o es de tipo diferente, usa los quemados
         for (String[] key : apiKeys) {
-            if (key[0].equals(account)) {
+            if (key[0].equals(accountName)) {
                 return new String[]{key[1], key[2]};
             }
         }
+
         return null;
     }
+
 
     private String hmacSha256(String secretKey, String data) {
         try {
@@ -778,9 +805,4 @@ public class BinanceService {
 	        throw new RuntimeException("Error al obtener Funding balance de " + asset + ": " + e.getMessage(), e);
 	    }
 	}
-
-
-
-
-
 }
