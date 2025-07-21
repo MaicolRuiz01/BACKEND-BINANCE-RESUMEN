@@ -35,6 +35,7 @@ import com.binance.web.BuyDollars.BuyDollarsDto;
 import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.BuyDollars;
 import com.binance.web.Entity.SaleP2P;
+import com.binance.web.Entity.SellDollars;
 import com.binance.web.Entity.Transacciones;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -435,19 +436,19 @@ public class SpotOrdersController {
 	    
 	    @GetMapping("/compras-no-registradas")
 	    public ResponseEntity<List<BuyDollarsDto>> getComprasNoRegistradas(
-	            @RequestParam(defaultValue = "100") int limit) throws Exception {
+	            @RequestParam(defaultValue = "30") int limit) throws Exception {
 
 	        Set<String> comprasIds = buyDollarsRepository.findAll().stream()
 	            .map(BuyDollars::getIdDeposit).collect(Collectors.toSet());
 
 	        Set<String> retiroTxIds = transaccionesRepository.findAll().stream()
-	        	    .map(Transacciones::getTxId)
-	        	    .filter(Objects::nonNull)
-	        	    .collect(Collectors.toSet());
-
+	                .map(Transacciones::getTxId)
+	                .filter(Objects::nonNull)
+	                .collect(Collectors.toSet());
 
 	        List<BuyDollarsDto> resultado = new ArrayList<>();
 	        ObjectMapper mapper = new ObjectMapper();
+	        LocalDate hoy = LocalDate.now(ZoneId.of("America/Bogota"));
 
 	        for (String account : binanceService.getAllAccountNames()) {
 	            String resp = binanceService.getSpotDeposits(account, limit);
@@ -474,26 +475,26 @@ public class SpotOrdersController {
 	                LocalDateTime fecha = null;
 	                if (tsStr != null) {
 	                    try {
-	                        long ts = Long.parseLong(tsStr); // insertTime es milisegundos
+	                        long ts = Long.parseLong(tsStr);
 	                        fecha = Instant.ofEpochMilli(ts).atZone(ZoneId.systemDefault()).toLocalDateTime();
 	                    } catch (NumberFormatException ex) {
-	                        // Si por alguna razón insertTime viene como texto, usamos el parser string
 	                        fecha = parseFechaDesdeString(tsStr);
 	                    }
 	                }
 
-
-	                BuyDollarsDto dto = new BuyDollarsDto();
-	                dto.setIdDeposit(id);
-	                dto.setNameAccount(account);
-	                dto.setDollars(amount);
-	                dto.setDate(fecha);
-	                resultado.add(dto);
+	                if (fecha != null && fecha.toLocalDate().isEqual(hoy)) {
+	                    BuyDollarsDto dto = new BuyDollarsDto();
+	                    dto.setIdDeposit(id);
+	                    dto.setNameAccount(account);
+	                    dto.setDollars(amount);
+	                    dto.setDate(fecha);
+	                    resultado.add(dto);
+	                }
 	            }
 	        }
 	        return ResponseEntity.ok(resultado);
-	        
 	    }
+
 
 
 
@@ -502,15 +503,16 @@ public class SpotOrdersController {
 	     */
 	    @GetMapping("/ventas-no-registradas")
 	    public ResponseEntity<List<SellDollarsDto>> getVentasNoRegistradas(
-	            @RequestParam(defaultValue = "100") int limit) throws Exception {
+	            @RequestParam(defaultValue = "50") int limit) throws Exception {
 
 	        Set<String> ventasIds = sellDollarsRepository.findAll()
-	            .stream().map(s -> s.getIdWithdrawals()).collect(Collectors.toSet());
+	            .stream().map(SellDollars::getIdWithdrawals).collect(Collectors.toSet());
 	        Set<String> internalAddrs = accountBinanceRepository.findAll()
 	            .stream().map(a -> a.getAddress()).filter(Objects::nonNull).collect(Collectors.toSet());
 
 	        List<SellDollarsDto> result = new ArrayList<>();
 	        ObjectMapper mapper = new ObjectMapper();
+	        LocalDate hoy = LocalDate.now(ZoneId.of("America/Bogota"));
 
 	        for (String account : binanceService.getAllAccountNames()) {
 	            String resp = binanceService.getSpotWithdrawals(account, limit);
@@ -538,33 +540,36 @@ public class SpotOrdersController {
 	                if (tsStr != null) {
 	                    try {
 	                        long ts = Long.parseLong(tsStr);
-	                        fecha = parseFechaDesdeTimestamp(ts); // usa tu método centralizado ya existente
+	                        fecha = parseFechaDesdeTimestamp(ts);
 	                    } catch (NumberFormatException ex) {
 	                        fecha = parseFechaDesdeString(tsStr);
 	                    }
 	                }
 
-	                SellDollarsDto dto = new SellDollarsDto();
-	                dto.setIdWithdrawals(id);
-	                dto.setNameAccount(account);
-	                dto.setDate(fecha);
+	                if (fecha != null && fecha.toLocalDate().isEqual(hoy)) {
+	                    SellDollarsDto dto = new SellDollarsDto();
+	                    dto.setIdWithdrawals(id);
+	                    dto.setNameAccount(account);
+	                    dto.setDate(fecha);
 
-	                double amount = wd.path("amount").asDouble(0);
-	                if (coin.equalsIgnoreCase("TRX") && fecha != null) {
-	                    Double tasa = binanceService.getHistoricalPriceTRXUSDT(fecha);
-	                    dto.setEquivalenteciaTRX(amount);
-	                    dto.setDollars(amount * (tasa != null ? tasa : 1));
-	                } else {
-	                    dto.setDollars(amount);
-	                    dto.setEquivalenteciaTRX(null);
+	                    double amount = wd.path("amount").asDouble(0);
+	                    if (coin.equalsIgnoreCase("TRX") && fecha != null) {
+	                        Double tasa = binanceService.getHistoricalPriceTRXUSDT(fecha);
+	                        dto.setEquivalenteciaTRX(amount);
+	                        dto.setDollars(amount * (tasa != null ? tasa : 1));
+	                    } else {
+	                        dto.setDollars(amount);
+	                        dto.setEquivalenteciaTRX(null);
+	                    }
+
+	                    result.add(dto);
 	                }
-
-	                result.add(dto);
 	            }
 	        }
 
 	        return ResponseEntity.ok(result);
 	    }
+
 
 
 

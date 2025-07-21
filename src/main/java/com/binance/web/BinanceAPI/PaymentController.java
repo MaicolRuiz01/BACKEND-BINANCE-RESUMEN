@@ -1,5 +1,8 @@
 package com.binance.web.BinanceAPI;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -84,32 +87,32 @@ public class PaymentController {
 	    List<BuyDollarsDto> resultados = new ArrayList<>();
 
 	    try {
-	        // Obtener los nombres de usuario Binance válidos
+	        LocalDate hoy = LocalDate.now(ZoneId.of("America/Bogota"));
+
 	        Set<String> userBinanceValidos = accountBinanceRepository.findAll().stream()
 	                .map(AccountBinance::getUserBinance)
 	                .filter(nombre -> nombre != null && !nombre.isBlank())
 	                .collect(Collectors.toSet());
 
-	        // Obtener los IDs de depósitos ya registrados
 	        Set<String> idsRegistrados = buyDollarsRepository.findAll().stream()
 	                .map(BuyDollars::getIdDeposit)
 	                .collect(Collectors.toSet());
 
-	        // Iterar sobre todas las cuentas Binance
 	        for (String cuenta : binanceService.getAllAccountNames()) {
 	            String respuesta = binanceService.getPaymentHistory(cuenta);
 	            List<Transaction> transacciones = parseTransactions(respuesta);
 
 	            for (Transaction tx : transacciones) {
 	                double monto = tx.getAmount();
+	                LocalDateTime fecha = tx.getTransactionTime();
 
-	                // Filtrar entradas de dinero no registradas y no internas
-	                if (monto > 0 && !idsRegistrados.contains(tx.getOrderId())) {
+	                if (monto > 0 && !idsRegistrados.contains(tx.getOrderId())
+	                        && fecha != null && fecha.toLocalDate().isEqual(hoy)) {
 	                    if (tx.getPayerInfo() != null && !userBinanceValidos.contains(tx.getPayerInfo().getName())) {
 	                        BuyDollarsDto dto = new BuyDollarsDto();
 	                        dto.setIdDeposit(tx.getOrderId());
 	                        dto.setNameAccount(cuenta);
-	                        dto.setDate(tx.getTransactionTime());
+	                        dto.setDate(fecha);
 	                        dto.setDollars(monto);
 	                        dto.setTasa(0.0);
 	                        dto.setPesos(0.0);
@@ -128,21 +131,22 @@ public class PaymentController {
 	    return ResponseEntity.ok(resultados);
 	}
 
+
 	@GetMapping("/ventas-no-registradas-binancepay")
 	public ResponseEntity<List<SellDollarsDto>> getVentasNoRegistradasBinancePay() {
 	    List<SellDollarsDto> resultados = new ArrayList<>();
 
 	    try {
-	        // Obtener IDs de ventas ya registradas
+	        LocalDate hoy = LocalDate.now(ZoneId.of("America/Bogota"));
+
 	        Set<String> idsRegistrados = sellDollarsRepository.findAll().stream()
 	                .map(sell -> sell.getIdWithdrawals())
 	                .collect(Collectors.toSet());
-	        
+
 	        Set<String> userBinanceValidos = accountBinanceRepository.findAll().stream()
 	                .map(AccountBinance::getUserBinance)
 	                .filter(nombre -> nombre != null && !nombre.isBlank())
 	                .collect(Collectors.toSet());
-
 
 	        for (String cuenta : binanceService.getAllAccountNames()) {
 	            String respuesta = binanceService.getPaymentHistory(cuenta);
@@ -150,21 +154,22 @@ public class PaymentController {
 
 	            for (Transaction tx : transacciones) {
 	                double monto = tx.getAmount();
+	                LocalDateTime fecha = tx.getTransactionTime();
 
-	                // Solo salidas de dinero no registradas
-	                if (monto < 0 && !idsRegistrados.contains(tx.getOrderId())) {
-	                	 if (tx.getReceiverInfo() != null && !userBinanceValidos.contains(tx.getReceiverInfo().getName())) {
-	                    SellDollarsDto dto = new SellDollarsDto();
-	                    dto.setIdWithdrawals(tx.getOrderId());
-	                    dto.setNameAccount(cuenta);
-	                    dto.setDate(tx.getTransactionTime());
-	                    dto.setDollars(Math.abs(monto));
-	                    dto.setTasa(0.0);
-	                    dto.setPesos(0.0);
-	                    
+	                if (monto < 0 && !idsRegistrados.contains(tx.getOrderId())
+	                        && fecha != null && fecha.toLocalDate().isEqual(hoy)) {
+	                    if (tx.getReceiverInfo() != null && !userBinanceValidos.contains(tx.getReceiverInfo().getName())) {
+	                        SellDollarsDto dto = new SellDollarsDto();
+	                        dto.setIdWithdrawals(tx.getOrderId());
+	                        dto.setNameAccount(cuenta);
+	                        dto.setDate(fecha);
+	                        dto.setDollars(Math.abs(monto));
+	                        dto.setTasa(0.0);
+	                        dto.setPesos(0.0);
 
-	                    resultados.add(dto);
-	                }}
+	                        resultados.add(dto);
+	                    }
+	                }
 	            }
 	        }
 
@@ -175,6 +180,7 @@ public class PaymentController {
 	        return ResponseEntity.status(500).body(new ArrayList<>());
 	    }
 	}
+
 
 	@GetMapping("/transacciones-binacepay")
 	public ResponseEntity<List<TransaccionesDTO>> getTransaccionesNoRegistradas() {
@@ -223,9 +229,4 @@ public class PaymentController {
 
 	    return ResponseEntity.ok(resultados);
 	}
-
-
-
-	
-
 }

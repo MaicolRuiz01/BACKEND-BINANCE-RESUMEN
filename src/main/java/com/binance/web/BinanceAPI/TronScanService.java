@@ -3,6 +3,7 @@ import com.binance.web.BuyDollars.BuyDollarsDto;
 import com.binance.web.SellDollars.SellDollarsDto;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -129,8 +130,34 @@ public class TronScanService {
     
     
     
+	/*
+	 * public List<SellDollarsDto> parseTRC20OutgoingUSDTTransfers(String
+	 * jsonResponse, String walletAddress, String accountName, Set<String>
+	 * assignedIds) { List<SellDollarsDto> result = new ArrayList<>(); try {
+	 * JsonNode root = objectMapper.readTree(jsonResponse); JsonNode data =
+	 * root.path("data"); if (data.isArray()) { for (JsonNode tx : data) { String
+	 * fromAddress = tx.path("from").asText(); String txId =
+	 * tx.path("transaction_id").asText(); JsonNode tokenInfo =
+	 * tx.path("token_info"); String symbol = tokenInfo.path("symbol").asText(); if
+	 * (fromAddress.equalsIgnoreCase(walletAddress) &&
+	 * symbol.equalsIgnoreCase("USDT") && !assignedIds.contains(txId)) { double
+	 * amount = Double.parseDouble(tx.path("value").asText("0")) / 1_000_000.0; long
+	 * timestamp = tx.path("block_timestamp").asLong();
+	 * 
+	 * SellDollarsDto dto = new SellDollarsDto(); dto.setDollars(amount);
+	 * dto.setTasa(0.0); dto.setNameAccount(accountName); // Aquí ahora guardas el
+	 * nombre real de la cuenta dto.setIdWithdrawals(txId); dto.setPesos(0.0);
+	 * dto.setDate(LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp),
+	 * ZoneId.of("America/Bogota"))); result.add(dto); } } } } catch (Exception e) {
+	 * e.printStackTrace(); } return result; }
+	 */
+    
+
+
     public List<SellDollarsDto> parseTRC20OutgoingUSDTTransfers(String jsonResponse, String walletAddress, String accountName, Set<String> assignedIds) {
         List<SellDollarsDto> result = new ArrayList<>();
+        LocalDate hoy = LocalDate.now(ZoneId.of("America/Bogota"));
+
         try {
             JsonNode root = objectMapper.readTree(jsonResponse);
             JsonNode data = root.path("data");
@@ -143,15 +170,18 @@ public class TronScanService {
                     if (fromAddress.equalsIgnoreCase(walletAddress) && symbol.equalsIgnoreCase("USDT") && !assignedIds.contains(txId)) {
                         double amount = Double.parseDouble(tx.path("value").asText("0")) / 1_000_000.0;
                         long timestamp = tx.path("block_timestamp").asLong();
+                        LocalDate fechaTx = LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp), ZoneId.of("America/Bogota")).toLocalDate();
 
-                        SellDollarsDto dto = new SellDollarsDto();
-                        dto.setDollars(amount);
-                        dto.setTasa(0.0);
-                        dto.setNameAccount(accountName); // Aquí ahora guardas el nombre real de la cuenta
-                        dto.setIdWithdrawals(txId);
-                        dto.setPesos(0.0);
-                        dto.setDate(LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp), ZoneId.of("America/Bogota")));
-                        result.add(dto);
+                        if (fechaTx.isEqual(hoy)) {
+                            SellDollarsDto dto = new SellDollarsDto();
+                            dto.setDollars(amount);
+                            dto.setTasa(0.0);
+                            dto.setNameAccount(accountName);
+                            dto.setIdWithdrawals(txId);
+                            dto.setPesos(0.0);
+                            dto.setDate(LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp), ZoneId.of("America/Bogota")));
+                            result.add(dto);
+                        }
                     }
                 }
             }
@@ -162,15 +192,45 @@ public class TronScanService {
     }
 
     
+    
+    
+    //similar al de abajo pero no filtra por el dia de hoy
+//    public List<BuyDollarsDto> parseTRC20IncomingUSDTTransfers(String jsonResponse, String walletAddress, String accountName, Set<String> assignedIds) {
+//        List<BuyDollarsDto> result = new ArrayList<>();
+//        try {
+//            JsonNode root = objectMapper.readTree(jsonResponse);
+//            JsonNode data = root.path("data");
+//            if (data.isArray()) {
+//                for (JsonNode tx : data) {
+//                    String toAddress = tx.path("to").asText();
+//                    String txId = tx.path("transaction_id").asText();
+//                    JsonNode tokenInfo = tx.path("token_info");
+//                    String symbol = tokenInfo.path("symbol").asText();
+//                    if (toAddress.equalsIgnoreCase(walletAddress) && symbol.equalsIgnoreCase("USDT") && !assignedIds.contains(txId)) {
+//                        double amount = Double.parseDouble(tx.path("value").asText("0")) / 1_000_000.0;
+//                        long timestamp = tx.path("block_timestamp").asLong();
+//
+//                        BuyDollarsDto dto = new BuyDollarsDto();
+//                        dto.setDollars(amount);
+//                        dto.setTasa(0.0);
+//                        dto.setNameAccount(accountName); // << Aquí ya no será "TRUST" quemado
+//                        dto.setIdDeposit(txId);
+//                        dto.setPesos(0.0);
+//                        dto.setDate(LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp), ZoneId.of("America/Bogota")));
+//                        result.add(dto);
+//                    }
+//                }
+//            }
+//        } catch (Exception e) {
+//            e.printStackTrace();
+//        }
+//        return result;
+//    }
 
-
-    
-    
-    
-    
-    
     public List<BuyDollarsDto> parseTRC20IncomingUSDTTransfers(String jsonResponse, String walletAddress, String accountName, Set<String> assignedIds) {
         List<BuyDollarsDto> result = new ArrayList<>();
+        LocalDate hoy = LocalDate.now(ZoneId.of("America/Bogota"));
+
         try {
             JsonNode root = objectMapper.readTree(jsonResponse);
             JsonNode data = root.path("data");
@@ -183,15 +243,18 @@ public class TronScanService {
                     if (toAddress.equalsIgnoreCase(walletAddress) && symbol.equalsIgnoreCase("USDT") && !assignedIds.contains(txId)) {
                         double amount = Double.parseDouble(tx.path("value").asText("0")) / 1_000_000.0;
                         long timestamp = tx.path("block_timestamp").asLong();
+                        LocalDate fechaTx = LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp), ZoneId.of("America/Bogota")).toLocalDate();
 
-                        BuyDollarsDto dto = new BuyDollarsDto();
-                        dto.setDollars(amount);
-                        dto.setTasa(0.0);
-                        dto.setNameAccount(accountName); // << Aquí ya no será "TRUST" quemado
-                        dto.setIdDeposit(txId);
-                        dto.setPesos(0.0);
-                        dto.setDate(LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp), ZoneId.of("America/Bogota")));
-                        result.add(dto);
+                        if (fechaTx.isEqual(hoy)) {
+                            BuyDollarsDto dto = new BuyDollarsDto();
+                            dto.setDollars(amount);
+                            dto.setTasa(0.0);
+                            dto.setNameAccount(accountName);
+                            dto.setIdDeposit(txId);
+                            dto.setPesos(0.0);
+                            dto.setDate(LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp), ZoneId.of("America/Bogota")));
+                            result.add(dto);
+                        }
                     }
                 }
             }
