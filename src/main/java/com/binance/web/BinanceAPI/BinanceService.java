@@ -901,4 +901,109 @@ public class BinanceService {
         return anuncios;
     }
 
+    public List<AnuncioDto> getOwnPublishedAds() {
+        List<AnuncioDto> anuncios = new ArrayList<>();
+
+        // 1. Cuentas en base de datos
+        List<AccountBinance> cuentasDb = accountRepo.findByTipo("BINANCE");
+        for (AccountBinance cuenta : cuentasDb) {
+            String apiKey = cuenta.getApiKey();
+            String secretKey = cuenta.getApiSecret();
+            String nombre = cuenta.getName();
+
+            if (apiKey == null || secretKey == null || apiKey.trim().isEmpty() || secretKey.trim().isEmpty()) {
+                System.out.println("⚠️ API key o secret vacía en DB para cuenta: " + nombre);
+                continue;
+            }
+
+            try {
+                List<AnuncioDto> anunciosCuenta = getAnunciosFromAccount(apiKey, secretKey, nombre);
+                anuncios.addAll(anunciosCuenta);
+            } catch (Exception e) {
+                System.out.println("❌ Error obteniendo anuncios de DB cuenta " + nombre + ": " + e.getMessage());
+            }
+        }
+
+        // 2. Cuentas quemadas
+        for (String[] cuenta : apiKeys) {
+            String nombre = cuenta[0];
+            String apiKey = cuenta[1];
+            String secretKey = cuenta[2];
+
+            boolean yaEsta = cuentasDb.stream().anyMatch(c -> c.getName().equalsIgnoreCase(nombre));
+            if (yaEsta)
+                continue; // evitar duplicados
+
+            try {
+                List<AnuncioDto> anunciosCuenta = getAnunciosFromAccount(apiKey, secretKey, nombre);
+                anuncios.addAll(anunciosCuenta);
+            } catch (Exception e) {
+                System.out.println("❌ Error obteniendo anuncios de cuenta quemada " + nombre + ": " + e.getMessage());
+            }
+        }
+
+        return anuncios;
+    }
+
+    private List<AnuncioDto> getAnunciosFromAccount(String apiKey, String secretKey, String nombreCuenta)
+            throws Exception {
+        String url = "https://p2p.binance.com/bapi/c2c/v2/private/c2c/adv/search";
+        long timestamp = getServerTime();
+        String query = "timestamp=" + timestamp + "&recvWindow=60000";
+        String signature = hmacSha256(secretKey, query);
+
+        URL obj = new URL(url + "?" + query + "&signature=" + signature);
+        HttpURLConnection con = (HttpURLConnection) obj.openConnection();
+        con.setRequestMethod("POST");
+        con.setRequestProperty("X-MBX-APIKEY", apiKey);
+        con.setDoOutput(true);
+
+        String payload = "{}";
+        try (OutputStream os = con.getOutputStream()) {
+            os.write(payload.getBytes(StandardCharsets.UTF_8));
+        }
+
+        int responseCode = con.getResponseCode();
+        if (responseCode != 200) {
+            throw new RuntimeException("Error HTTP: " + responseCode);
+        }
+
+        String response;
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(con.getInputStream()))) {
+            response = reader.lines().collect(Collectors.joining());
+        }
+
+        JsonObject json = JsonParser.parseString(response).getAsJsonObject();
+        JsonArray data = json.getAsJsonArray("data");
+
+        List<AnuncioDto> resultado = new ArrayList<>();
+        for (JsonElement elem : data) {
+            JsonObject adv = elem.getAsJsonObject().getAsJsonObject("adv");
+            AnuncioDto dto = new AnuncioDto();
+
+            dto.setCuenta(nombreCuenta);
+            dto.setPrecio(adv.get("price").getAsString());
+            dto.setMoneda(adv.get("asset").getAsString());
+            dto.setFiat(adv.get("fiatUnit").getAsString());
+            dto.setMinimo(adv.get("minSingleTransAmount").getAsString());
+            dto.setMaximo(adv.get("maxSingleTransAmount").getAsString());
+            dto.setTipo(adv.get("tradeType").getAsString());
+
+            JsonArray methods = adv.getAsJsonArray("tradeMethods");
+            if (methods != null && !methods.isEmpty()) {
+                dto.setMetodoPago(methods.get(0).getAsJsonObject().get("tradeMethodName").getAsString());
+            }
+
+            long ts = adv.get("createTime").getAsLong();
+            ZonedDateTime dateTime = Instant.ofEpochMilli(ts).atZone(ZoneId.of("America/Bogota"));
+            dto.setHoraAnuncio(dateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+
+            resultado.add(dto);
+
+        }
+
+        System.out.println("✅ Anuncios recibidos de " + nombreCuenta);
+        return resultado;
+    }
+
 }

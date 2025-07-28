@@ -1,7 +1,5 @@
 package com.binance.web.BinanceAPI;
 
-
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -35,14 +33,17 @@ public class P2PController {
     public ResponseEntity<String> getP2POrders(@RequestParam("account") String account) {
         return ResponseEntity.ok().body(binanceService.getP2POrderLatest(account));
     }
-    
+
     @PostMapping("/anuncios")
     public ResponseEntity<List<AnuncioDto>> obtenerAnunciosFiltrados(@RequestBody Map<String, Object> filtros) {
         List<AnuncioDto> anuncios = binanceService.obtenerTodosLosAnuncios(filtros);
         return ResponseEntity.ok(anuncios);
     }
-    
 
+    @GetMapping("/anuncios/mis-cuentas")
+    public ResponseEntity<List<AnuncioDto>> obtenerAnunciosDeMisCuentas() {
+        List<AnuncioDto> anuncios = binanceService.getOwnPublishedAds();
+        return ResponseEntity.ok(anuncios);
+    }
 
 }
-
