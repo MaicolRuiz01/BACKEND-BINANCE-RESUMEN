@@ -88,7 +88,7 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
         System.out.println("🔴 Restando saldo: " + amount + " a cuenta: " + name);
 
     }
-
+//trae el balance general de una cuenta binance
     @Override
     public String getUSDTBalance(String name) {
         AccountBinance account = accountBinanceRepository.findByName(name);
@@ -98,38 +98,45 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
 
         String tipo = account.getTipo();
         if ("BINANCE".equalsIgnoreCase(tipo)) {
-            // Cuenta Binance: delegamos al servicio de Binance
-            return binanceService.getGeneralBalance(name);
+            try {
+                Double balanceUSDT = binanceService.getGeneralBalanceInUSDT(name);
+                return String.valueOf(balanceUSDT);
+            } catch (Exception e) {
+                return "{\"error\": \"No se pudo calcular el balance en USDT: " + e.getMessage() + "\"}";
+            }
         } else if ("TRUST".equalsIgnoreCase(tipo)) {
-            // Cuenta TRON/TRUST: usamos TronScanService para obtener total assets en USD
             double balanceUsd = tronScanService.getTotalAssetTokenOverview(account.getAddress());
             return String.valueOf(balanceUsd);
         } else {
-            // Tipo no reconocido
             return "{\"error\": \"Tipo de cuenta no soportado: " + tipo + "\"}";
         }
     }
+
+
     
     @Override
     public Double getTotalExternalBalance() {
         List<AccountBinance> cuentas = accountBinanceRepository.findAll();
-
         double total = 0.0;
 
         for (AccountBinance account : cuentas) {
-            if ("BINANCE".equalsIgnoreCase(account.getTipo())) {
-                String balanceStr = binanceService.getGeneralBalance(account.getName());
-                try {
-                    total += Double.parseDouble(balanceStr);
-                } catch (NumberFormatException e) {
-                    // Si la cuenta no responde correctamente, no suma nada.
+            try {
+                if ("BINANCE".equalsIgnoreCase(account.getTipo())) {
+                    // Llamamos a la versión robusta del balance USDT
+                    Double balance = binanceService.getGeneralBalanceInUSDT(account.getName());
+                    total += balance != null ? balance : 0.0;
+                } else if ("TRUST".equalsIgnoreCase(account.getTipo())) {
+                    total += tronScanService.getTotalAssetTokenOverview(account.getAddress());
                 }
-            } else if ("TRUST".equalsIgnoreCase(account.getTipo())) {
-                total += tronScanService.getTotalAssetTokenOverview(account.getAddress());
+            } catch (Exception e) {
+                System.out.println("⚠️ Error con cuenta " + account.getName() + ": " + e.getMessage());
+                // Continuamos con las demás cuentas
             }
         }
+
         return total;
     }
+
 
     
 

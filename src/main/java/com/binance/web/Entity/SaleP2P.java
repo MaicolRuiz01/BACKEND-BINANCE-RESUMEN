@@ -32,6 +32,7 @@ public class SaleP2P {
 	private Double commission;
 	private Double pesosCop;
 	private Double dollarsUs;
+	private Double tasa;
 
 	@OneToMany(mappedBy = "saleP2p", cascade = CascadeType.ALL, orphanRemoval = true)
 	@JsonIgnore

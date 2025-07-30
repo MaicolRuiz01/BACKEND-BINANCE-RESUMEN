@@ -13,4 +13,5 @@ public class SaleP2PDto {
 	private Double pesosCop;
 	private String nameAccountBinance;
 	private Double dollarsUs;
+	private Double tasa;
 }

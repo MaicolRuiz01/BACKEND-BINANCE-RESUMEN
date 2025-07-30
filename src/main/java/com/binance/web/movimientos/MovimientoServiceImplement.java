@@ -9,9 +9,11 @@ import com.binance.web.Entity.AccountCop;
 import com.binance.web.Entity.Efectivo;
 import com.binance.web.Entity.Movimiento;
 import com.binance.web.Repository.AccountCopRepository;
+import com.binance.web.Repository.ClienteRepository;
 import com.binance.web.Repository.EfectivoRepository;
 import com.binance.web.Repository.MovimientoRepository;
 import com.binance.web.movimientos.MovimientoDTO;
+import com.binance.web.Entity.Cliente;
 
 @Service
 public class MovimientoServiceImplement implements MovimientoService{
@@ -22,6 +24,8 @@ public class MovimientoServiceImplement implements MovimientoService{
 	private AccountCopRepository accountCopRepository;
 	@Autowired
 	private EfectivoRepository efectivoRepository;
+	@Autowired
+	private ClienteRepository clienteRepository;
 
 	@Override
 	public Movimiento RegistrarTransferencia(Integer idCuentoFrom, Integer idCuentaTo, Double monto) {
@@ -33,9 +37,9 @@ public class MovimientoServiceImplement implements MovimientoService{
 		Double montoConComision = monto * 1.004;
 		Double comision = monto * 0.004;
 		
-		Movimiento nuevoMoviento = new Movimiento(null, "TRANSFERENCIA", LocalDateTime.now(), monto, cuentaTo, cuentaFrom, null, comision);
+		Movimiento nuevoMoviento = new Movimiento(null, "TRANSFERENCIA", LocalDateTime.now(), monto, cuentaTo, cuentaFrom, null, comision, null);
 		
-		cuentaFrom.setBalance(cuentaFrom.getBalance() - monto);
+		cuentaFrom.setBalance(cuentaFrom.getBalance() - montoConComision);
 		cuentaTo.setBalance(cuentaTo.getBalance() + monto);
 		
 		
@@ -46,13 +50,13 @@ public class MovimientoServiceImplement implements MovimientoService{
 	}
 
 	@Override
-	public Movimiento RegistrarRetiro(Integer cuentaId, Double monto) {
+	public Movimiento RegistrarRetiro(Integer cuentaId, Integer cajaId, Double monto) {
 		// TODO Auto-generated method stub
 		AccountCop cuentaOrigen = accountCopRepository.findById(cuentaId).get();
-		Efectivo caja = efectivoRepository.findByName("CAJA PRINCIPAL");
+		Efectivo caja = efectivoRepository.findById(cajaId).get();
 		Double comision = monto * 0.004;
 		Double montoConComision = monto * 1.004;
-		Movimiento retiro = new Movimiento(null, "RETIRO", LocalDateTime.now(), monto, cuentaOrigen,null,caja, montoConComision);
+		Movimiento retiro = new Movimiento(null, "RETIRO", LocalDateTime.now(), monto, cuentaOrigen,null,caja, montoConComision, null);
 		
 		cuentaOrigen.setBalance(cuentaOrigen.getBalance() - montoConComision);
 		caja.setSaldo(caja.getSaldo() + monto);
@@ -64,20 +68,36 @@ public class MovimientoServiceImplement implements MovimientoService{
 	}
 
 	@Override
-	public Movimiento RegistrarDeposito(Integer cuentaId, Double monto) {
+	public Movimiento RegistrarDeposito(Integer cuentaId, Integer cajaId, Double monto) {
 		// TODO Auto-generated method stub
 		AccountCop cuentaDestino = accountCopRepository.findById(cuentaId).get();
-		Efectivo caja = efectivoRepository.findByName("CAJA PRINCIPAL");
+		Efectivo caja = efectivoRepository.findById(cajaId).get();
 		
 		cuentaDestino.setBalance(cuentaDestino.getBalance() + monto);
 		caja.setSaldo(caja.getSaldo() - monto);
 		
-		Movimiento deposito = new Movimiento(null, "DEPOSITO", LocalDateTime.now(), monto, null ,cuentaDestino,caja, 0.0);
+		Movimiento deposito = new Movimiento(null, "DEPOSITO", LocalDateTime.now(), monto, null ,cuentaDestino,caja, 0.0, null);
 		
 		accountCopRepository.save(cuentaDestino);
 		efectivoRepository.save(caja);
 		
 		return movimientoRepository.save(deposito);
+	}
+	
+	public Movimiento registrarPagoCliente(Integer cuentaId, Integer clienteId, Double monto) {
+		
+		AccountCop cuentaDestino = accountCopRepository.findById(cuentaId).get();
+		Cliente cliente = clienteRepository.findById(clienteId).get();
+		
+		cliente.setSaldo(cliente.getSaldo() + monto);
+		cuentaDestino.setBalance(cuentaDestino.getBalance() + monto);
+		
+		Movimiento pago = new Movimiento(null, "PAGO", LocalDateTime.now(), monto, null, cuentaDestino, null, 0.0, cliente);
+		
+		accountCopRepository.save(cuentaDestino);
+		clienteRepository.save(cliente);
+		return movimientoRepository.save(pago);
+		
 	}
 
 	@Override
@@ -100,8 +120,8 @@ public class MovimientoServiceImplement implements MovimientoService{
 	public List<Movimiento> listarTransferencias(){
 		return movimientoRepository.findByTipo("TRANSFERENCIA");
 	}
-	
-	
-
-
+	@Override
+	public List<Movimiento> listarPagos(){
+		return movimientoRepository.findByTipo("PAGO");
+	}
 }

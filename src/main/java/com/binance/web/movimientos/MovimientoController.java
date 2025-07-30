@@ -20,18 +20,22 @@ public class MovimientoController {
     private MovimientoService movimientoService;
 
     @PostMapping("/deposito")
-    public Movimiento deposito(@RequestParam Integer cuentaId, @RequestParam Double monto) {
-        return movimientoService.RegistrarDeposito(cuentaId, monto);
+    public Movimiento deposito(@RequestParam Integer cuentaId,@RequestParam Integer cajaId, @RequestParam Double monto) {
+        return movimientoService.RegistrarDeposito(cuentaId,cajaId, monto);
     }
 
     @PostMapping("/retiro")
-    public Movimiento retiro(@RequestParam Integer cuentaId, @RequestParam Double monto) {
-        return movimientoService.RegistrarRetiro(cuentaId, monto);
+    public Movimiento retiro(@RequestParam Integer cuentaId,@RequestParam Integer cajaId, @RequestParam Double monto) {
+        return movimientoService.RegistrarRetiro(cuentaId,cajaId, monto);
     }
 
     @PostMapping("/transferencia")
     public Movimiento transferencia(@RequestParam Integer origenId, @RequestParam Integer destinoId, @RequestParam Double monto) {
         return movimientoService.RegistrarTransferencia(origenId, destinoId, monto);
+    }
+    @PostMapping("/pago")
+    public Movimiento pago(@RequestParam Integer cuentaId, @RequestParam Integer clienteId, @RequestParam Double monto) {
+    	return movimientoService.registrarPagoCliente(cuentaId, clienteId, monto);
     }
 
     @GetMapping("/listar")
@@ -60,6 +64,13 @@ public class MovimientoController {
             .toList();
     }
     
+    @GetMapping("/pagos")
+    public List<MovimientoDTO> listarPagos(){
+    	return movimientoService.listarPagos().stream()
+    			.map(this::mapToDto)
+    			.toList();
+    }
+    
     private MovimientoDTO mapToDto(Movimiento movimiento) {
 	    return new MovimientoDTO(
 	        movimiento.getTipo(),
@@ -67,7 +78,8 @@ public class MovimientoController {
 	        movimiento.getMonto(),
 	        movimiento.getCuentaOrigen() != null ? movimiento.getCuentaOrigen().getName() : null,
 	        movimiento.getCuentaDestino() != null ? movimiento.getCuentaDestino().getName() : null,
-	        movimiento.getCaja() != null ? movimiento.getCaja().getName() : null
+	        movimiento.getCaja() != null ? movimiento.getCaja().getName() : null,
+	        movimiento.getPagoCliente() != null ? movimiento.getPagoCliente().getNombre() : null
 	    );
 	}
 }

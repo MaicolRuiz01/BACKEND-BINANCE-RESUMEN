@@ -31,5 +31,7 @@ public class Movimiento {
 	@ManyToOne
 	private Efectivo caja;
 	private Double comision;
+	@ManyToOne
+	private Cliente pagoCliente;
 
 }
