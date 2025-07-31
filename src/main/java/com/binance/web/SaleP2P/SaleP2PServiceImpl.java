@@ -41,11 +41,19 @@ public class SaleP2PServiceImpl implements SaleP2PService {
     private AccountCopService accountCopService;
 
     @Autowired
+    private BinanceService binanceService;
+
+    @Autowired
+	private OrderP2PService orderP2PService;
+
+    @Autowired
     private AccountBinanceRepository accountBinanceRepository;
 
 	@Autowired
 	private AccountBinanceService accountBinanceService;
 
+
+    
 	@Override
 	public List<SaleP2PDto> findAllSaleP2P() {
 		return saleP2PRepository.findAll()
