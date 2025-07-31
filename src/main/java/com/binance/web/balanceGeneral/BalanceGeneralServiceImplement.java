@@ -1,6 +1,7 @@
 package com.binance.web.balanceGeneral;
 
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -143,7 +144,7 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService{
     
     @Override
     public BalanceGeneral calcularHoyYRetornar() {
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(ZoneId.of("America/Bogota"));
         calcularOBalancear(today);
 
         return balanceRepo.findByDate(today).orElse(null);

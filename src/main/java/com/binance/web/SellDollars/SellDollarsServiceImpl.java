@@ -20,10 +20,12 @@ import com.binance.web.BinanceAPI.BinanceService;
 import com.binance.web.BinanceAPI.PaymentController;
 import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.AccountCop;
+import com.binance.web.Entity.Cliente;
 import com.binance.web.Entity.PurchaseRate;
 import com.binance.web.Entity.SellDollars;
 import com.binance.web.Entity.SellDollarsAccountCop;
 import com.binance.web.Repository.AccountBinanceRepository;
+import com.binance.web.Repository.ClienteRepository;
 import com.binance.web.Repository.PurchaseRateRepository;
 import com.binance.web.Repository.SellDollarsRepository;
 import com.binance.web.Repository.SupplierRepository;
@@ -49,17 +51,17 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 	private PaymentController paymentController;
 	@Autowired
 	private PurchaseRateRepository purchaseRateRepository;
+	@Autowired
+	private ClienteRepository clienteRepository;
 
 	@Override
 	@Transactional
 	public SellDollars createSellDollars(SellDollarsDto dto) {
-	    // 1. Cargar entidades base
+	    // 1. Cargar cuenta Binance
 	    AccountBinance accountBinance = accountBinanceRepository.findById(dto.getAccountBinanceId())
-	            .orElseThrow(() -> new RuntimeException("AccountBinance not found"));
-	    Supplier supplier = supplierRepository.findById(dto.getSupplier())
-	            .orElseThrow(() -> new RuntimeException("Supplier no encontrado"));
+	        .orElseThrow(() -> new RuntimeException("AccountBinance not found"));
 
-	    // 2. Construir la entidad SellDollars
+	    // 2. Crear objeto venta
 	    SellDollars sale = new SellDollars();
 	    sale.setIdWithdrawals(dto.getIdWithdrawals());
 	    sale.setTasa(dto.getTasa());
@@ -68,55 +70,71 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 	    sale.setNameAccount(dto.getNameAccount());
 	    sale.setAccountBinance(accountBinance);
 	    sale.setPesos(dto.getPesos());
-	    sale.setSupplier(supplier);
-	    sale.setUtilidad(utilidad(sale));
 	    sale.setAsignado(true);
+	    sale.setUtilidad(utilidad(sale));
 
-	    // 3. Ajustar saldo de la cuenta Binance (USDT)
+	    // 3. Ajustar saldo de la cuenta Binance
 	    double currentBinanceBalance = accountBinance.getBalance() != null ? accountBinance.getBalance() : 0.0;
 	    accountBinance.setBalance(currentBinanceBalance - dto.getDollars());
 
-	    // 4. Distribuir el monto en PESOS entre cuentas COP y proveedor
-	    double totalAsignadoACuentas = 0.0;
-	    List<SellDollarsAccountCop> detalles = new ArrayList<>();
-	    if (dto.getAccounts() != null && !dto.getAccounts().isEmpty()) {
-	        for (AssignAccountDto assignDto : dto.getAccounts()) {
-	            // 4.1. Aumentar balance de cada AccountCop
-	            AccountCop acc = accountCopService.findByIdAccountCop(assignDto.getAccountCop());
-	            double currentCopBalance = acc.getBalance() != null ? acc.getBalance() : 0.0;
-	            acc.setBalance(currentCopBalance + assignDto.getAmount());
-	            accountCopService.saveAccountCop(acc);
+	    // ⚡ Caso 1: Si hay cliente, se descuenta del saldo del cliente
+	    if (dto.getClienteId() != null) {
+	        Cliente cliente = clienteRepository.findById(dto.getClienteId())
+	            .orElseThrow(() -> new RuntimeException("Cliente no encontrado"));
+	        sale.setCliente(cliente);
+	        sale.setSupplier(null);  // 🔥 Importante
 
-	            // 4.2. Crear el detalle de la relación
-	            SellDollarsAccountCop detalle = new SellDollarsAccountCop();
-	            detalle.setSellDollars(sale);
-	            detalle.setAccountCop(acc);
-	            detalle.setAmount(assignDto.getAmount());
-	            detalle.setNameAccount(assignDto.getNameAccount());
-	            detalles.add(detalle);
+	        double saldoActual = cliente.getSaldo() != null ? cliente.getSaldo() : 0.0;
+	        cliente.setSaldo(saldoActual - dto.getPesos());
+	        clienteRepository.save(cliente);
+	    } 
+	    // 🏦 Caso 2: Si no hay cliente, flujo normal: cuentas COP y proveedor
+	    else {
+	        Supplier supplier = supplierRepository.findById(dto.getSupplier())
+	            .orElseThrow(() -> new RuntimeException("Supplier no encontrado"));
+	        sale.setSupplier(supplier);
+	        sale.setCliente(null); // 🔥 Importante
 
-	            totalAsignadoACuentas += assignDto.getAmount();
+	        double totalAsignadoACuentas = 0.0;
+	        List<SellDollarsAccountCop> detalles = new ArrayList<>();
+
+	        if (dto.getAccounts() != null && !dto.getAccounts().isEmpty()) {
+	            for (AssignAccountDto assignDto : dto.getAccounts()) {
+	                AccountCop acc = accountCopService.findByIdAccountCop(assignDto.getAccountCop());
+	                double currentCopBalance = acc.getBalance() != null ? acc.getBalance() : 0.0;
+	                acc.setBalance(currentCopBalance + assignDto.getAmount());
+	                accountCopService.saveAccountCop(acc);
+
+	                SellDollarsAccountCop detalle = new SellDollarsAccountCop();
+	                detalle.setSellDollars(sale);
+	                detalle.setAccountCop(acc);
+	                detalle.setAmount(assignDto.getAmount());
+	                detalle.setNameAccount(assignDto.getNameAccount());
+	                detalles.add(detalle);
+
+	                totalAsignadoACuentas += assignDto.getAmount();
+	            }
 	        }
+
+	        double montoEnPesos = dto.getPesos() != null
+	            ? dto.getPesos()
+	            : dto.getDollars() * dto.getTasa();
+	        double restanteParaProveedor = montoEnPesos - totalAsignadoACuentas;
+
+	        if (restanteParaProveedor > 0.0) {
+	            double currentSupplierBalance = supplier.getBalance() != null ? supplier.getBalance() : 0.0;
+	            supplier.setBalance(currentSupplierBalance - restanteParaProveedor);
+	        }
+
+	        sale.setSellDollarsAccounts(detalles);
+	        supplierRepository.save(supplier);
 	    }
 
-	    // 4.3. Calcular cuánto queda para el proveedor
-	    double montoEnPesos = dto.getPesos() != null
-	        ? dto.getPesos()
-	        : dto.getDollars() * dto.getTasa();
-	    double restanteParaProveedor = montoEnPesos - totalAsignadoACuentas;
-
-	    if (restanteParaProveedor > 0.0) {
-	        double currentSupplierBalance = supplier.getBalance() != null ? supplier.getBalance() : 0.0;
-	        supplier.setBalance(currentSupplierBalance - restanteParaProveedor);
-	    }
-
-	    // 5. Guardar relaciones y entidades
-	    sale.setSellDollarsAccounts(detalles);
 	    accountBinanceRepository.save(accountBinance);
-	    supplierRepository.save(supplier);
-
 	    return sellDollarsRepository.save(sale);
 	}
+
+
 	
 	@Override
 	public List<SellDollars> obtenerVentasEntreFechas(LocalDateTime inicio, LocalDateTime fin){
@@ -248,7 +266,10 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 	    LocalDateTime end = fecha.plusDays(1).atStartOfDay();
 	    return sellDollarsRepository.findByDateBetween(start, end);
 	}
-
-
+	
+	@Override
+	public List<SellDollars> obtenerVentasPorCliente(Integer clienteId) {
+	    return sellDollarsRepository.findByClienteId(clienteId);
+	}
 
 }

@@ -17,5 +17,6 @@ public class MovimientoDTO {
 	private String cuentaOrigen;
 	private String cuentaDestino;
 	private String caja;
+	private String pagoCliente;
 
 }

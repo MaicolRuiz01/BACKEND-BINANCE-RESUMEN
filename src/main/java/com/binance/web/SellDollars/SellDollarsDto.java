@@ -29,5 +29,7 @@ public class SellDollarsDto {
     private Integer supplier;
     
     private List<AssignAccountDto> accounts;
+    private Integer clienteId;
+
 
 }

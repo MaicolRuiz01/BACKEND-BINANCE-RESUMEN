@@ -20,4 +20,6 @@ public interface SellDollarsRepository extends JpaRepository<SellDollars, Intege
 	List<SellDollars> findByAsignadoFalse();
 	
 	List<SellDollars> findByDateBetween(LocalDateTime start, LocalDateTime end);
+	List<SellDollars> findByClienteId(Integer clienteId);
+
 }

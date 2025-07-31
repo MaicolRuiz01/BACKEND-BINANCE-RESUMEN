@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -15,9 +16,12 @@ import org.springframework.web.bind.annotation.*;
 import com.binance.web.BuyDollars.BuyDollarsDto;
 import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.BuyDollars;
+import com.binance.web.Entity.Cliente;
+import com.binance.web.Entity.SellDollars;
 import com.binance.web.Entity.Transacciones;
 import com.binance.web.Repository.AccountBinanceRepository;
 import com.binance.web.Repository.BuyDollarsRepository;
+import com.binance.web.Repository.ClienteRepository;
 import com.binance.web.Repository.SellDollarsRepository;
 import com.binance.web.SellDollars.SellDollarsDto;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -26,6 +30,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.binance.web.model.Transaction;
 import com.binance.web.transacciones.TransaccionesDTO;
 import com.binance.web.transacciones.TransaccionesRepository;
+import java.util.function.Function;
 
 
 
@@ -49,6 +54,8 @@ public class PaymentController {
 	private SellDollarsRepository sellDollarsRepository;
 	@Autowired
 	private TransaccionesRepository transaccionesRepository;
+	@Autowired
+	private ClienteRepository clienteRepository;
 
 	@GetMapping("/payments")
 	public ResponseEntity<String> getPaymentHistory(@RequestParam(nameAccount) String account) {
@@ -140,13 +147,18 @@ public class PaymentController {
 	        LocalDate hoy = LocalDate.now(ZoneId.of("America/Bogota"));
 
 	        Set<String> idsRegistrados = sellDollarsRepository.findAll().stream()
-	                .map(sell -> sell.getIdWithdrawals())
+	                .map(SellDollars::getIdWithdrawals)
 	                .collect(Collectors.toSet());
 
 	        Set<String> userBinanceValidos = accountBinanceRepository.findAll().stream()
 	                .map(AccountBinance::getUserBinance)
 	                .filter(nombre -> nombre != null && !nombre.isBlank())
 	                .collect(Collectors.toSet());
+
+	        // 🔍 Mapa rápido para buscar clientes por accountId
+	        Map<Integer, Cliente> clientePorAccountId = clienteRepository.findAll().stream()
+	                .filter(c -> c.getAccountId() != null)
+	                .collect(Collectors.toMap(Cliente::getAccountId, Function.identity()));
 
 	        for (String cuenta : binanceService.getAllAccountNames()) {
 	            String respuesta = binanceService.getPaymentHistory(cuenta);
@@ -158,6 +170,7 @@ public class PaymentController {
 
 	                if (monto < 0 && !idsRegistrados.contains(tx.getOrderId())
 	                        && fecha != null && fecha.toLocalDate().isEqual(hoy)) {
+	                    
 	                    if (tx.getReceiverInfo() != null && !userBinanceValidos.contains(tx.getReceiverInfo().getName())) {
 	                        SellDollarsDto dto = new SellDollarsDto();
 	                        dto.setIdWithdrawals(tx.getOrderId());
@@ -166,6 +179,13 @@ public class PaymentController {
 	                        dto.setDollars(Math.abs(monto));
 	                        dto.setTasa(0.0);
 	                        dto.setPesos(0.0);
+
+	                        // 🔍 Si el accountId de receiver coincide con un cliente conocido
+	                        Integer recvAccountId = tx.getReceiverInfo().getAccountId().intValue();
+	                        Cliente cliente = clientePorAccountId.get(recvAccountId);
+	                        if (cliente != null) {
+	                            dto.setClienteId(cliente.getId());
+	                        }
 
 	                        resultados.add(dto);
 	                    }

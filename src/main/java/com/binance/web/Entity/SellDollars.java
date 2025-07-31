@@ -47,5 +47,10 @@ public class SellDollars {
     private List<SellDollarsAccountCop> sellDollarsAccounts;
 	private Double utilidad;
 	private Boolean asignado;
+	
+	@ManyToOne
+	@JoinColumn(name = "cliente_id")
+	private Cliente cliente;
+
 
 }

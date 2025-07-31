@@ -107,6 +107,7 @@ public class Transaction {
         private String name;
         private String email;
         private Long binanceId;
+        private Long accountId; 
         // Getters y setters
         public String getName() {
             return name;
@@ -129,6 +130,12 @@ public class Transaction {
         }
         public void setBinanceId(Long binanceId) { // <-- Setter nuevo!
             this.binanceId = binanceId;
+        }
+        public Long getAccountId() {
+        	return accountId;
+        }
+        public void setAccountId(Long accountId) {
+        	this.accountId= accountId;
         }
     }
 }
