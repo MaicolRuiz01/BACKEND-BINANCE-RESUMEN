@@ -44,10 +44,12 @@ public class SaleP2PServiceImpl implements SaleP2PService {
 	private AccountBinanceService accountBinanceService;
 
 	@Override
-	public List<SaleP2P> findAllSaleP2P() {
-		List<SaleP2P> salesP2P = saleP2PRepository.findAll();
-		return salesP2P;
-	}
+	public List<SaleP2PDto> findAllSaleP2P() {
+		return saleP2PRepository.findAll()
+				.stream()
+				.map(this::convertToDto)
+				.collect(Collectors.toList());
+}
 
 	@Override
 	public SaleP2P findByIdSaleP2P(Integer id) {
@@ -206,16 +208,16 @@ public class SaleP2PServiceImpl implements SaleP2PService {
 	}
 
 	private SaleP2PDto convertToDto(SaleP2P sale) {
-		SaleP2PDto dto = new SaleP2PDto();
-		dto.setId(sale.getId());
-		dto.setNumberOrder(sale.getNumberOrder());
-		dto.setDate(sale.getDate());
-		dto.setCommission(sale.getCommission());
-		dto.setPesosCop(sale.getPesosCop());
-		dto.setDollarsUs(sale.getDollarsUs());
-		dto.setNameAccountBinance(getBinanceAccountName(sale));
-		return dto;
-	}
+    SaleP2PDto dto = new SaleP2PDto();
+    dto.setId(sale.getId());
+    dto.setNumberOrder(sale.getNumberOrder());
+    dto.setDate(sale.getDate());
+    dto.setCommission(sale.getCommission());
+    dto.setPesosCop(sale.getPesosCop());
+    dto.setDollarsUs(sale.getDollarsUs());
+    dto.setNameAccountBinance(getBinanceAccountName(sale));
+    return dto;
+}
 	
 	private String getBinanceAccountName(SaleP2P sale) {
 		return sale.getBinanceAccount() != null ? sale.getBinanceAccount().getName() : null;
