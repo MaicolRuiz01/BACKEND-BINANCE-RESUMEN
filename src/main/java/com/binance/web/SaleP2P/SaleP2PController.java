@@ -22,8 +22,8 @@ public class SaleP2PController {
 	private AccountBinanceRepository accountBinanceRepository;
 
 	@GetMapping
-	public ResponseEntity<List<SaleP2P>> getAllSales() {
-		List<SaleP2P> sales = saleP2PService.findAllSaleP2P();
+	public ResponseEntity<List<SaleP2PDto>> getAllSales() {
+		List<SaleP2PDto> sales = saleP2PService.findAllSaleP2P();
 		return ResponseEntity.ok(sales);
 	}
 
@@ -32,6 +32,12 @@ public class SaleP2PController {
 		List<SaleP2PDto> sales = saleP2PService.getLastSaleP2pToday(account);
 		return ResponseEntity.ok(sales);
 	}
+	@GetMapping("/all")
+public ResponseEntity<List<SaleP2PDto>> getAllP2P() {
+    List<SaleP2PDto> sales = saleP2PService.findAllSaleP2P();
+    return ResponseEntity.ok(sales);
+}
+
 
 	@GetMapping("/{id}")
 	public ResponseEntity<SaleP2P> getSaleById(@PathVariable Integer id) {
@@ -61,19 +67,19 @@ public class SaleP2PController {
 		saleP2PService.deleteSaleP2P(id);
 		return ResponseEntity.noContent().build();
 	}
-	
+
 	@GetMapping("today/all-binance")
 	public ResponseEntity<List<SaleP2PDto>> getAllSalesTodayAllBinanceAccounts() {
-	    List<SaleP2PDto> result = new ArrayList<>();
-	    List<AccountBinance> binanceAccounts = accountBinanceRepository.findAll().stream()
-	        .filter(acc -> "BINANCE".equalsIgnoreCase(acc.getTipo()))
-	        .collect(Collectors.toList());
+		List<SaleP2PDto> result = new ArrayList<>();
+		List<AccountBinance> binanceAccounts = accountBinanceRepository.findAll().stream()
+				.filter(acc -> "BINANCE".equalsIgnoreCase(acc.getTipo()))
+				.collect(Collectors.toList());
 
-	    for (AccountBinance account : binanceAccounts) {
-	        result.addAll(saleP2PService.getLastSaleP2pToday(account.getName()));
-	    }
+		for (AccountBinance account : binanceAccounts) {
+			result.addAll(saleP2PService.getLastSaleP2pToday(account.getName()));
+		}
 
-	    return ResponseEntity.ok(result);
+		return ResponseEntity.ok(result);
 	}
 
 }

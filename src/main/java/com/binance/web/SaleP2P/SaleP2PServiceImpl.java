@@ -41,18 +41,26 @@ public class SaleP2PServiceImpl implements SaleP2PService {
     private AccountCopService accountCopService;
 
     @Autowired
-    private AccountBinanceRepository accountBinanceRepository;
-
-    @Autowired
-    private AccountBinanceService accountBinanceService;
-
-    @Autowired
     private BinanceService binanceService;
 
-    @Override
-    public List<SaleP2P> findAllSaleP2P() {
-        return saleP2PRepository.findAll();
-    }
+    @Autowired
+	private OrderP2PService orderP2PService;
+
+    @Autowired
+    private AccountBinanceRepository accountBinanceRepository;
+
+	@Autowired
+	private AccountBinanceService accountBinanceService;
+
+
+    
+	@Override
+	public List<SaleP2PDto> findAllSaleP2P() {
+		return saleP2PRepository.findAll()
+				.stream()
+				.map(this::convertToDto)
+				.collect(Collectors.toList());
+}
 
     @Override
     public SaleP2P findByIdSaleP2P(Integer id) {
@@ -230,38 +238,37 @@ public class SaleP2PServiceImpl implements SaleP2PService {
         return sales.stream().map(this::convertToDto).collect(Collectors.toList());
     }
 
-    private SaleP2PDto convertToDto(SaleP2P sale) {
-        SaleP2PDto dto = new SaleP2PDto();
-        dto.setId(sale.getId());
-        dto.setNumberOrder(sale.getNumberOrder());
-        dto.setDate(sale.getDate());
-        dto.setCommission(sale.getCommission());
-        dto.setPesosCop(sale.getPesosCop());
-        dto.setDollarsUs(sale.getDollarsUs());
-        dto.setTasa(sale.getTasa());
-        dto.setNameAccountBinance(getBinanceAccountName(sale));
-        return dto;
-    }
-
-    private String getBinanceAccountName(SaleP2P sale) {
-        return sale.getBinanceAccount() != null ? sale.getBinanceAccount().getName() : null;
-    }
-
-    @Override
-    public List<SaleP2P> obtenerVentasPorFecha(LocalDate fecha) {
-        LocalDateTime start = fecha.atStartOfDay();
-        LocalDateTime end = start.plusDays(1);
-        return saleP2PRepository.findByDateBetween(start, end);
-    }
-
-    @Override
-    public Double obtenerComisionesPorFecha(LocalDate fecha) {
-        LocalDateTime start = fecha.atStartOfDay();
-        LocalDateTime end = start.plusDays(1);
-        return saleP2PRepository.findByDateBetween(start, end).stream()
-                .mapToDouble(SaleP2P::getCommission)
-                .sum();
-    }
+	private SaleP2PDto convertToDto(SaleP2P sale) {
+    SaleP2PDto dto = new SaleP2PDto();
+    dto.setId(sale.getId());
+    dto.setNumberOrder(sale.getNumberOrder());
+    dto.setDate(sale.getDate());
+    dto.setCommission(sale.getCommission());
+    dto.setPesosCop(sale.getPesosCop());
+    dto.setDollarsUs(sale.getDollarsUs());
+    dto.setNameAccountBinance(getBinanceAccountName(sale));
+    return dto;
+}
+	
+	private String getBinanceAccountName(SaleP2P sale) {
+		return sale.getBinanceAccount() != null ? sale.getBinanceAccount().getName() : null;
+	}
+	
+	@Override
+	public List<SaleP2P> obtenerVentasPorFecha(LocalDate fecha) {
+	    LocalDateTime start = fecha.atStartOfDay();
+	    LocalDateTime end = start.plusDays(1);
+	    return saleP2PRepository.findByDateBetween(start, end);
+	}
+	
+	@Override
+	public Double obtenerComisionesPorFecha(LocalDate fecha) {
+	    LocalDateTime start = fecha.atStartOfDay();
+	    LocalDateTime end = start.plusDays(1);
+	    return saleP2PRepository.findByDateBetween(start, end).stream()
+	        .mapToDouble(SaleP2P::getCommission)
+	        .sum();
+	}
 
 	@Override
 	public List<SaleP2P> obtenerVentasEntreFechas(LocalDateTime inicio, LocalDateTime fin) {
