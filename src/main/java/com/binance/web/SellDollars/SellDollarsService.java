@@ -13,4 +13,7 @@ public interface SellDollarsService {
 	void saveUtilityDefinitive(List<SellDollars> rangoSell, Double averageRate);
 	List<SellDollars> obtenerVentasPorFecha(LocalDate fecha);
 	List<SellDollars> obtenerVentasPorCliente(Integer clienteId);
+	List<SellDollarsDto> listarVentasDto();
+	SellDollars updateSellDollars(Integer id, SellDollarsDto dto);
+
 }

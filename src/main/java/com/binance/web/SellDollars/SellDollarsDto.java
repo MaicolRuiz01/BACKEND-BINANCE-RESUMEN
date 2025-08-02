@@ -14,6 +14,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class SellDollarsDto {
+	private Integer id;
 	private String idWithdrawals;
     private Double tasa;
     private Double dollars;
@@ -30,6 +31,7 @@ public class SellDollarsDto {
     
     private List<AssignAccountDto> accounts;
     private Integer clienteId;
+    private List<String> nombresCuentasAsignadas;
 
 
 }

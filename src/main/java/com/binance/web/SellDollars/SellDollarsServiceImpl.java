@@ -271,5 +271,164 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 	public List<SellDollars> obtenerVentasPorCliente(Integer clienteId) {
 	    return sellDollarsRepository.findByClienteId(clienteId);
 	}
+	
+	@Override
+	public List<SellDollarsDto> listarVentasDto() {
+	    List<SellDollars> ventas = sellDollarsRepository.findAll();
+	    return ventas.stream().map(this::convertToDto).collect(Collectors.toList());
+	}
+
+	private SellDollarsDto convertToDto(SellDollars venta) {
+	    SellDollarsDto dto = new SellDollarsDto();
+	    dto.setId(venta.getId());
+	    dto.setIdWithdrawals(venta.getIdWithdrawals());
+	    dto.setTasa(venta.getTasa());
+	    dto.setDollars(venta.getDollars());
+	    dto.setPesos(venta.getPesos());
+	    dto.setDate(venta.getDate());
+	    dto.setNameAccount(venta.getNameAccount());
+	    dto.setAccountBinanceId(
+	        venta.getAccountBinance() != null ? venta.getAccountBinance().getId() : null
+	    );
+	    dto.setSupplier(
+	        venta.getSupplier() != null ? venta.getSupplier().getId() : null
+	    );
+	    dto.setClienteId(
+	        venta.getCliente() != null ? venta.getCliente().getId() : null
+	    );
+
+	    if (venta.getSellDollarsAccounts() != null) {
+	        List<String> nombres = venta.getSellDollarsAccounts().stream()
+	            .map(detalle -> detalle.getAccountCop() != null ? detalle.getAccountCop().getName() : null)
+	            .filter(Objects::nonNull) // eliminar nulos
+	            .collect(Collectors.toList());
+	        dto.setNombresCuentasAsignadas(nombres);
+	    }
+
+
+
+	    return dto;
+	}
+	
+	
+	@Transactional
+	public SellDollars updateSellDollars(Integer id, SellDollarsDto dto) {
+	    SellDollars existing = sellDollarsRepository.findById(id)
+	        .orElseThrow(() -> new RuntimeException("Venta no encontrada"));
+
+	    // 1️⃣ Revertir efectos anteriores:
+	    revertPreviousAssignment(existing);
+
+	    // 2️⃣ Aplicar nuevos valores:
+	    // usa lógica similar a createSellDollars, actualizando por ejemplo:
+	    existing.setTasa(dto.getTasa());
+	    existing.setDollars(dto.getDollars());
+	    existing.setPesos(dto.getPesos());
+	    // actualiza cliente o supplier según dto.getClienteId() / dto.getSupplier()
+	    // también actualiza cuentas COP
+
+	    // 3️⃣ Guardar efectos nuevos:
+	    applyNewAssignment(existing, dto);
+
+	    return sellDollarsRepository.save(existing);
+	}
+	
+	private void revertPreviousAssignment(SellDollars sell) {
+	    if (sell.getCliente() != null) {
+	        Cliente cl = sell.getCliente();
+	        cl.setSaldo(cl.getSaldo() + sell.getPesos());
+	        clienteRepository.save(cl);
+	    } else if (sell.getSupplier() != null) {
+	        Supplier sup = sell.getSupplier();
+	        sup.setBalance(sup.getBalance() + (sell.getPesos() - sumAccounts(sell)));
+	        supplierRepository.save(sup);
+	        // revertir cuentas COP
+	        for (SellDollarsAccountCop det : sell.getSellDollarsAccounts()) {
+	            AccountCop acc = det.getAccountCop();
+	            acc.setBalance(acc.getBalance() - det.getAmount());
+	            accountCopService.saveAccountCop(acc);
+	        }
+	    }
+	}
+	
+	private double sumAccounts(SellDollars sell) {
+	    if (sell.getSellDollarsAccounts() == null) return 0.0;
+	    return sell.getSellDollarsAccounts().stream()
+	            .mapToDouble(SellDollarsAccountCop::getAmount)
+	            .sum();
+	}
+	
+	private void applyNewAssignment(SellDollars existing, SellDollarsDto dto) {
+	    existing.setAsignado(true);
+	    existing.setUtilidad(utilidad(existing));
+
+	    // Asignación por cliente
+	    if (dto.getClienteId() != null) {
+	        Cliente cliente = clienteRepository.findById(dto.getClienteId())
+	                .orElseThrow(() -> new RuntimeException("Cliente no encontrado"));
+
+	        existing.setCliente(cliente);
+	        existing.setSupplier(null);
+
+	        double saldoActual = cliente.getSaldo() != null ? cliente.getSaldo() : 0.0;
+	        cliente.setSaldo(saldoActual - dto.getPesos());
+	        clienteRepository.save(cliente);
+
+	        // Limpia correctamente la colección para evitar error Hibernate
+	        if (existing.getSellDollarsAccounts() != null) {
+	            existing.getSellDollarsAccounts().forEach(det -> det.setSellDollars(null));
+	            existing.getSellDollarsAccounts().clear();
+	        }
+
+	    } else {
+	        // Asignación a proveedor y cuentas COP
+	        Supplier supplier = supplierRepository.findById(dto.getSupplier())
+	                .orElseThrow(() -> new RuntimeException("Proveedor no encontrado"));
+
+	        existing.setSupplier(supplier);
+	        existing.setCliente(null);
+
+	        double totalAsignadoACuentas = 0.0;
+	        List<SellDollarsAccountCop> nuevosDetalles = new ArrayList<>();
+
+	        if (dto.getAccounts() != null && !dto.getAccounts().isEmpty()) {
+	            for (AssignAccountDto assignDto : dto.getAccounts()) {
+	                AccountCop acc = accountCopService.findByIdAccountCop(assignDto.getAccountCop());
+
+	                double currentBalance = acc.getBalance() != null ? acc.getBalance() : 0.0;
+	                acc.setBalance(currentBalance + assignDto.getAmount());
+	                accountCopService.saveAccountCop(acc);
+
+	                SellDollarsAccountCop detalle = new SellDollarsAccountCop();
+	                detalle.setSellDollars(existing);
+	                detalle.setAccountCop(acc);
+	                detalle.setAmount(assignDto.getAmount());
+	                detalle.setNameAccount(assignDto.getNameAccount());
+
+	                nuevosDetalles.add(detalle);
+	                totalAsignadoACuentas += assignDto.getAmount();
+	            }
+	        }
+
+	        double montoEnPesos = dto.getPesos() != null ? dto.getPesos() : dto.getDollars() * dto.getTasa();
+	        double restanteParaProveedor = montoEnPesos - totalAsignadoACuentas;
+
+	        if (restanteParaProveedor > 0) {
+	            double currentSupplierBalance = supplier.getBalance() != null ? supplier.getBalance() : 0.0;
+	            supplier.setBalance(currentSupplierBalance - restanteParaProveedor);
+	            supplierRepository.save(supplier);
+	        }
+
+	        // Limpieza correcta antes de asignar los nuevos
+	        if (existing.getSellDollarsAccounts() != null) {
+	            existing.getSellDollarsAccounts().forEach(det -> det.setSellDollars(null));
+	            existing.getSellDollarsAccounts().clear();
+	        } else {
+	            existing.setSellDollarsAccounts(new ArrayList<>());
+	        }
+
+	        existing.getSellDollarsAccounts().addAll(nuevosDetalles);
+	    }
+	}
 
 }
