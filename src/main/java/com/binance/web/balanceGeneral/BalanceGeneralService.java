@@ -8,5 +8,6 @@ public interface BalanceGeneralService {
     List<BalanceGeneral> listarTodos();
     BalanceGeneral obtenerPorFecha(LocalDate fecha);
     BalanceGeneral calcularHoyYRetornar();
+    Double obtenerTotalCajas();
 
 }
