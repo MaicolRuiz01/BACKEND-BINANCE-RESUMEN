@@ -327,7 +327,7 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 	    // actualiza cliente o supplier según dto.getClienteId() / dto.getSupplier()
 	    // también actualiza cuentas COP
 
-	    // 3️⃣ Guardar efectos nuevos:
+	   
 	    applyNewAssignment(existing, dto);
 
 	    return sellDollarsRepository.save(existing);

@@ -13,7 +13,7 @@ import com.fasterxml.jackson.annotation.JsonFormat;
 @NoArgsConstructor
 @AllArgsConstructor
 public class BuyDollarsDto {
-
+	private Integer id;
     private Double dollars;      // Monto de dólares a comprar
     private Double tasa;         // Tasa de cambio aplicada
     private String nameAccount;  // Nombre de la cuenta

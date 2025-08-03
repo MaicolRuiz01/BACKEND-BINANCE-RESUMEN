@@ -1,6 +1,9 @@
 package com.binance.web.BuyDollars;
 
+import java.util.List;
+
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -95,4 +98,59 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 		}
 		return lastBuy;
 	}
+	
+	@Override
+	public List<BuyDollars> getAllBuyDollars() {
+	    return buyDollarsRepository.findAll(Sort.by(Sort.Direction.DESC, "date"));
+	}
+	
+	
+	@Override
+	@Transactional
+	public BuyDollars updateBuyDollars(Integer id, BuyDollarsDto dto) {
+	    BuyDollars existing = buyDollarsRepository.findById(id)
+	        .orElseThrow(() -> new RuntimeException("Compra con ID " + id + " no encontrada"));
+
+	    // Restaurar balances anteriores
+	    Double oldAmount = existing.getDollars() * existing.getTasa();
+	    Supplier oldSupplier = existing.getSupplier();
+	    AccountBinance oldAccount = existing.getAccountBinance();
+	    oldSupplier.setBalance(oldSupplier.getBalance() - oldAmount);
+	    oldAccount.setBalance(oldAccount.getBalance() - existing.getDollars());
+
+	    // Actualizar campos
+	    existing.setDollars(dto.getDollars());
+	    existing.setTasa(dto.getTasa());
+	    existing.setPesos(dto.getPesos());
+	    existing.setDate(dto.getDate());
+	    existing.setNameAccount(dto.getNameAccount());
+	    existing.setIdDeposit(dto.getIdDeposit());
+
+	    // Nueva cuenta y proveedor si se cambiaron
+	    if (!oldSupplier.getId().equals(dto.getSupplierId())) {
+	        Supplier newSupplier = supplierRepository.findById(dto.getSupplierId())
+	            .orElseThrow(() -> new RuntimeException("Proveedor no encontrado"));
+	        existing.setSupplier(newSupplier);
+	        oldSupplier = newSupplier;
+	    }
+
+	    if (!oldAccount.getId().equals(dto.getAccountBinanceId())) {
+	        AccountBinance newAccount = accountBinanceRepository.findById(dto.getAccountBinanceId())
+	            .orElseThrow(() -> new RuntimeException("Cuenta Binance no encontrada"));
+	        existing.setAccountBinance(newAccount);
+	        oldAccount = newAccount;
+	    }
+
+	    // Reasignar balances
+	    double nuevoMonto = dto.getDollars() * dto.getTasa();
+	    oldSupplier.setBalance(oldSupplier.getBalance() + nuevoMonto);
+	    oldAccount.setBalance(oldAccount.getBalance() + dto.getDollars());
+
+	    supplierRepository.save(oldSupplier);
+	    accountBinanceRepository.save(oldAccount);
+
+	    return buyDollarsRepository.save(existing);
+	}
+
+
 }
