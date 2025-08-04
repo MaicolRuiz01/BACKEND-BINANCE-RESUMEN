@@ -104,53 +104,65 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 	    return buyDollarsRepository.findAll(Sort.by(Sort.Direction.DESC, "date"));
 	}
 	
-	
 	@Override
 	@Transactional
 	public BuyDollars updateBuyDollars(Integer id, BuyDollarsDto dto) {
 	    BuyDollars existing = buyDollarsRepository.findById(id)
 	        .orElseThrow(() -> new RuntimeException("Compra con ID " + id + " no encontrada"));
 
-	    // Restaurar balances anteriores
-	    Double oldAmount = existing.getDollars() * existing.getTasa();
+	    // Monto anterior en pesos y dólares
+	    Double oldDollars = existing.getDollars();
+	    Double oldTasa = existing.getTasa();
+	    double oldAmountPesos = oldDollars * oldTasa;
+
 	    Supplier oldSupplier = existing.getSupplier();
 	    AccountBinance oldAccount = existing.getAccountBinance();
-	    oldSupplier.setBalance(oldSupplier.getBalance() - oldAmount);
-	    oldAccount.setBalance(oldAccount.getBalance() - existing.getDollars());
 
-	    // Actualizar campos
-	    existing.setDollars(dto.getDollars());
-	    existing.setTasa(dto.getTasa());
+	    // Restar montos anteriores
+	    oldSupplier.setBalance(oldSupplier.getBalance() - oldAmountPesos);
+	    oldAccount.setBalance(oldAccount.getBalance() - oldDollars);
+
+	    // Nuevos valores
+	    Double newDollars = dto.getDollars();
+	    Double newTasa = dto.getTasa();
+	    double newAmountPesos = newDollars * newTasa;
+
+	    // Actualizar campos básicos
+	    existing.setDollars(newDollars);
+	    existing.setTasa(newTasa);
 	    existing.setPesos(dto.getPesos());
 	    existing.setDate(dto.getDate());
 	    existing.setNameAccount(dto.getNameAccount());
 	    existing.setIdDeposit(dto.getIdDeposit());
 
-	    // Nueva cuenta y proveedor si se cambiaron
+	    // Cambiar proveedor si es necesario
 	    if (!oldSupplier.getId().equals(dto.getSupplierId())) {
 	        Supplier newSupplier = supplierRepository.findById(dto.getSupplierId())
 	            .orElseThrow(() -> new RuntimeException("Proveedor no encontrado"));
 	        existing.setSupplier(newSupplier);
-	        oldSupplier = newSupplier;
+	        newSupplier.setBalance(newSupplier.getBalance() + newAmountPesos);
+	        supplierRepository.save(newSupplier);
+	    } else {
+	        // Si el proveedor es el mismo, simplemente reasignar con nuevo valor
+	        oldSupplier.setBalance(oldSupplier.getBalance() + newAmountPesos);
+	        supplierRepository.save(oldSupplier);
 	    }
 
+	    // Cambiar cuenta Binance si es necesario
 	    if (!oldAccount.getId().equals(dto.getAccountBinanceId())) {
 	        AccountBinance newAccount = accountBinanceRepository.findById(dto.getAccountBinanceId())
 	            .orElseThrow(() -> new RuntimeException("Cuenta Binance no encontrada"));
 	        existing.setAccountBinance(newAccount);
-	        oldAccount = newAccount;
+	        newAccount.setBalance(newAccount.getBalance() + newDollars);
+	        accountBinanceRepository.save(newAccount);
+	    } else {
+	        oldAccount.setBalance(oldAccount.getBalance() + newDollars);
+	        accountBinanceRepository.save(oldAccount);
 	    }
-
-	    // Reasignar balances
-	    double nuevoMonto = dto.getDollars() * dto.getTasa();
-	    oldSupplier.setBalance(oldSupplier.getBalance() + nuevoMonto);
-	    oldAccount.setBalance(oldAccount.getBalance() + dto.getDollars());
-
-	    supplierRepository.save(oldSupplier);
-	    accountBinanceRepository.save(oldAccount);
 
 	    return buyDollarsRepository.save(existing);
 	}
+
 
 
 }
