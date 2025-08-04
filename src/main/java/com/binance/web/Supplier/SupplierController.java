@@ -1,8 +1,10 @@
 package com.binance.web.Supplier;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -11,6 +13,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.binance.web.Entity.BuyDollars;
@@ -22,12 +25,18 @@ public class SupplierController {
 
 	@Autowired
 	private SupplierService supplierService;
-	
+
 	@GetMapping(produces = "application/json")
-	public ResponseEntity<List<Supplier>> getAllSuppliers(){
+	public ResponseEntity<List<Supplier>> getAllSuppliers() {
 		List<Supplier> Suppliers = supplierService.findAllSuppliers();
 		return ResponseEntity.ok(Suppliers);
 	}
+
+	@PostMapping("/suppliers")
+public ResponseEntity<Void> createSupplier(@RequestBody Supplier supplier) {
+    supplierService.saveSupplier(supplier);
+    return ResponseEntity.status(HttpStatus.CREATED).build();
+}
 
 	@GetMapping("/{id}")
 	public ResponseEntity<Supplier> getSupplierById(@PathVariable Integer id) {
@@ -54,4 +63,5 @@ public class SupplierController {
 		supplierService.subtractSupplierDebt(dto.getPesosCop(), dto.getSupplierId(), dto.getAccountCopId());
 		return ResponseEntity.ok().build();
 	}
+
 }

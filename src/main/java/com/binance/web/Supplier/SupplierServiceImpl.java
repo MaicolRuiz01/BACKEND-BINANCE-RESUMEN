@@ -32,6 +32,14 @@ public class SupplierServiceImpl implements SupplierService {
 		supplierRepository.save(supplier);
 	}
 
+	public void createSupplier(String name, Double balance, LocalDateTime lastPaymentDate) {
+		Supplier supplier = new Supplier();
+		supplier.setName(name);
+		supplier.setBalance(balance);
+		supplier.setLastPaymentDate(lastPaymentDate);
+		supplierRepository.save(supplier);
+	}
+
 	@Override
 	public void subtractSupplierDebt(Double pesosCop, Integer supplierId, Integer accountCopId) {
 		Supplier supplier = supplierRepository.findById(supplierId).orElse(null);
