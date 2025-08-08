@@ -1,0 +1,154 @@
+package com.binance.web.BinanceAPI;
+
+import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonNull;
+import com.google.gson.JsonObject;
+import okhttp3.*;
+import java.io.IOException;
+import java.util.HashSet;
+import java.util.Set;
+
+public class BinanceP2PScraper {
+
+    private static final String BINANCE_P2P_API = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search";
+    private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
+    private final OkHttpClient client = new OkHttpClient();
+    private final Gson gson = new Gson();
+
+    // Lista de usuarios que quieres buscar
+    private final Set<String> targetNicknames = Set.of(
+            "User-febba",
+            "User-7a1ac",
+            "User-503f0",
+            "User-7d57b",
+            "User-1dc7a"
+    );
+
+    public void fetchAdsHybrid(String asset, String fiat, String tradeType) throws IOException {
+        for (String nickname : targetNicknames) {
+            System.out.println("\n🔍 Buscando anuncios de: " + nickname);
+
+            boolean found = fetchByNickname(asset, fiat, tradeType, nickname);
+
+            if (!found) {
+                System.out.println("⚠ No se encontraron anuncios directos de " + nickname + ". Intentando búsqueda completa...");
+                fetchByScanningAll(asset, fiat, tradeType, nickname);
+            }
+        }
+    }
+
+    private boolean fetchByNickname(String asset, String fiat, String tradeType, String nickname) throws IOException {
+        int page = 1;
+        boolean hasMore = true;
+        boolean foundAny = false;
+
+        while (hasMore) {
+            JsonObject requestBodyJson = new JsonObject();
+            requestBodyJson.addProperty("asset", asset);
+            requestBodyJson.addProperty("fiat", fiat);
+            requestBodyJson.addProperty("tradeType", tradeType);
+            requestBodyJson.addProperty("page", page);
+            requestBodyJson.addProperty("rows", 20);
+            requestBodyJson.addProperty("merchantCheck", false);
+            requestBodyJson.add("publisherType", JsonNull.INSTANCE);
+            requestBodyJson.addProperty("merchantNickName", nickname);
+
+            RequestBody body = RequestBody.create(requestBodyJson.toString(), JSON);
+            Request request = new Request.Builder()
+                    .url(BINANCE_P2P_API)
+                    .post(body)
+                    .build();
+
+            try (Response response = client.newCall(request).execute()) {
+                if (!response.isSuccessful()) throw new IOException("Error en request: " + response);
+
+                JsonObject jsonResponse = gson.fromJson(response.body().string(), JsonObject.class);
+                JsonArray ads = jsonResponse.get("data").getAsJsonArray();
+
+                if (ads.size() == 0) {
+                    hasMore = false;
+                    break;
+                }
+
+                for (int i = 0; i < ads.size(); i++) {
+                    JsonObject adv = ads.get(i).getAsJsonObject().getAsJsonObject("adv");
+                    JsonObject advertiser = ads.get(i).getAsJsonObject().getAsJsonObject("advertiser");
+                    String foundNick = advertiser.get("nickName").getAsString();
+
+                    if (foundNick.equalsIgnoreCase(nickname)) {
+                        printAd(foundNick, adv);
+                        foundAny = true;
+                    }
+                }
+
+                hasMore = ads.size() == 20;
+                page++;
+            }
+        }
+        return foundAny;
+    }
+
+    private void fetchByScanningAll(String asset, String fiat, String tradeType, String nickname) throws IOException {
+        int page = 1;
+        boolean hasMore = true;
+
+        while (hasMore) {
+            JsonObject requestBodyJson = new JsonObject();
+            requestBodyJson.addProperty("asset", asset);
+            requestBodyJson.addProperty("fiat", fiat);
+            requestBodyJson.addProperty("tradeType", tradeType);
+            requestBodyJson.addProperty("page", page);
+            requestBodyJson.addProperty("rows", 20);
+
+            RequestBody body = RequestBody.create(requestBodyJson.toString(), JSON);
+            Request request = new Request.Builder()
+                    .url(BINANCE_P2P_API)
+                    .post(body)
+                    .build();
+
+            try (Response response = client.newCall(request).execute()) {
+                if (!response.isSuccessful()) throw new IOException("Error en request: " + response);
+
+                JsonObject jsonResponse = gson.fromJson(response.body().string(), JsonObject.class);
+                JsonArray ads = jsonResponse.get("data").getAsJsonArray();
+
+                if (ads.size() == 0) {
+                    hasMore = false;
+                    break;
+                }
+
+                for (int i = 0; i < ads.size(); i++) {
+                    JsonObject adv = ads.get(i).getAsJsonObject().getAsJsonObject("adv");
+                    JsonObject advertiser = ads.get(i).getAsJsonObject().getAsJsonObject("advertiser");
+                    String foundNick = advertiser.get("nickName").getAsString();
+
+                    if (foundNick.equalsIgnoreCase(nickname)) {
+                        printAd(foundNick, adv);
+                    }
+                }
+
+                hasMore = ads.size() == 20;
+                page++;
+            }
+        }
+    }
+
+    private void printAd(String nickname, JsonObject adv) {
+        System.out.println("------------------------------------");
+        System.out.println("Nickname: " + nickname);
+        System.out.println("Precio: " + adv.get("price").getAsString());
+        System.out.println("Límite mínimo: " + adv.get("minSingleTransAmount").getAsString());
+        System.out.println("Límite máximo: " + adv.get("maxSingleTransAmount").getAsString());
+        System.out.println("------------------------------------");
+    }
+
+    public static void main(String[] args) {
+        BinanceP2PScraper scraper = new BinanceP2PScraper();
+        try {
+            scraper.fetchAdsHybrid("USDT", "COP", "SELL");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+}

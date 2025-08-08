@@ -26,5 +26,6 @@ public class Cliente {
 	private String correo;
 	private Double saldo;
 	private Integer accountId;
+	private String wallet;
 
 }
