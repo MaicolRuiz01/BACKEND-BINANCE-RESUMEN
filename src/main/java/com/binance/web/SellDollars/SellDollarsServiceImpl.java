@@ -18,6 +18,8 @@ import com.binance.web.model.Transaction;
 import com.binance.web.AccountCop.AccountCopService;
 import com.binance.web.BinanceAPI.BinanceService;
 import com.binance.web.BinanceAPI.PaymentController;
+import com.binance.web.BinanceAPI.SpotOrdersController;
+import com.binance.web.BinanceAPI.TronScanController;
 import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.AccountCop;
 import com.binance.web.Entity.Cliente;
@@ -53,6 +55,12 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 	private PurchaseRateRepository purchaseRateRepository;
 	@Autowired
 	private ClienteRepository clienteRepository;
+	@Autowired
+	private SpotOrdersController spotOrdersController;
+	@Autowired
+	private PaymentController binancePayController;
+	@Autowired
+	private TronScanController tronScanController;
 
 	@Override
 	@Transactional
@@ -133,8 +141,78 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 	    accountBinanceRepository.save(accountBinance);
 	    return sellDollarsRepository.save(sale);
 	}
+	
+	@Override
+	@Transactional
+	public SellDollars asignarVenta(Integer id, SellDollarsDto dto) {
+	    // Buscar la venta no asignada
+	    SellDollars existing = sellDollarsRepository.findById(id)
+	        .orElseThrow(() -> new RuntimeException("Venta no encontrada"));
 
+	    if (Boolean.TRUE.equals(existing.getAsignado())) {
+	        throw new RuntimeException("Venta ya fue asignada");
+	    }
 
+	    // Actualizar tasa y pesos
+	    existing.setTasa(dto.getTasa());
+	    existing.setPesos(dto.getDollars() * dto.getTasa());
+
+	    if (dto.getClienteId() != null) {
+	        Cliente cliente = clienteRepository.findById(dto.getClienteId())
+	            .orElseThrow(() -> new RuntimeException("Cliente no encontrado"));
+	        existing.setCliente(cliente);
+	        existing.setSupplier(null);  // 🔥 Importante
+
+	        double saldoActual = cliente.getSaldo() != null ? cliente.getSaldo() : 0.0;
+	        cliente.setSaldo(saldoActual - dto.getPesos());
+	        clienteRepository.save(cliente);
+	    } 
+	    else {
+	        Supplier supplier = supplierRepository.findById(dto.getSupplier())
+	            .orElseThrow(() -> new RuntimeException("Supplier no encontrado"));
+	        existing.setSupplier(supplier);
+	        existing.setCliente(null); // 🔥 Importante
+
+	        double totalAsignadoACuentas = 0.0;
+	        List<SellDollarsAccountCop> detalles = new ArrayList<>();
+
+	        if (dto.getAccounts() != null && !dto.getAccounts().isEmpty()) {
+	            for (AssignAccountDto assignDto : dto.getAccounts()) {
+	                AccountCop acc = accountCopService.findByIdAccountCop(assignDto.getAccountCop());
+	                double currentCopBalance = acc.getBalance() != null ? acc.getBalance() : 0.0;
+	                acc.setBalance(currentCopBalance + assignDto.getAmount());
+	                accountCopService.saveAccountCop(acc);
+
+	                SellDollarsAccountCop detalle = new SellDollarsAccountCop();
+	                detalle.setSellDollars(existing);
+	                detalle.setAccountCop(acc);
+	                detalle.setAmount(assignDto.getAmount());
+	                detalle.setNameAccount(assignDto.getNameAccount());
+	                detalles.add(detalle);
+
+	                totalAsignadoACuentas += assignDto.getAmount();
+	            }
+	        }
+
+	        double montoEnPesos = dto.getPesos() != null
+	            ? dto.getPesos()
+	            : dto.getDollars() * dto.getTasa();
+	        double restanteParaProveedor = montoEnPesos - totalAsignadoACuentas;
+
+	        if (restanteParaProveedor > 0.0) {
+	            double currentSupplierBalance = supplier.getBalance() != null ? supplier.getBalance() : 0.0;
+	            supplier.setBalance(currentSupplierBalance - restanteParaProveedor);
+	        }
+
+	        existing.setSellDollarsAccounts(detalles);
+	        supplierRepository.save(supplier);
+	    }
+	    // Marcar como asignada
+	    existing.setAsignado(true);
+
+	    return sellDollarsRepository.save(existing);
+	}
+	
 	
 	@Override
 	public List<SellDollars> obtenerVentasEntreFechas(LocalDateTime inicio, LocalDateTime fin){
@@ -429,6 +507,55 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 
 	        existing.getSellDollarsAccounts().addAll(nuevosDetalles);
 	    }
+	}
+	
+	@Override
+	@Transactional
+	public void registrarVentasAutomaticamente() {
+		
+		try {
+			List<SellDollarsDto> spot = spotOrdersController.getVentasNoRegistradas(50).getBody();
+		    List<SellDollarsDto> binancePay = binancePayController.getVentasNoRegistradasBinancePay().getBody();
+		    List<SellDollarsDto> trust = tronScanController.getUSDTOutgoingTransfers().getBody();
+
+		    Set<String> existentes = sellDollarsRepository.findAll().stream()
+		        .map(SellDollars::getIdWithdrawals)
+		        .filter(Objects::nonNull)
+		        .collect(Collectors.toSet());
+
+		    List<SellDollarsDto> todas = new ArrayList<>();
+		    if (spot != null) todas.addAll(spot);
+		    if (binancePay != null) todas.addAll(binancePay);
+		    if (trust != null) todas.addAll(trust);
+
+		    for (SellDollarsDto dto : todas) {
+		        if (dto.getIdWithdrawals() == null || existentes.contains(dto.getIdWithdrawals())) continue;
+
+		        AccountBinance account = accountBinanceRepository.findByName(dto.getNameAccount());
+		        if (account == null) continue;
+
+		        SellDollars nueva = new SellDollars();
+		        nueva.setIdWithdrawals(dto.getIdWithdrawals());
+		        nueva.setNameAccount(dto.getNameAccount());
+		        nueva.setDate(dto.getDate());
+		        nueva.setDollars(dto.getDollars());
+		        nueva.setTasa(0.0);
+		        nueva.setPesos(0.0);
+		        nueva.setAsignado(false);
+		        nueva.setAccountBinance(account);
+
+		        // Descontar balance porque es una venta
+		        double actualBalance = account.getBalance() != null ? account.getBalance() : 0.0;
+		        account.setBalance(actualBalance - dto.getDollars());
+
+		        accountBinanceRepository.save(account);
+		        sellDollarsRepository.save(nueva);
+		    }
+		}catch (Exception e) {
+			// TODO: handle exception
+			throw new RuntimeException("Error al registrar compras automáticamente", e);
+		}
+	    
 	}
 
 }

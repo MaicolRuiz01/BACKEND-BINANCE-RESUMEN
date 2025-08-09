@@ -83,6 +83,27 @@ public class BuyDollarsController {
         }
     }
 
+    @PostMapping("/importar-automatico")
+    public ResponseEntity<Void> importarComprasAutomaticamente() {
+        buyDollarsService.registrarComprasAutomaticamente();
+        return ResponseEntity.ok().build();
+    }
+    
+ // En BuyDollarsController.java
+    @GetMapping("/no-asignadas-hoy")
+    public ResponseEntity<List<BuyDollarsDto>> getNoAsignadasHoy() {
+        return ResponseEntity.ok(buyDollarsService.getComprasNoAsignadasHoy());
+    }
+    
+    @PutMapping("/asignar/{id}")
+    public ResponseEntity<BuyDollars> asignarCompra(
+        @PathVariable Integer id,
+        @RequestBody BuyDollarsDto dto) {
+        BuyDollars updated = buyDollarsService.asignarCompra(id, dto);
+        return ResponseEntity.ok(updated);
+    }
+
+
 
 
 }

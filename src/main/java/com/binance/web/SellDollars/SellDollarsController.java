@@ -84,5 +84,16 @@ public class SellDollarsController {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Error al actualizar la venta: " + e.getMessage());
         }
     }
+    
+    @PostMapping("/importar-automatico")
+    public ResponseEntity<Void> importarVentasAutomaticamente() {
+        service.registrarVentasAutomaticamente();
+        return ResponseEntity.ok().build();
+    }
+    
+    @PutMapping("/asignar/{id}")
+    public ResponseEntity<SellDollars> asignar(@PathVariable Integer id, @RequestBody SellDollarsDto dto) {
+        return ResponseEntity.ok(service.asignarVenta(id, dto));
+    }
 
 }

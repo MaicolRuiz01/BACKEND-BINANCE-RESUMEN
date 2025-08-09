@@ -26,6 +26,7 @@ import java.io.OutputStream;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
@@ -234,56 +235,12 @@ public class BinanceService {
     }
 
     public String getP2POrderLatest(String account) {
-        try {
-            String[] credentials = getApiCredentials(account);
-            if (credentials == null)
-                return "{\"error\": \"Cuenta no válida.\"}";
-
-            String apiKey = credentials[0];
-            String secretKey = credentials[1];
-
-            long timestamp = getServerTime();
-            List<JsonObject> allOrders = new ArrayList<>();
-            int currentPage = 1;
-            int rows = 50;
-
-            while (true) {
-                String query = "tradeType=SELL&timestamp=" + timestamp +
-                        "&recvWindow=60000&page=" + currentPage + "&rows=" + rows;
-                String signature = hmacSha256(secretKey, query);
-                String url = P2P_ORDERS_API_URL + "?" + query + "&signature=" + signature;
-
-                String response = sendBinanceRequestWithProxy(url, apiKey);
-                JsonObject jsonResponse = JsonParser.parseString(response).getAsJsonObject();
-
-                if (jsonResponse.has("code") && !jsonResponse.get("code").getAsString().equals("000000")) {
-                    return "{\"error\": \"" + jsonResponse.get("msg").getAsString() + "\"}";
-                }
-
-                if (!jsonResponse.has("data") || jsonResponse.get("data").isJsonNull()) {
-                    break;
-                }
-
-                jsonResponse.getAsJsonArray("data").forEach(order -> allOrders.add(order.getAsJsonObject()));
-
-                if (allOrders.size() >= 100) {
-                    break;
-                }
-
-                currentPage++;
-            }
-
-            int startIndex = Math.max(0, allOrders.size() - 100);
-            List<JsonObject> last100Orders = allOrders.subList(startIndex, allOrders.size());
-
-            JsonObject finalResponse = new JsonObject();
-            finalResponse.add("data", JsonParser.parseString(last100Orders.toString()));
-            return finalResponse.toString();
-
-        } catch (Exception e) {
-            return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
-        }
+        LocalDate today = LocalDate.now(ZoneId.of("America/Bogota"));
+        long startTime = today.atStartOfDay(ZoneId.of("America/Bogota")).toInstant().toEpochMilli();
+        long endTime = today.plusDays(1).atStartOfDay(ZoneId.of("America/Bogota")).toInstant().toEpochMilli();
+        return getP2POrdersInRange(account, startTime, endTime);
     }
+
 
     // En BinanceService.java
     public String getAllSpotTradeOrdersTRXUSDT() {

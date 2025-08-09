@@ -100,21 +100,23 @@ public class SaleP2PServiceImpl implements SaleP2PService {
         }
 
         JsonArray dataArray = jsonObject.getAsJsonArray("data");
-        List<String> existingOrders = saleP2PRepository.findByDateWithoutTime(today).stream()
-                .map(SaleP2P::getNumberOrder)
-                .collect(Collectors.toList());
+
+        LocalDateTime inicio = today.atStartOfDay();
+        LocalDateTime fin = inicio.plusDays(1);
 
         for (JsonElement element : dataArray) {
             JsonObject obj = element.getAsJsonObject();
             String orderNumber = obj.get("orderNumber").getAsString();
             String status = obj.get("orderStatus").getAsString();
+            LocalDateTime fechaOrden = convertTimestamp(obj.get("createTime").getAsLong());
 
             if (!"COMPLETED".equalsIgnoreCase(status)) continue;
-            if (existingOrders.contains(orderNumber)) continue;
+            if (fechaOrden.isBefore(inicio) || fechaOrden.isAfter(fin)) continue;
+            if (saleP2PRepository.existsByNumberOrder(orderNumber)) continue;
 
             SaleP2P sale = new SaleP2P();
             sale.setNumberOrder(orderNumber);
-            sale.setDate(convertTimestamp(obj.get("createTime").getAsLong()));
+            sale.setDate(fechaOrden);
 
             Double pesosCop = obj.has("fiatAmount") && !obj.get("fiatAmount").isJsonNull()
                     ? obj.get("fiatAmount").getAsDouble()
@@ -128,20 +130,17 @@ public class SaleP2PServiceImpl implements SaleP2PService {
                     ? obj.get("commission").getAsDouble()
                     : 0.0;
 
-            // PRIMERO asigna esos valores al objeto antes de calcular tasas o utilidades
             sale.setPesosCop(pesosCop);
             sale.setDollarsUs(dollarsUs);
             sale.setCommission(commission);
-
-            // AHORA SÍ puedes calcular la tasa y utilidad sin que lance error
             sale.setTasa(calculateTasaVenta(sale));
             sale = assignAccountBinance(sale, account);
             sale.setUtilidad(generateUtilidad(sale));
 
             saveSaleP2P(sale);
-
         }
     }
+
 
     private LocalDateTime convertTimestamp(long timestamp) {
         return Instant.ofEpochMilli(timestamp)

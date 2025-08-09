@@ -25,6 +25,8 @@ public interface SaleP2PRepository extends JpaRepository<SaleP2P, Integer> {
 			@Param("binanceAccountId") Integer binanceAccountId);
 
 	List<SaleP2P> findByDateBetween(LocalDateTime start, LocalDateTime end);
+	boolean existsByNumberOrder(String numberOrder);
+
 
 
 }

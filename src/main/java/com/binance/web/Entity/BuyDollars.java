@@ -35,4 +35,5 @@ public class BuyDollars {
 	@ManyToOne
 	@JoinColumn(name = "account_binance_id")
 	private AccountBinance accountBinance;
+	private Boolean asignada;
 }

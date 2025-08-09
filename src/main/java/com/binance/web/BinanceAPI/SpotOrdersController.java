@@ -62,20 +62,6 @@ public class SpotOrdersController {
     private final AccountBinanceRepository accountBinanceRepository;
     private final TransaccionesRepository transaccionesRepository;
 
-    // ----------------- P2P Orders (filtradas) -----------------
-	/*
-	 * @GetMapping public ResponseEntity<List<OrderP2PDto>>
-	 * getP2POrders(@RequestParam String account) { List<OrderP2PDto> ordenes =
-	 * orderP2PService.showOrderP2PToday(account);
-	 * 
-	 * Set<String> asignadas = saleP2PRepository.findAll().stream()
-	 * .map(SaleP2P::getNumberOrder) .collect(Collectors.toSet());
-	 * 
-	 * List<OrderP2PDto> sinAsignar = ordenes.stream() .filter(o ->
-	 * !asignadas.contains(o.getOrderNumber())) .collect(Collectors.toList());
-	 * 
-	 * return ResponseEntity.ok(sinAsignar); }
-	 */
 
     // Obtener depósitos en la billetera Spot, excluyendo:
     //  • Los ya convertidos en BuyDollars (idDeposit)
@@ -167,15 +153,6 @@ public class SpotOrdersController {
             return ResponseEntity.ok(response);  // Devuelve original en caso de error
         }
     }
-
-	/*
-	 * @GetMapping("/spot-balance") public ResponseEntity<String> getSpotBalance(
-	 * 
-	 * @RequestParam String account,
-	 * 
-	 * @RequestParam String asset) { return
-	 * ResponseEntity.ok(binanceService.getSpotBalanceByAsset(account, asset)); }
-	 */
 	    
 	    private Set<String> getRegisteredAddresses() {
 	        return accountBinanceRepository.findAll().stream()
@@ -183,12 +160,7 @@ public class SpotOrdersController {
 	            .filter(Objects::nonNull)
 	            .collect(Collectors.toSet());
 	    }
-	    
-	    
-	    
-	    
-	    
-	    
+ 
 	    private boolean esCoincidenteConTransaccion(BuyDollarsDto dto, List<Transacciones> txsHoy) {
 	        LocalDateTime fechaDto = dto.getDate();
 	        return txsHoy.stream().anyMatch(tx -> {
@@ -198,13 +170,6 @@ public class SpotOrdersController {
 	        });
 	    }
 
-	    
-	    
-	    
-	    
-	    
-	    
-	    
 	    private List<BuyDollarsDto> obtenerComprasNoRegistradas(int limit) throws Exception {
 	        ObjectMapper mapper = new ObjectMapper();
 	        List<BuyDollarsDto> resultado = new ArrayList<>();
@@ -395,44 +360,6 @@ public class SpotOrdersController {
 
 
 	    }
-
-
-
-
-
-
-
-
-
-
-
-		/*
-		 * @GetMapping("/ventas-no-registradas") public ResponseEntity<?>
-		 * getVentasNoRegistradas(@RequestParam(defaultValue = "100") int limit) { try {
-		 * ClasificacionMovimientos movimientos = obtenerMovimientosClasificados(limit);
-		 * return ResponseEntity.ok(movimientos.ventas); } catch (Exception e) { return
-		 * ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR) .body("{\"error\":\""
-		 * + e.getMessage() + "\"}"); } }
-		 * 
-		 * 
-		 * @GetMapping("/traspasos-no-registrados") public
-		 * ResponseEntity<List<TransaccionesDTO>> getTraspasosNoRegistrados(
-		 * 
-		 * @RequestParam(defaultValue = "100") int limit) { try {
-		 * ClasificacionMovimientos movimientos = obtenerMovimientosClasificados(limit);
-		 * return ResponseEntity.ok(movimientos.traspasos); } catch (Exception e) {
-		 * return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR) .body(new
-		 * ArrayList<>()); } }
-		 * 
-		 * @GetMapping("/compras-no-registradas") public
-		 * ResponseEntity<List<BuyDollarsDto>> getComprasNoRegistradas(
-		 * 
-		 * @RequestParam(defaultValue = "100") int limit) { try { List<BuyDollarsDto>
-		 * compras = obtenerComprasNoRegistradas(limit); return
-		 * ResponseEntity.ok(compras); } catch (Exception e) { return
-		 * ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-		 * .body(Collections.emptyList()); } }
-		 */
 	    
 	    @GetMapping("/compras-no-registradas")
 	    public ResponseEntity<List<BuyDollarsDto>> getComprasNoRegistradas(
