@@ -23,6 +23,7 @@ import javax.crypto.spec.SecretKeySpec;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.math.BigDecimal;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -882,4 +883,46 @@ public class BinanceService {
 	        throw new RuntimeException("Error general en cálculo de balance USDT: " + e.getMessage(), e);
 	    }
 	}
+	
+	public BigDecimal calcularComisionUSDTDesdeHash(String txHash) {
+	    try {
+	        // 1. Consultar transacción en TronScan
+	        String tronScanUrl = "https://apilist.tronscanapi.com/api/transaction-info?hash=" + txHash;
+	        RestTemplate restTemplate = new RestTemplate();
+	        String tronResponse = restTemplate.getForObject(tronScanUrl, String.class);
+
+	        JsonObject tronJson = JsonParser.parseString(tronResponse).getAsJsonObject();
+
+	        // 2. Obtener fee en SUN y timestamp
+	        long feeSun = tronJson.get("cost").getAsJsonObject().get("net_fee").getAsLong(); // o energy_fee según el caso
+	        long timestampMillis = tronJson.get("timestamp").getAsLong();
+
+	        // 3. Convertir SUN → TRX
+	        BigDecimal feeTRX = new BigDecimal(feeSun).divide(BigDecimal.valueOf(1_000_000));
+
+	        // 4. Obtener precio histórico TRX/USDT en ese minuto
+	        long startTime = timestampMillis - (timestampMillis % 60000);
+	        String binanceUrl = String.format(
+	                "https://api.binance.com/api/v3/klines?symbol=TRXUSDT&interval=1m&startTime=%d&endTime=%d&limit=1",
+	                startTime, startTime + 60000
+	        );
+
+	        String binanceResponse = restTemplate.getForObject(binanceUrl, String.class);
+	        JsonArray vela = JsonParser.parseString(binanceResponse).getAsJsonArray();
+	        if (vela.size() == 0) {
+	            throw new RuntimeException("No se encontró precio para ese momento");
+	        }
+
+	        String precioCierreStr = vela.get(0).getAsJsonArray().get(4).getAsString();
+	        BigDecimal precioTRXUSDT = new BigDecimal(precioCierreStr);
+
+	        // 5. Calcular comisión en USDT
+	        return feeTRX.multiply(precioTRXUSDT);
+
+	    } catch (Exception e) {
+	        throw new RuntimeException("Error calculando comisión en USDT desde hash: " + e.getMessage(), e);
+	    }
+	}
+
+
 }

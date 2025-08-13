@@ -543,10 +543,14 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 		        nueva.setPesos(0.0);
 		        nueva.setAsignado(false);
 		        nueva.setAccountBinance(account);
+		        nueva.setComision(dto.getComision());
 
 		        // Descontar balance porque es una venta
 		        double actualBalance = account.getBalance() != null ? account.getBalance() : 0.0;
-		        account.setBalance(actualBalance - dto.getDollars());
+		        double comision = dto.getComision() != null ? dto.getComision() : 0.0;
+		        
+		        account.setBalance(actualBalance - dto.getDollars() - comision);
+		        
 
 		        accountBinanceRepository.save(account);
 		        sellDollarsRepository.save(nueva);

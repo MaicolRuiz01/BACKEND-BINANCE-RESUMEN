@@ -32,6 +32,6 @@ public class SellDollarsDto {
     private List<AssignAccountDto> accounts;
     private Integer clienteId;
     private List<String> nombresCuentasAsignadas;
-
+    private Double comision;
 
 }

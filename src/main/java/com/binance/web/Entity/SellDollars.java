@@ -51,6 +51,7 @@ public class SellDollars {
 	@ManyToOne
 	@JoinColumn(name = "cliente_id")
 	private Cliente cliente;
+	private Double comision;
 
 
 }
