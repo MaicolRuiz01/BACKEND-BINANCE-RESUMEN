@@ -155,11 +155,26 @@ public class SaleP2PServiceImpl implements SaleP2PService {
 
     private Double generateUtilidad(SaleP2P sale) {
         PurchaseRate lastRate = purchaseRateRepository.findTopByOrderByDateDesc();
-        Double pesosUsdtVendidos = sale.getPesosCop();
-        Double usdtVendidos = sale.getDollarsUs() + sale.getCommission();
-        Double utilidad = pesosUsdtVendidos - (usdtVendidos * lastRate.getRate()) - (sale.getPesosCop() * 0.004);
+
+        if (lastRate == null) {
+            // Log de advertencia para saber que no había tasa registrada
+            System.err.println("⚠ No existe una tasa de compra registrada. Usando tasa = 0.");
+            lastRate = new PurchaseRate();
+            lastRate.setRate(0.0);
+        }
+
+        Double pesosUsdtVendidos = sale.getPesosCop() != null ? sale.getPesosCop() : 0.0;
+        Double usdtVendidos =
+            (sale.getDollarsUs() != null ? sale.getDollarsUs() : 0.0) +
+            (sale.getCommission() != null ? sale.getCommission() : 0.0);
+
+        Double utilidad = pesosUsdtVendidos
+                - (usdtVendidos * lastRate.getRate())
+                - (pesosUsdtVendidos * 0.004);
+
         return utilidad;
     }
+
 
     private Double generateTax(SaleP2P sale) {
         Double impuesto = 0.0;

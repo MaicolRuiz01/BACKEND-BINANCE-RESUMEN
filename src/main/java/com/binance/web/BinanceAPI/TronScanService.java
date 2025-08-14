@@ -1,5 +1,6 @@
 package com.binance.web.BinanceAPI;
 import com.binance.web.BuyDollars.BuyDollarsDto;
+import com.binance.web.Entity.Cliente;
 import com.binance.web.SellDollars.SellDollarsDto;
 
 import java.time.Instant;
@@ -9,6 +10,7 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
@@ -147,7 +149,8 @@ public class TronScanService {
             String jsonResponse,
             String walletAddress,
             String accountName,
-            Set<String> assignedIds) {
+            Set<String> assignedIds,
+            Map<String, Cliente> clientePorWallet) { // <-- nuevo parámetro
 
         List<SellDollarsDto> result = new ArrayList<>();
         LocalDate hoy = LocalDate.now(ZoneId.of("America/Bogota"));
@@ -155,55 +158,56 @@ public class TronScanService {
         try {
             JsonNode root = objectMapper.readTree(jsonResponse);
             JsonNode data = root.path("data");
+
             if (data.isArray()) {
                 for (JsonNode tx : data) {
-                    String fromAddress = tx.path("from").asText();
-                    String txId = tx.path("transaction_id").asText();
-                    JsonNode tokenInfo = tx.path("token_info");
-                    String symbol = tokenInfo.path("symbol").asText();
+                    String fromAddress = tx.path("ownerAddress").asText();
+                    String toAddress = tx.path("toAddress").asText();
+                    String txId = tx.path("hash").asText();
+                    String symbol = tx.path("tokenInfo").path("tokenAbbr").asText();
 
                     if (fromAddress.equalsIgnoreCase(walletAddress) &&
-                        symbol.equalsIgnoreCase("USDT") &&
+                        symbol.equalsIgnoreCase("trx") && // o "USDT" según el token
                         !assignedIds.contains(txId)) {
 
-                        double amount = Double.parseDouble(tx.path("value").asText("0")) / 1_000_000.0;
-                        long timestamp = tx.path("block_timestamp").asLong();
+                        double amount = tx.path("amount").asDouble(0.0) / 1_000_000.0;
+                        long timestamp = tx.path("timestamp").asLong();
                         LocalDate fechaTx = LocalDateTime.ofInstant(
                                 Instant.ofEpochMilli(timestamp),
                                 ZoneId.of("America/Bogota")
                         ).toLocalDate();
-                        
-                        // NOTA: La transacción del ejemplo (3b61add9...) es de 2025-08-12.
-                        // Si estás probando hoy (12 de agosto de 2025), la condición `fechaTx.isEqual(hoy)`
-                        // se cumplirá. En otro día, tendrás que ajustar esto para probar.
-                        if (fechaTx.isEqual(hoy)) { 
+
+                        if (fechaTx.isEqual(hoy)) {
                             SellDollarsDto dto = new SellDollarsDto();
                             dto.setDollars(amount);
                             dto.setTasa(0.0);
                             dto.setNameAccount(accountName);
                             dto.setIdWithdrawals(txId);
                             dto.setPesos(0.0);
-                            dto.setDate(LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp),
-                                    ZoneId.of("America/Bogota")));
+                            dto.setDate(LocalDateTime.ofInstant(
+                                    Instant.ofEpochMilli(timestamp),
+                                    ZoneId.of("America/Bogota")
+                            ));
 
-                            // --- Calcular comisión usando la llamada a TronScan ---
+                            // --- Calcular comisión usando TronScan ---
                             JsonNode txDetails = getTransactionDetailsFromTronScan(txId);
                             double feeInSun = txDetails.path("cost").path("energy_fee").asDouble(0.0);
-                            System.out.println("DEBUG: Fee en Sun para " + txId + ": " + feeInSun);
 
                             double feeTRX = feeInSun / 1_000_000.0;
-                            System.out.println("DEBUG: Fee en TRX: " + feeTRX);
-                            
                             if (feeTRX > 0) {
                                 double trxPriceAtTx = getTRXPriceAt(timestamp);
                                 double feeInUSDT = feeTRX * trxPriceAtTx;
-                                System.out.println("DEBUG: Precio de TRX en el momento: " + trxPriceAtTx);
-                                
                                 dto.setComision(feeInUSDT);
-                                dto.setEquivalenteciaTRX(feeTRX); 
+                                dto.setEquivalenteciaTRX(feeTRX);
                             } else {
                                 dto.setComision(0.0);
                                 dto.setEquivalenteciaTRX(0.0);
+                            }
+
+                            // --- Asignar cliente si existe ---
+                            Cliente cliente = clientePorWallet.get(toAddress.trim().toLowerCase());
+                            if (cliente != null) {
+                                dto.setClienteId(cliente.getId());
                             }
 
                             result.add(dto);
@@ -216,6 +220,7 @@ public class TronScanService {
         }
         return result;
     }
+
 
 
     /**

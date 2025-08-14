@@ -1,5 +1,6 @@
 package com.binance.web.balance.PurchaseRate;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,7 +29,14 @@ public class PurchseRateServiceImpl implements PurchaseRateService {
 
     @Override
     public void addPurchaseRate(BuyDollars lastBuy) {
-        PurchaseRate lastRate = purchaseRateRepository.findTopByOrderByDateDesc();
+    	PurchaseRate lastRate = purchaseRateRepository.findTopByOrderByDateDesc();
+    	if (lastRate == null) {
+    	    // crear una tasa inicial con valores default
+    	    lastRate = new PurchaseRate();
+    	    lastRate.setRate(0.0);
+    	    lastRate.setDolares(0.0);
+    	    lastRate.setDate(LocalDateTime.now());
+    	}
         PurchaseRate newRate = new PurchaseRate();
         Double dolaresVendidos = 0.0;
 

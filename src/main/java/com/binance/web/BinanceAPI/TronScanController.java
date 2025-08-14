@@ -5,7 +5,9 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,10 +21,12 @@ import org.springframework.web.bind.annotation.RestController;
 import com.binance.web.BuyDollars.BuyDollarsDto;
 import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.BuyDollars;
+import com.binance.web.Entity.Cliente;
 import com.binance.web.Entity.SellDollars;
 import com.binance.web.Entity.Transacciones;
 import com.binance.web.Repository.AccountBinanceRepository;
 import com.binance.web.Repository.BuyDollarsRepository;
+import com.binance.web.Repository.ClienteRepository;
 import com.binance.web.Repository.SellDollarsRepository;
 import com.binance.web.SellDollars.SellDollarsDto;
 import com.binance.web.transacciones.TransaccionesDTO;
@@ -47,6 +51,8 @@ public class TronScanController {
     private TransaccionesRepository transaccionesRepository;
     @Autowired
     private AccountBinanceRepository accountBinanceRepository;
+    @Autowired
+    private ClienteRepository clienteRepository;
     
     private List<String> getAllTrustWallets() {
         return accountBinanceRepository.findAll().stream()
@@ -130,6 +136,15 @@ public class TronScanController {
                 .map(SellDollars::getIdWithdrawals)
                 .collect(Collectors.toSet());
 
+        // 🔍 Crear mapa de wallets registradas -> cliente
+        Map<String, Cliente> clientePorWallet = clienteRepository.findAll().stream()
+                .filter(c -> c.getWallet() != null && !c.getWallet().isBlank())
+                .collect(Collectors.toMap(
+                    c -> c.getWallet().trim().toLowerCase(),
+                    Function.identity()
+                ));
+
+        // 🔍 Filtrar solo cuentas tipo TRUST
         List<AccountBinance> trustWallets = accountBinanceRepository.findAll().stream()
                 .filter(account -> "TRUST".equalsIgnoreCase(account.getTipo()))
                 .filter(account -> account.getAddress() != null && !account.getAddress().isBlank())
@@ -141,12 +156,18 @@ public class TronScanController {
             String walletAddress = trustAccount.getAddress();
             String accountName = trustAccount.getName();
             String response = tronScanService.getTRC20TransfersUsingTronGrid(walletAddress);
-            List<SellDollarsDto> outgoing = tronScanService.parseTRC20OutgoingUSDTTransfers(response, walletAddress, accountName, assignedIds);
+
+            // 📌 Ahora pasamos el mapa de clientes al parser
+            List<SellDollarsDto> outgoing = tronScanService.parseTRC20OutgoingUSDTTransfers(
+                    response, walletAddress, accountName, assignedIds, clientePorWallet
+            );
+
             result.addAll(outgoing);
         }
 
         return ResponseEntity.ok(result);
     }
+
 
     
     

@@ -34,6 +34,9 @@ public class BalanceGeneral {
     private Double totalVentasGeneralesDelDia;
     private Double utilidadVentasGenerales;
     
-   // private Double totalGeneralSales;
+    private Double efectivoDelDia; //este va a hacer la suma de las cajas
+    private Double saldoClientes; //saldo total de clientes
+    
+    private Double comisionTrust; //comisiones del las selldollars
 
 }

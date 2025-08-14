@@ -27,5 +27,6 @@ public class Cliente {
 	private Double saldo;
 	private Integer accountId;
 	private String wallet;
+	private Long binanceId;
 
 }

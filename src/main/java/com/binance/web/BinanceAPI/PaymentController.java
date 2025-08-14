@@ -155,10 +155,10 @@ public class PaymentController {
 	                .filter(nombre -> nombre != null && !nombre.isBlank())
 	                .collect(Collectors.toSet());
 
-	        // 🔍 Mapa rápido para buscar clientes por accountId
-	        Map<Integer, Cliente> clientePorAccountId = clienteRepository.findAll().stream()
-	                .filter(c -> c.getAccountId() != null)
-	                .collect(Collectors.toMap(Cliente::getAccountId, Function.identity()));
+	     // 🔍 Mapa rápido para buscar clientes por binanceId
+	        Map<Long, Cliente> clientePorBinanceId = clienteRepository.findAll().stream()
+	            .filter(c -> c.getBinanceId() != null)
+	            .collect(Collectors.toMap(Cliente::getBinanceId, Function.identity()));
 
 	        for (String cuenta : binanceService.getAllAccountNames()) {
 	            String respuesta = binanceService.getPaymentHistory(cuenta);
@@ -171,24 +171,24 @@ public class PaymentController {
 	                if (monto < 0 && !idsRegistrados.contains(tx.getOrderId())
 	                        && fecha != null && fecha.toLocalDate().isEqual(hoy)) {
 	                    
-	                    if (tx.getReceiverInfo() != null && !userBinanceValidos.contains(tx.getReceiverInfo().getName())) {
-	                        SellDollarsDto dto = new SellDollarsDto();
-	                        dto.setIdWithdrawals(tx.getOrderId());
-	                        dto.setNameAccount(cuenta);
-	                        dto.setDate(fecha);
-	                        dto.setDollars(Math.abs(monto));
-	                        dto.setTasa(0.0);
-	                        dto.setPesos(0.0);
+	                	if (tx.getReceiverInfo() != null && !userBinanceValidos.contains(tx.getReceiverInfo().getName())) {
+	                	    SellDollarsDto dto = new SellDollarsDto();
+	                	    dto.setIdWithdrawals(tx.getOrderId());
+	                	    dto.setNameAccount(cuenta);
+	                	    dto.setDate(fecha);
+	                	    dto.setDollars(Math.abs(monto));
+	                	    dto.setTasa(0.0);
+	                	    dto.setPesos(0.0);
 
-	                        // 🔍 Si el accountId de receiver coincide con un cliente conocido
-	                        Integer recvAccountId = tx.getReceiverInfo().getAccountId().intValue();
-	                        Cliente cliente = clientePorAccountId.get(recvAccountId);
-	                        if (cliente != null) {
-	                            dto.setClienteId(cliente.getId());
-	                        }
+	                	    // ✅ Usar binanceId del receiver para encontrar cliente
+	                	    Long recvBinanceId = tx.getReceiverInfo().getBinanceId();
+	                	    Cliente cliente = clientePorBinanceId.get(recvBinanceId);
+	                	    if (cliente != null) {
+	                	        dto.setClienteId(cliente.getId());
+	                	    }
 
-	                        resultados.add(dto);
-	                    }
+	                	    resultados.add(dto);
+	                	}
 	                }
 	            }
 	        }
