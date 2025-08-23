@@ -33,10 +33,10 @@ public class SupplierController {
 	}
 
 	@PostMapping("/suppliers")
-public ResponseEntity<Void> createSupplier(@RequestBody Supplier supplier) {
+	public ResponseEntity<Void> createSupplier(@RequestBody Supplier supplier) {
     supplierService.saveSupplier(supplier);
     return ResponseEntity.status(HttpStatus.CREATED).build();
-}
+	}
 
 	@GetMapping("/{id}")
 	public ResponseEntity<Supplier> getSupplierById(@PathVariable Integer id) {

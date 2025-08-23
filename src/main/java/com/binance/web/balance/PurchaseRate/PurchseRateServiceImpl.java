@@ -59,16 +59,7 @@ public class PurchseRateServiceImpl implements PurchaseRateService {
             }
         }
 
-        // Obtener ventas de dólares y validar
-        List<SellDollars> rangeSellDolars = sellDollarsService.obtenerVentasEntreFechas(lastRate.getDate(), lastBuy.getDate());
-        if (rangeSellDolars != null && !rangeSellDolars.isEmpty()) {
-            sellDollarsService.saveUtilityDefinitive(rangeSellDolars, lastRate.getRate());
-
-            for (SellDollars venta : rangeSellDolars) {
-                if (venta.getDollars() == null) venta.setDollars(0.0);
-                dolaresVendidos += venta.getDollars();
-            }
-        }
+       
 
         // Cálculo de nueva tasa promedio
         Double dolaresSobrantes = lastRate.getDolares() - dolaresVendidos;

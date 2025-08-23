@@ -923,6 +923,105 @@ public class BinanceService {
 	        throw new RuntimeException("Error calculando comisión en USDT desde hash: " + e.getMessage(), e);
 	    }
 	}
+	
+	
+	//para obtener el hisorial de traider o hisorial de operaciones spot
+	// Nuevo método para obtener todos los trades de spot para todas las cuentas
+	public String getAllSpotTradesForAllAccounts(String symbol, int limit) {
+	    try {
+	        List<JsonObject> allTrades = new ArrayList<>();
+	        List<AccountBinance> accounts = accountRepo.findByTipo("BINANCE");
+
+	        for (AccountBinance account : accounts) {
+	            String accountName = account.getName();
+	            String apiKey = account.getApiKey();
+	            String secretKey = account.getApiSecret();
+
+	            if (apiKey == null || secretKey == null) {
+	                System.err.println("DEBUG: Saltando cuenta " + accountName + " por falta de credenciales.");
+	                continue;
+	            }
+
+	            // Llama al método para obtener los trades de spot para una cuenta específica y un par
+	            String response = getSpotTrades(accountName, symbol, limit);
+	            
+	            // Procesa la respuesta
+	            JsonElement parsedResponse = JsonParser.parseString(response);
+	            if (parsedResponse.isJsonArray()) {
+	                JsonArray tradesArray = parsedResponse.getAsJsonArray();
+	                for (JsonElement tradeElement : tradesArray) {
+	                    JsonObject trade = tradeElement.getAsJsonObject();
+	                    trade.addProperty("account", accountName);
+	                    allTrades.add(trade);
+	                }
+	            } else {
+	                System.err.println("Error al obtener trades para " + accountName + " con " + symbol + ": " + response);
+	            }
+	        }
+
+	        return new Gson().toJson(allTrades);
+
+	    } catch (Exception e) {
+	        e.printStackTrace();
+	        return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
+	    }
+	}
+
+	// Método modificado para obtener trades de spot usando el endpoint correcto.
+	// Se hace privado para que sea llamado solo internamente.
+	// En BinanceService.java
+	public String getSpotTrades(String account, String symbol, int limit) {
+	    try {
+	        String[] credentials = getApiCredentials(account);
+	        if (credentials == null) {
+	            return "{\"error\": \"Cuenta no válida.\"}";
+	        }
+
+	        String apiKey = credentials[0];
+	        String secretKey = credentials[1];
+
+	        long timestamp = getServerTime();
+	        // La cadena de consulta para la firma debe estar en el orden correcto
+	        String query = "symbol=" + symbol +
+	                "&limit=" + limit +
+	                "&timestamp=" + timestamp +
+	                "&recvWindow=60000";
+
+	        // Genera la firma usando la cadena de consulta
+	        String signature = hmacSha256(secretKey, query);
+	        
+	        // Construye la URL final con la firma
+	        String url = "https://api.binance.com/api/v3/myTrades?" + query + "&signature=" + signature;
+
+	        return sendBinanceRequestWithProxy(url, apiKey);
+
+	    } catch (Exception e) {
+	        return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
+	    }
+	}
+	
+	// Método para obtener el historial de órdenes completadas o canceladas
+	public String getOrderHistory(String account, String symbol, int limit) throws Exception {
+	    String[] credentials = getApiCredentials(account);
+	    if (credentials == null) {
+	        return "{\"error\": \"Cuenta no válida.\"}";
+	    }
+
+	    String apiKey = credentials[0];
+	    String secretKey = credentials[1];
+
+	    long timestamp = getServerTime();
+
+	    String query = "symbol=" + symbol +
+	            "&timestamp=" + timestamp +
+	            "&recvWindow=60000" +
+	            "&limit=" + limit;
+
+	    String signature = hmacSha256(secretKey, query);
+	    String url = "https://api.binance.com/api/v3/allOrders?" + query + "&signature=" + signature;
+
+	    return sendBinanceRequestWithProxy(url, apiKey);
+	}
 
 
 }

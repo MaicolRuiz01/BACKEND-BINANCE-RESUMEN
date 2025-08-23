@@ -79,8 +79,6 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 	    sale.setAccountBinance(accountBinance);
 	    sale.setPesos(dto.getPesos());
 	    sale.setAsignado(true);
-	    sale.setUtilidad(utilidad(sale));
-
 	    // 3. Ajustar saldo de la cuenta Binance
 	    double currentBinanceBalance = accountBinance.getBalance() != null ? accountBinance.getBalance() : 0.0;
 	    accountBinance.setBalance(currentBinanceBalance - dto.getDollars());
@@ -142,74 +140,85 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 	    return sellDollarsRepository.save(sale);
 	}
 	
+	// src/main/java/com/binance/web/Service/Impl/SellDollarsServiceImpl.java
+
 	@Override
 	@Transactional
 	public SellDollars asignarVenta(Integer id, SellDollarsDto dto) {
-	    // Buscar la venta no asignada
+	    // 1. Buscar la venta no asignada
 	    SellDollars existing = sellDollarsRepository.findById(id)
 	        .orElseThrow(() -> new RuntimeException("Venta no encontrada"));
 
 	    if (Boolean.TRUE.equals(existing.getAsignado())) {
 	        throw new RuntimeException("Venta ya fue asignada");
+	        
 	    }
+	    
 
-	    // Actualizar tasa y pesos
+	    // 2. Actualizar datos básicos
 	    existing.setTasa(dto.getTasa());
 	    existing.setPesos(dto.getDollars() * dto.getTasa());
 
+	    // 3. Limpiar relaciones anteriores
+	    // ⚠️ Importante: Limpiamos la colección para que Hibernate elimine las viejas cuentas COP.
+	    if (existing.getSellDollarsAccounts() != null) {
+	        existing.getSellDollarsAccounts().clear();
+	    }
+	    
+	    // 4. Lógica para cliente o proveedor
 	    if (dto.getClienteId() != null) {
 	        Cliente cliente = clienteRepository.findById(dto.getClienteId())
 	            .orElseThrow(() -> new RuntimeException("Cliente no encontrado"));
 	        existing.setCliente(cliente);
-	        existing.setSupplier(null);  // 🔥 Importante
+	        existing.setSupplier(null);
 
 	        double saldoActual = cliente.getSaldo() != null ? cliente.getSaldo() : 0.0;
-	        cliente.setSaldo(saldoActual - dto.getPesos());
+	        cliente.setSaldo(saldoActual - existing.getPesos());
 	        clienteRepository.save(cliente);
-	    } 
-	    else {
+
+	    } else {
 	        Supplier supplier = supplierRepository.findById(dto.getSupplier())
 	            .orElseThrow(() -> new RuntimeException("Supplier no encontrado"));
 	        existing.setSupplier(supplier);
-	        existing.setCliente(null); // 🔥 Importante
+	        existing.setCliente(null);
 
 	        double totalAsignadoACuentas = 0.0;
-	        List<SellDollarsAccountCop> detalles = new ArrayList<>();
-
+	        
+	        // ✅ AHORA AGREGAMOS LAS NUEVAS CUENTAS A LA COLECCIÓN
 	        if (dto.getAccounts() != null && !dto.getAccounts().isEmpty()) {
 	            for (AssignAccountDto assignDto : dto.getAccounts()) {
 	                AccountCop acc = accountCopService.findByIdAccountCop(assignDto.getAccountCop());
+	                
 	                double currentCopBalance = acc.getBalance() != null ? acc.getBalance() : 0.0;
 	                acc.setBalance(currentCopBalance + assignDto.getAmount());
 	                accountCopService.saveAccountCop(acc);
 
 	                SellDollarsAccountCop detalle = new SellDollarsAccountCop();
-	                detalle.setSellDollars(existing);
+	                detalle.setSellDollars(existing); // Establecemos la relación bidireccional
 	                detalle.setAccountCop(acc);
 	                detalle.setAmount(assignDto.getAmount());
 	                detalle.setNameAccount(assignDto.getNameAccount());
-	                detalles.add(detalle);
+	                
+	                // ✅ Agregamos el nuevo objeto a la colección
+	                existing.getSellDollarsAccounts().add(detalle);
 
 	                totalAsignadoACuentas += assignDto.getAmount();
 	            }
 	        }
-
-	        double montoEnPesos = dto.getPesos() != null
-	            ? dto.getPesos()
-	            : dto.getDollars() * dto.getTasa();
+	        
+	        // 5. Ajustar saldo del proveedor
+	        double montoEnPesos = existing.getPesos();
 	        double restanteParaProveedor = montoEnPesos - totalAsignadoACuentas;
 
 	        if (restanteParaProveedor > 0.0) {
 	            double currentSupplierBalance = supplier.getBalance() != null ? supplier.getBalance() : 0.0;
 	            supplier.setBalance(currentSupplierBalance - restanteParaProveedor);
 	        }
-
-	        existing.setSellDollarsAccounts(detalles);
 	        supplierRepository.save(supplier);
 	    }
-	    // Marcar como asignada
-	    existing.setAsignado(true);
 
+	    // 6. Marcar como asignada y guardar
+	    existing.setAsignado(true);
 	    return sellDollarsRepository.save(existing);
 	}
 	
@@ -295,34 +304,10 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 	    return sellDollarsRepository.saveAll(nuevasVentas);
 	}
 	
-	private Double utilidad(SellDollars sell) {
-		
-		PurchaseRate lastRate = purchaseRateRepository.findTopByOrderByDateDesc();
-		Double pesos = sell.getPesos();
-		Double usdt = sell.getDollars();
-		Double utilidadVenta = pesos - (usdt * lastRate.getRate() ) - (sell.getPesos() * 0.004);  
-		
-		return utilidadVenta;
-	}
+	
 
 	
-	//aqui terminara para obtener ventas de binance pay
-	
-	//metodo para obtener la utilidad de una rango de sell
-	public void saveUtilityDefinitive(List<SellDollars> rangoSell, Double averageRate) {
-		Double pesosUsdtVendidos = 0.0;
-		Double usdtVendidos = 0.0;
-		Double utilidad = 0.0;
-		for (SellDollars sell: rangoSell) {
-			pesosUsdtVendidos= sell.getPesos();
-			usdtVendidos= sell.getDollars();
-			utilidad = pesosUsdtVendidos - (usdtVendidos * averageRate);
-			utilidad = utilidad - generateTax(sell);
-			sell.setUtilidad(utilidad);
-			sellDollarsRepository.save(sell);
-		}
-		
-	}
+
 	
 	//metodo de apoyo para generar los impuestos de las cuentas colombianas
 	public Double generateTax(SellDollars sell) {
@@ -358,6 +343,7 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 
 	private SellDollarsDto convertToDto(SellDollars venta) {
 	    SellDollarsDto dto = new SellDollarsDto();
+	    
 	    dto.setId(venta.getId());
 	    dto.setIdWithdrawals(venta.getIdWithdrawals());
 	    dto.setTasa(venta.getTasa());
@@ -438,7 +424,7 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 	
 	private void applyNewAssignment(SellDollars existing, SellDollarsDto dto) {
 	    existing.setAsignado(true);
-	    existing.setUtilidad(utilidad(existing));
+
 
 	    // Asignación por cliente
 	    if (dto.getClienteId() != null) {
@@ -532,7 +518,7 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 		        if (dto.getIdWithdrawals() == null || existentes.contains(dto.getIdWithdrawals())) continue;
 
 		        AccountBinance account = accountBinanceRepository.findByName(dto.getNameAccount());
-		        if (account == null) continue;
+		        //if (account == null) continue;
 
 		        SellDollars nueva = new SellDollars();
 		        nueva.setIdWithdrawals(dto.getIdWithdrawals());

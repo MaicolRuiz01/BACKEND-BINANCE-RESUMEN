@@ -10,7 +10,7 @@ public interface SellDollarsService {
 	SellDollars createSellDollars(SellDollarsDto dto);
 	List<SellDollars> registrarYObtenerVentasNoAsignadas();
 	List<SellDollars> obtenerVentasEntreFechas(LocalDateTime inicio, LocalDateTime fin);
-	void saveUtilityDefinitive(List<SellDollars> rangoSell, Double averageRate);
+	
 	List<SellDollars> obtenerVentasPorFecha(LocalDate fecha);
 	List<SellDollars> obtenerVentasPorCliente(Integer clienteId);
 	List<SellDollarsDto> listarVentasDto();

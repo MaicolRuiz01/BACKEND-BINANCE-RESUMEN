@@ -36,4 +36,5 @@ public class BuyDollars {
 	@JoinColumn(name = "account_binance_id")
 	private AccountBinance accountBinance;
 	private Boolean asignada;
+	private Double quivalenteciaTRX;
 }

@@ -184,7 +184,4 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
             .map(BigDecimal::valueOf)
             .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
-    
-    
-
 }

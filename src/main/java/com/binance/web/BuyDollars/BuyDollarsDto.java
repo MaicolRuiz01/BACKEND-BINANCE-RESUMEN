@@ -24,4 +24,5 @@ public class BuyDollarsDto {
     private Integer accountBinanceId;
 	private Integer supplierId;
 	private Boolean asignada;
+	private Double equivalenteciaTRX;
 }
