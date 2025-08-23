@@ -27,152 +27,160 @@ import jakarta.transaction.Transactional;
 @Service
 public class BalanceGeneralServiceImplement implements BalanceGeneralService {
 
-    @Autowired
-    private BalanceGeneralRepository balanceRepo;
-    @Autowired
-    private AccountBinanceRepository accountBinanceRepo;
-    @Autowired
-    private AccountCopRepository accountCopRepo;
-    @Autowired
-    private SupplierRepository accountProveedorRepo;
-    @Autowired
-    private PurchaseRateRepository rateRepo;
-    @Autowired
-    private SaleP2PService saleP2PService;
-    @Autowired
-    private SellDollarsService sellDollarsService;
-    @Autowired
-    private AverageRateRepository averageRateRepository;
-    @Autowired
-    private AccountBinanceService accountBinanceService;
-    @Autowired
-    private EfectivoRepository efectivoRepository;
-    @Autowired
-    private ClienteRepository clienteRepository;
+        @Autowired
+        private BalanceGeneralRepository balanceRepo;
+        @Autowired
+        private AccountBinanceRepository accountBinanceRepo;
+        @Autowired
+        private AccountCopRepository accountCopRepo;
+        @Autowired
+        private SupplierRepository accountProveedorRepo;
+        @Autowired
+        private PurchaseRateRepository rateRepo;
+        @Autowired
+        private SaleP2PService saleP2PService;
+        @Autowired
+        private SellDollarsService sellDollarsService;
+        @Autowired
+        private AverageRateRepository averageRateRepository;
+        @Autowired
+        private AccountBinanceService accountBinanceService;
+        @Autowired
+        private EfectivoRepository efectivoRepository;
+        @Autowired
+        private ClienteRepository clienteRepository;
 
-    @Override
-    @Transactional
-    public void calcularOBalancear(LocalDate fecha) {
+        @Override
+        @Transactional
+        public void calcularOBalancear(LocalDate fecha) {
 
-        // verifica si es el balance del dia o si es uno nuevo
-        BalanceGeneral balance = balanceRepo.findByDate(fecha)
-                .orElseGet(() -> {
-                    BalanceGeneral nuevo = new BalanceGeneral();
-                    nuevo.setDate(fecha);
-                    return nuevo;
-                });
+                // verifica si es el balance del dia o si es uno nuevo
+                BalanceGeneral balance = balanceRepo.findByDate(fecha)
+                                .orElseGet(() -> {
+                                        BalanceGeneral nuevo = new BalanceGeneral();
+                                        nuevo.setDate(fecha);
+                                        return nuevo;
+                                });
 
-        Double saldoBinanceTotalEnPesos = accountBinanceService.getTotalBalance().doubleValue();
-        List<SellDollars> ventasGenerales = sellDollarsService.obtenerVentasPorFecha(fecha);
-        // obtienen todos los saldos de los nequis y los suma
-        Double saldoCop = accountCopRepo.findAll().stream()
-                .mapToDouble(a -> a.getBalance())
-                .sum();
-        // obtiene todos los saldos de los proveedores y los suma
-        Double saldoProveedores = accountProveedorRepo.findAll().stream()
-                .mapToDouble(a -> a.getBalance())
-                .sum();
+                Double saldoBinanceTotalEnPesos = accountBinanceService.getTotalBalance().doubleValue();
+                List<SellDollars> ventasGenerales = sellDollarsService.obtenerVentasPorFecha(fecha);
+                // obtienen todos los saldos de los nequis y los suma
+                Double saldoCop = accountCopRepo.findAll().stream()
+                                .mapToDouble(a -> a.getBalance())
+                                .sum();
+                // obtiene todos los saldos de los proveedores y los suma
+                Double saldoProveedores = accountProveedorRepo.findAll().stream()
+                                .mapToDouble(a -> a.getBalance())
+                                .sum();
 
-        Double saldoCajas = efectivoRepository.findAll().stream()
-                .mapToDouble(a -> a.getSaldo())
-                .sum();
-        
-        Double clientesSaldo = clienteRepository.findAll().stream()
-        		.mapToDouble(c -> c.getSaldo())
-        		.sum();
+                Double saldoCajas = efectivoRepository.findAll().stream()
+                                .mapToDouble(a -> a.getSaldo())
+                                .sum();
 
-        Double saldoTotal = saldoBinanceTotalEnPesos + saldoCajas + saldoCop - saldoProveedores + clientesSaldo;
+                Double clientesSaldo = clienteRepository.findAll().stream()
+                                .mapToDouble(c -> c.getSaldo())
+                                .sum();
 
-        Double totalP2P = saleP2PService.obtenerVentasPorFecha(fecha).stream()
-                .mapToDouble(SaleP2P::getPesosCop)
-                .sum();
+                Double saldoTotal = saldoBinanceTotalEnPesos + saldoCajas + saldoCop - saldoProveedores + clientesSaldo;
 
-        Double totalUsdt = saleP2PService.obtenerVentasPorFecha(fecha).stream()
-                .mapToDouble(v -> v.getDollarsUs())
-                .sum();
+                Double totalP2P = saleP2PService.obtenerVentasPorFecha(fecha).stream()
+                                .mapToDouble(SaleP2P::getPesosCop)
+                                .sum();
 
-        Double totalUSDTVentasGenrales = sellDollarsService.obtenerVentasPorFecha(fecha).stream()
-                .mapToDouble(v -> v.getDollars())
-                .sum();
+                Double totalUsdt = saleP2PService.obtenerVentasPorFecha(fecha).stream()
+                                .mapToDouble(v -> v.getDollarsUs())
+                                .sum();
 
-        Double pesosVentasGenerales = sellDollarsService.obtenerVentasPorFecha(fecha).stream()
-                .mapToDouble(v -> v.getPesos())
-                .sum();
+                Double totalUSDTVentasGenrales = sellDollarsService.obtenerVentasPorFecha(fecha).stream()
+                                .mapToDouble(v -> v.getDollars())
+                                .sum();
 
-        Double tasaVenta = totalUsdt == 0 ? 0 : totalP2P / totalUsdt;
+                Double pesosVentasGenerales = sellDollarsService.obtenerVentasPorFecha(fecha).stream()
+                                .mapToDouble(v -> v.getPesos())
+                                .sum();
 
-        // NUEVO: Sacar tasa promedio del día
-        Double tasaPromedioDelDia = averageRateRepository.findTopByOrderByFechaDesc()
-                .map(AverageRate::getAverageRate)
-                .orElseGet(() -> averageRateRepository.findTopByOrderByIdDesc()
-                        .map(AverageRate::getAverageRate)
-                        .orElse(0.0));
-        
-        Double comisionTrust = ventasGenerales.stream()
-        		.filter(v -> v.getComision() !=null )
-        		.mapToDouble(SellDollars::getComision)
-        		.sum()*tasaPromedioDelDia; 
+                Double tasaVenta = totalUsdt == 0 ? 0 : totalP2P / totalUsdt;
 
-        Double comisionesP2P = saleP2PService.obtenerComisionesPorFecha(fecha) * tasaPromedioDelDia;
-        
-        Double cuatroPorMil = totalP2P * 0.004;
+                // NUEVO: Sacar tasa promedio del día
+                Double tasaPromedioDelDia = averageRateRepository.findTopByOrderByFechaDesc()
+                                .map(AverageRate::getAverageRate)
+                                .orElseGet(() -> averageRateRepository.findTopByOrderByIdDesc()
+                                                .map(AverageRate::getAverageRate)
+                                                .orElse(0.0));
 
-        Double utilidadP2P = (totalUsdt * tasaVenta) - (totalUsdt * tasaPromedioDelDia) - comisionesP2P - cuatroPorMil;
-        Double tasaVentaGenerales = 0.0;
-        if (pesosVentasGenerales != null && pesosVentasGenerales != 0) {
-            tasaVentaGenerales = totalUSDTVentasGenrales / pesosVentasGenerales;
+                Double comisionTrust = ventasGenerales.stream()
+                                .filter(v -> v.getComision() != null)
+                                .mapToDouble(SellDollars::getComision)
+                                .sum() * tasaPromedioDelDia;
+
+                Double comisionesP2P = saleP2PService.obtenerComisionesPorFecha(fecha) * tasaPromedioDelDia;
+
+                Double cuatroPorMil = totalP2P * 0.004;
+
+                Double utilidadP2P = (totalUsdt * tasaVenta) - (totalUsdt * tasaPromedioDelDia) - comisionesP2P
+                                - cuatroPorMil;
+                Double tasaVentaGenerales = 0.0;
+                if (pesosVentasGenerales != null && pesosVentasGenerales != 0) {
+                        tasaVentaGenerales = totalUSDTVentasGenrales / pesosVentasGenerales;
+                }
+
+                if (Double.isInfinite(tasaVentaGenerales) || Double.isNaN(tasaVentaGenerales)) {
+                        tasaVentaGenerales = 0.0;
+                }
+
+                Double utilidadVentasGenerales = (totalUSDTVentasGenrales * tasaVentaGenerales)
+                                - (totalUSDTVentasGenrales * tasaPromedioDelDia);
+
+                balance.setDate(fecha);
+                balance.setSaldo(saldoTotal);
+                balance.setTasaPromedioDelDia(tasaPromedioDelDia);
+                balance.setTasaVentaDelDia(tasaVenta);
+                balance.setTotalP2PdelDia(totalUsdt);
+                balance.setComisionesP2PdelDia(comisionesP2P);
+                // balance.setTotalGeneralSales(totalGeneralSales);
+                balance.setCuatroPorMilDeVentas(cuatroPorMil);
+                balance.setUtilidadP2P(utilidadP2P);
+                balance.setTotalVentasGeneralesDelDia(totalUSDTVentasGenrales);
+                balance.setUtilidadVentasGenerales(utilidadVentasGenerales);
+
+                balance.setEfectivoDelDia(saldoCajas);
+                balance.setSaldoClientes(clientesSaldo);
+                balance.setComisionTrust(comisionTrust);
+
+                System.out.println("Hoy es (según el backend): " + LocalDate.now());
+                balanceRepo.save(balance);
         }
 
-        if (Double.isInfinite(tasaVentaGenerales) || Double.isNaN(tasaVentaGenerales)) {
-            tasaVentaGenerales = 0.0;
+        @Override
+        public List<BalanceGeneral> listarTodos() {
+                return balanceRepo.findAll();
         }
 
-        Double utilidadVentasGenerales = (totalUSDTVentasGenrales * tasaVentaGenerales)
-                - (totalUSDTVentasGenrales * tasaPromedioDelDia);
+        @Override
+        public BalanceGeneral obtenerPorFecha(LocalDate fecha) {
+                return balanceRepo.findByDate(fecha).orElse(null);
+        }
 
-        balance.setDate(fecha);
-        balance.setSaldo(saldoTotal);
-        balance.setTasaPromedioDelDia(tasaPromedioDelDia);
-        balance.setTasaVentaDelDia(tasaVenta);
-        balance.setTotalP2PdelDia(totalUsdt);
-        balance.setComisionesP2PdelDia(comisionesP2P);
-        // balance.setTotalGeneralSales(totalGeneralSales);
-        balance.setCuatroPorMilDeVentas(cuatroPorMil);
-        balance.setUtilidadP2P(utilidadP2P);
-        balance.setTotalVentasGeneralesDelDia(totalUSDTVentasGenrales);
-        balance.setUtilidadVentasGenerales(utilidadVentasGenerales);
-        
-        balance.setEfectivoDelDia(saldoCajas);
-        balance.setSaldoClientes(clientesSaldo);
-        balance.setComisionTrust(comisionTrust);
+        @Override
+        public BalanceGeneral calcularHoyYRetornar() {
+                LocalDate today = LocalDate.now(ZoneId.of("America/Bogota"));
+                calcularOBalancear(today);
 
-        System.out.println("Hoy es (según el backend): " + LocalDate.now());
-        balanceRepo.save(balance);
-    }
+                return balanceRepo.findByDate(today).orElse(null);
+        }
 
-    @Override
-    public List<BalanceGeneral> listarTodos() {
-        return balanceRepo.findAll();
-    }
+        @Override
+        public Double obtenerTotalCajas() {
+                return efectivoRepository.findAll().stream()
+                                .mapToDouble(e -> e.getSaldo())
+                                .sum();
+        }
 
-    @Override
-    public BalanceGeneral obtenerPorFecha(LocalDate fecha) {
-        return balanceRepo.findByDate(fecha).orElse(null);
-    }
-
-    @Override
-    public BalanceGeneral calcularHoyYRetornar() {
-        LocalDate today = LocalDate.now(ZoneId.of("America/Bogota"));
-        calcularOBalancear(today);
-
-        return balanceRepo.findByDate(today).orElse(null);
-    }
-
-    @Override
-    public Double obtenerTotalCajas() {
-        return efectivoRepository.findAll().stream()
-                .mapToDouble(e -> e.getSaldo())
-                .sum();
-    }
+        @Override
+        public Double obtenerTotalClientes() {
+                return clienteRepository.findAll().stream()
+                                .mapToDouble(c -> c.getSaldo())
+                                .sum();
+        }
 
 }

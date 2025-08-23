@@ -9,5 +9,6 @@ public interface BalanceGeneralService {
     BalanceGeneral obtenerPorFecha(LocalDate fecha);
     BalanceGeneral calcularHoyYRetornar();
     Double obtenerTotalCajas();
+    Double obtenerTotalClientes();
 
 }
