@@ -47,9 +47,12 @@ public class SupplierServiceImpl implements SupplierService {
 		supplier.setBalance(balance);
 		supplier.setLastPaymentDate(getTodayDate());
 		saveSupplier(supplier);
-		
+
+		// calcular comisión 4x1000
+		Double comision = pesosCop * 0.004;
+
 		AccountCop accountCop = accountCopRepository.findById(accountCopId).orElse(null);
-		accountCop.setBalance(accountCop.getBalance() - pesosCop);
+		accountCop.setBalance(accountCop.getBalance() - pesosCop - comision);
 		accountCopRepository.save(accountCop);
 	}
 
