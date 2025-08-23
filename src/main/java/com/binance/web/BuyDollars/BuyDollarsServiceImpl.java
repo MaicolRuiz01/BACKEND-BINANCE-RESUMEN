@@ -261,7 +261,7 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 
 	    // Insertar datos necesarios desde DTO:
 	    existing.setTasa(dto.getTasa());
-	    existing.setPesos(dto.getDollars() * dto.getTasa());
+	    existing.setPesos(existing.getDollars() * dto.getTasa());
 
 	    // Asignar proveedor
 	    Supplier supplier = supplierRepository.findById(dto.getSupplierId())
@@ -269,7 +269,7 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 	    existing.setSupplier(supplier);
 
 	    // Actualizar balances:
-	    double montoPesos = dto.getDollars() * dto.getTasa();
+	    double montoPesos = existing.getDollars() * dto.getTasa();
 	    double currentSupplierBalance = supplier.getBalance() != null ? supplier.getBalance() : 0.0;
 	    supplier.setBalance(currentSupplierBalance + montoPesos);
 	    supplierRepository.save(supplier);
