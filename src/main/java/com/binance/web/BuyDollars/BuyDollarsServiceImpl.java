@@ -3,6 +3,7 @@ package com.binance.web.BuyDollars;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -227,8 +228,9 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 	
 	@Override
 	public List<BuyDollarsDto> getComprasNoAsignadasHoy() {
-	    LocalDateTime start = LocalDate.now().atStartOfDay();
-	    LocalDateTime end = LocalDate.now().atTime(LocalTime.MAX);
+		ZoneId zoneId = ZoneId.of("America/Bogota");
+	    LocalDateTime start = LocalDate.now(zoneId).atStartOfDay();
+	    LocalDateTime end = LocalDate.now(zoneId).atTime(LocalTime.MAX);
 	    List<BuyDollars> compras = buyDollarsRepository.findNoAsignadasHoy(start, end);
 
 	    return compras.stream().map(buy -> {
