@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -95,7 +96,7 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 		Double nuevaTasaPromedio = pesosTotal / usdtTotal;
 		Double nuevoSaldo = saldoTotalInternoAnteriorUSDT + dollars;
 		
-		averageRateService.guardarNuevaTasa(nuevaTasaPromedio, nuevoSaldo);
+		//averageRateService.guardarNuevaTasa(nuevaTasaPromedio, nuevoSaldo);
 		
 		accountBinanceRepository.save(accountBinance);
 		supplierRepository.save(supplier);
@@ -178,12 +179,14 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 	    return buyDollarsRepository.save(existing);
 	}
 
+	// BuyDollarsServiceImpl.java
+
 	@Override
 	@Transactional
 	public void registrarComprasAutomaticamente() {
 	    try {
 	        List<BuyDollarsDto> binancePay = binancePayController.getComprasNoRegistradas().getBody();
-	        List<BuyDollarsDto> spot = spotOrdersController.getComprasNoRegistradas(30).getBody();
+	        List<BuyDollarsDto> spot = spotOrdersController.getComprasNoRegistradas(20).getBody();
 	        List<BuyDollarsDto> trust = tronScanController.getUSDTIncomingTransfers().getBody();
 
 	        Set<String> existentes = buyDollarsRepository.findAll().stream()
@@ -194,6 +197,9 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 	        if (binancePay != null) todas.addAll(binancePay);
 	        if (spot != null) todas.addAll(spot);
 	        if (trust != null) todas.addAll(trust);
+
+	        // ✅ ORDENAR LA LISTA POR FECHA ANTES DE PROCESARLA
+	        todas.sort(Comparator.comparing(BuyDollarsDto::getDate));
 
 	        for (BuyDollarsDto dto : todas) {
 	            if (dto.getIdDeposit() == null || existentes.contains(dto.getIdDeposit())) continue;
@@ -215,13 +221,13 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 	            nueva.setPesos(0.0);
 	            nueva.setAsignada(false);
 	            nueva.setAccountBinance(account);
-
+	            nueva.setSaldoAnterior(actual);
+	            
 	            buyDollarsRepository.save(nueva);
 	            existentes.add(dto.getIdDeposit());
 	        }
 
 	    } catch (Exception e) {
-	        // Logueá el error o lanzalo si querés fallar la transacción
 	        throw new RuntimeException("Error al registrar compras automáticamente", e);
 	    }
 	}
@@ -269,9 +275,18 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 	    existing.setSupplier(supplier);
 
 	    // Actualizar balances:
-	    double montoPesos = existing.getDollars() * dto.getTasa();
-	    double currentSupplierBalance = supplier.getBalance() != null ? supplier.getBalance() : 0.0;
+	    Double montoPesos = existing.getDollars() * dto.getTasa();
+	    Double currentSupplierBalance = supplier.getBalance() != null ? supplier.getBalance() : 0.0;
 	    supplier.setBalance(currentSupplierBalance + montoPesos);
+	    
+	    Double pesosAnterior = existing.getSaldoAnterior() * averageRateService.getUltimaTasaPromedio().getAverageRate();
+	    Double totalUsdt = dto.getDollars() + existing.getSaldoAnterior();
+	    Double nuevaTasaPromedio = ( pesosAnterior + montoPesos ) / totalUsdt;
+	    
+	    averageRateService.guardarNuevaTasa(nuevaTasaPromedio, accountBinanceService.getTotalBalanceInterno().doubleValue(), existing.getDate());
+	    
+	    
+	    
 	    supplierRepository.save(supplier);
 
 	    // Marcar como asignada

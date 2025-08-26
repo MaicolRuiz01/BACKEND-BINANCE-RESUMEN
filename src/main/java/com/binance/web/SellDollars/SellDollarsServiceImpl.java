@@ -3,6 +3,7 @@ package com.binance.web.SellDollars;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,11 +23,13 @@ import com.binance.web.BinanceAPI.SpotOrdersController;
 import com.binance.web.BinanceAPI.TronScanController;
 import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.AccountCop;
+import com.binance.web.Entity.AverageRate;
 import com.binance.web.Entity.Cliente;
 import com.binance.web.Entity.PurchaseRate;
 import com.binance.web.Entity.SellDollars;
 import com.binance.web.Entity.SellDollarsAccountCop;
 import com.binance.web.Repository.AccountBinanceRepository;
+import com.binance.web.Repository.AverageRateRepository;
 import com.binance.web.Repository.ClienteRepository;
 import com.binance.web.Repository.PurchaseRateRepository;
 import com.binance.web.Repository.SellDollarsRepository;
@@ -61,6 +64,8 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 	private PaymentController binancePayController;
 	@Autowired
 	private TronScanController tronScanController;
+	
+	private AverageRateRepository averageRateRepository;
 
 	@Override
 	@Transactional
@@ -153,11 +158,21 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 	        throw new RuntimeException("Venta ya fue asignada");
 	        
 	    }
-	    
-
 	    // 2. Actualizar datos básicos
 	    existing.setTasa(dto.getTasa());
 	    existing.setPesos(dto.getDollars() * dto.getTasa());
+	    
+	    AverageRate tasaPromedioAnterior = averageRateRepository.findTopByFechaBeforeOrderByFechaDesc(existing.getDate())
+	            .orElse(null);
+	    
+	    if (tasaPromedioAnterior != null) {
+	        Double costoEnPesos = existing.getDollars() * tasaPromedioAnterior.getAverageRate();
+	        Double utilidad = existing.getPesos() - costoEnPesos - existing.getComision();
+	        existing.setUtilidad(utilidad);
+	    } else {
+	        // En caso de que no haya una tasa anterior, la utilidad es 0
+	        existing.setUtilidad(0.0);
+	    }
 
 	    // 3. Limpiar relaciones anteriores
 	    // ⚠️ Importante: Limpiamos la colección para que Hibernate elimine las viejas cuentas COP.
@@ -209,6 +224,8 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 	        // 5. Ajustar saldo del proveedor
 	        double montoEnPesos = existing.getPesos();
 	        double restanteParaProveedor = montoEnPesos - totalAsignadoACuentas;
+	        
+	        
 
 	        if (restanteParaProveedor > 0.0) {
 	            double currentSupplierBalance = supplier.getBalance() != null ? supplier.getBalance() : 0.0;
@@ -513,6 +530,8 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 		    if (spot != null) todas.addAll(spot);
 		    if (binancePay != null) todas.addAll(binancePay);
 		    if (trust != null) todas.addAll(trust);
+		    
+		    todas.sort(Comparator.comparing(SellDollarsDto::getDate));
 
 		    for (SellDollarsDto dto : todas) {
 		        if (dto.getIdWithdrawals() == null || existentes.contains(dto.getIdWithdrawals())) continue;

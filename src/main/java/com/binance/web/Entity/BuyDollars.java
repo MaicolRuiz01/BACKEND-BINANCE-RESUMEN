@@ -37,4 +37,5 @@ public class BuyDollars {
 	private AccountBinance accountBinance;
 	private Boolean asignada;
 	private Double quivalenteciaTRX;
+	private Double saldoAnterior;
 }

@@ -24,12 +24,12 @@ public class AverageRateServiceImpl implements AverageRateService{
 	}
 
 	@Override
-	public AverageRate guardarNuevaTasa(Double nuevaTasa, Double nuevoSaldo) {
+	public AverageRate guardarNuevaTasa(Double nuevaTasa, Double nuevoSaldo, LocalDateTime fecha) {
 		
 		AverageRate tasaPromedio = new AverageRate();
 		tasaPromedio.setAverageRate(nuevaTasa);
 		tasaPromedio.setSaldoTotalInterno(nuevoSaldo);
-		tasaPromedio.setFecha(LocalDateTime.now());
+		tasaPromedio.setFecha(fecha);
 		return averageRateRepository.save(tasaPromedio);
 	}
 

@@ -52,4 +52,5 @@ public class SellDollars {
 	@JoinColumn(name = "cliente_id")
 	private Cliente cliente;
 	private Double comision;
+
 }

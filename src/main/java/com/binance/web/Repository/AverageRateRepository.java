@@ -1,5 +1,6 @@
 package com.binance.web.Repository;
 
+import java.time.LocalDateTime;
 import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -10,5 +11,6 @@ public interface AverageRateRepository extends JpaRepository<AverageRate, Intege
 	
 	Optional<AverageRate> findTopByOrderByFechaDesc();
 	Optional<AverageRate> findTopByOrderByIdDesc();
+	Optional<AverageRate> findTopByFechaBeforeOrderByFechaDesc(LocalDateTime fecha);
 
 }
