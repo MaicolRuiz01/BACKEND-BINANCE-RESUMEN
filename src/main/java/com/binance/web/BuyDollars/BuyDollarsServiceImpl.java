@@ -279,8 +279,10 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 	    Double currentSupplierBalance = supplier.getBalance() != null ? supplier.getBalance() : 0.0;
 	    supplier.setBalance(currentSupplierBalance + montoPesos);
 	    
-	    Double pesosAnterior = existing.getSaldoAnterior() * averageRateService.getUltimaTasaPromedio().getAverageRate();
-	    Double totalUsdt = dto.getDollars() + existing.getSaldoAnterior();
+	    Double saldoAnterior = existing.getSaldoAnterior() != null ? existing.getSaldoAnterior() : 0.0;
+	    Double tasaPromedio = averageRateService.getUltimaTasaPromedio().getAverageRate();
+	    Double pesosAnterior = saldoAnterior * tasaPromedio;
+	    Double totalUsdt = existing.getDollars() + saldoAnterior ;
 	    Double nuevaTasaPromedio = ( pesosAnterior + montoPesos ) / totalUsdt;
 	    
 	    averageRateService.guardarNuevaTasa(nuevaTasaPromedio, accountBinanceService.getTotalBalanceInterno().doubleValue(), existing.getDate());
