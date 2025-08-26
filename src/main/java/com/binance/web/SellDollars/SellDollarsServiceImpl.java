@@ -64,7 +64,7 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 	private PaymentController binancePayController;
 	@Autowired
 	private TronScanController tronScanController;
-	
+	@Autowired
 	private AverageRateRepository averageRateRepository;
 
 	@Override
@@ -167,7 +167,8 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 	    
 	    if (tasaPromedioAnterior != null) {
 	        Double costoEnPesos = existing.getDollars() * tasaPromedioAnterior.getAverageRate();
-	        Double utilidad = existing.getPesos() - costoEnPesos - existing.getComision();
+	        Double comision = existing.getComision() != null ? existing.getComision() : 0.0;
+	        Double utilidad = existing.getPesos() - costoEnPesos - comision;
 	        existing.setUtilidad(utilidad);
 	    } else {
 	        // En caso de que no haya una tasa anterior, la utilidad es 0
