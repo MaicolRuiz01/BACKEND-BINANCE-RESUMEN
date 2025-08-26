@@ -16,4 +16,6 @@ public interface MovimientoService {
 	List<Movimiento> listarDepositos();
 	List<Movimiento> listarTransferencias();
 	List<Movimiento> listarPagos();
+	Movimiento actualizarMovimiento(Integer id, Double monto, Integer cuentaOrigenId, Integer cuentaDestinoId, Integer cajaId);
+
 }

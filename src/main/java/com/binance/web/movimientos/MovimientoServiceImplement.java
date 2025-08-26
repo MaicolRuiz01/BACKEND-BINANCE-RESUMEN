@@ -124,4 +124,37 @@ public class MovimientoServiceImplement implements MovimientoService{
 	public List<Movimiento> listarPagos(){
 		return movimientoRepository.findByTipo("PAGO");
 	}
+
+	@Override
+public Movimiento actualizarMovimiento(Integer id, Double monto, Integer cuentaOrigenId, Integer cuentaDestinoId, Integer cajaId) {
+    Movimiento movimiento = movimientoRepository.findById(id)
+            .orElseThrow(() -> new RuntimeException("Movimiento no encontrado con id: " + id));
+
+    if (monto != null) {
+        movimiento.setMonto(monto);
+    }
+
+    if (cuentaOrigenId != null) {
+        AccountCop cuentaOrigen = accountCopRepository.findById(cuentaOrigenId)
+                .orElseThrow(() -> new RuntimeException("Cuenta origen no encontrada con id: " + cuentaOrigenId));
+        movimiento.setCuentaOrigen(cuentaOrigen);
+    }
+
+    if (cuentaDestinoId != null) {
+        AccountCop cuentaDestino = accountCopRepository.findById(cuentaDestinoId)
+                .orElseThrow(() -> new RuntimeException("Cuenta destino no encontrada con id: " + cuentaDestinoId));
+        movimiento.setCuentaDestino(cuentaDestino);
+    }
+
+    if (cajaId != null) {
+        Efectivo caja = efectivoRepository.findById(cajaId)
+                .orElseThrow(() -> new RuntimeException("Caja no encontrada con id: " + cajaId));
+        movimiento.setCaja(caja);
+    }
+
+    return movimientoRepository.save(movimiento);
+}
+
+
+	
 }
