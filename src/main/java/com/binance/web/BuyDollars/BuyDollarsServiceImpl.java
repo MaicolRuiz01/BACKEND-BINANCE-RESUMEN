@@ -22,9 +22,11 @@ import com.binance.web.BinanceAPI.TronScanController;
 import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.AverageRate;
 import com.binance.web.Entity.BuyDollars;
+import com.binance.web.Entity.Cliente;
 import com.binance.web.Entity.Supplier;
 import com.binance.web.Repository.AccountBinanceRepository;
 import com.binance.web.Repository.BuyDollarsRepository;
+import com.binance.web.Repository.ClienteRepository;
 import com.binance.web.Repository.SupplierRepository;
 import com.binance.web.Spot.SpotController;
 import com.binance.web.averageRate.AverageRateService;
@@ -38,6 +40,9 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 
 	@Autowired
 	private SupplierRepository supplierRepository;
+
+	@Autowired
+private ClienteRepository clienteRepository;
 
 	@Autowired
 	private AccountBinanceRepository accountBinanceRepository;
@@ -269,31 +274,48 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 	    existing.setTasa(dto.getTasa());
 	    existing.setPesos(existing.getDollars() * dto.getTasa());
 
-	    // Asignar proveedor
-	    Supplier supplier = supplierRepository.findById(dto.getSupplierId())
-	        .orElseThrow(() -> new RuntimeException("Proveedor no encontrado"));
-	    existing.setSupplier(supplier);
+		Double montoPesos = existing.getDollars() * dto.getTasa();
 
-	    // Actualizar balances:
-	    Double montoPesos = existing.getDollars() * dto.getTasa();
-	    Double currentSupplierBalance = supplier.getBalance() != null ? supplier.getBalance() : 0.0;
-	    supplier.setBalance(currentSupplierBalance + montoPesos);
-	    
-	    Double saldoAnterior = existing.getSaldoAnterior() != null ? existing.getSaldoAnterior() : 0.0;
-	    Double tasaPromedio = averageRateService.getUltimaTasaPromedio().getAverageRate();
-	    Double pesosAnterior = saldoAnterior * tasaPromedio;
-	    Double totalUsdt = existing.getDollars() + saldoAnterior ;
-	    Double nuevaTasaPromedio = ( pesosAnterior + montoPesos ) / totalUsdt;
-	    
-	    averageRateService.guardarNuevaTasa(nuevaTasaPromedio, accountBinanceService.getTotalBalanceInterno().doubleValue(), existing.getDate());
-	    
-	    
-	    
-	    supplierRepository.save(supplier);
+	    // ✅ Si viene supplierId, asignar proveedor
+    if (dto.getSupplierId() != null) {
+        Supplier supplier = supplierRepository.findById(dto.getSupplierId())
+            .orElseThrow(() -> new RuntimeException("Proveedor no encontrado"));
+        existing.setSupplier(supplier);
 
-	    // Marcar como asignada
-	    existing.setAsignada(true);
+        Double currentSupplierBalance = supplier.getBalance() != null ? supplier.getBalance() : 0.0;
+        supplier.setBalance(currentSupplierBalance + montoPesos);
 
-	    return buyDollarsRepository.save(existing);
-	}
+        supplierRepository.save(supplier);
+    }
+
+    // ✅ Si viene clienteId, asignar cliente
+    if (dto.getClienteId() != null) {
+        Cliente cliente = clienteRepository.findById(dto.getClienteId())
+            .orElseThrow(() -> new RuntimeException("Cliente no encontrado"));
+        existing.setCliente(cliente);
+
+        Double currentClienteBalance = cliente.getSaldo() != null ? cliente.getSaldo() : 0.0;
+        cliente.setSaldo(currentClienteBalance - montoPesos); // Cliente vendió → se descuenta
+
+        clienteRepository.save(cliente);
+    }
+
+    // Mantengo igual tu lógica de tasa promedio
+    Double saldoAnterior = existing.getSaldoAnterior() != null ? existing.getSaldoAnterior() : 0.0;
+    Double tasaPromedio = averageRateService.getUltimaTasaPromedio().getAverageRate();
+    Double pesosAnterior = saldoAnterior * tasaPromedio;
+    Double totalUsdt = existing.getDollars() + saldoAnterior;
+    Double nuevaTasaPromedio = (pesosAnterior + montoPesos) / totalUsdt;
+
+    averageRateService.guardarNuevaTasa(
+        nuevaTasaPromedio,
+        accountBinanceService.getTotalBalanceInterno().doubleValue(),
+        existing.getDate()
+    );
+
+    // Marcar como asignada
+    existing.setAsignada(true);
+
+    return buyDollarsRepository.save(existing);
+}
 }
