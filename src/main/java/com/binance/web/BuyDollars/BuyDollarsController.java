@@ -21,20 +21,20 @@ import com.binance.web.Repository.AccountBinanceRepository;
 @RestController
 @RequestMapping("/api/buy-dollars")
 public class BuyDollarsController {
-    
+
     @Autowired
     private BuyDollarsService buyDollarsService;
 
     @Autowired
-    private AccountBinanceRepository accountBinanceRepository;  // Inyección del repositorio
+    private AccountBinanceRepository accountBinanceRepository; // Inyección del repositorio
 
     @PostMapping
     public ResponseEntity<BuyDollars> createBuyDollars(@RequestBody BuyDollarsDto buyDollarsDto) {
         // Buscar la cuenta de Binance que coincida con el nombre proporcionado
         AccountBinance accountBinance = accountBinanceRepository.findByName(buyDollarsDto.getNameAccount());
-        
+
         if (accountBinance == null) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(null);  // Si no se encuentra la cuenta
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(null); // Si no se encuentra la cuenta
         }
 
         // Asignar la cuenta de Binance al DTO de compra de dólares
@@ -45,20 +45,20 @@ public class BuyDollarsController {
 
         return ResponseEntity.status(HttpStatus.CREATED).body(newBuy);
     }
-    
+
     @GetMapping
     public ResponseEntity<List<BuyDollars>> getAllBuyDollars() {
         List<BuyDollars> compras = buyDollarsService.getAllBuyDollars();
         return ResponseEntity.ok(compras);
     }
-    
+
     @GetMapping("/listado")
     public ResponseEntity<List<BuyDollarsDto>> getBuyDollarsList() {
         List<BuyDollars> compras = buyDollarsService.getAllBuyDollars();
 
         List<BuyDollarsDto> dtos = compras.stream().map(buy -> {
             BuyDollarsDto dto = new BuyDollarsDto();
-            dto.setId(buy.getId()); 
+            dto.setId(buy.getId());
             dto.setDollars(buy.getDollars());
             dto.setTasa(buy.getTasa());
             dto.setNameAccount(buy.getNameAccount());
@@ -72,7 +72,7 @@ public class BuyDollarsController {
 
         return ResponseEntity.ok(dtos);
     }
-    
+
     @PutMapping("/{id}")
     public ResponseEntity<BuyDollars> updateBuyDollars(@PathVariable Integer id, @RequestBody BuyDollarsDto dto) {
         try {
@@ -88,22 +88,23 @@ public class BuyDollarsController {
         buyDollarsService.registrarComprasAutomaticamente();
         return ResponseEntity.ok().build();
     }
-    
- // En BuyDollarsController.java
+
+    // En BuyDollarsController.java
     @GetMapping("/no-asignadas-hoy")
     public ResponseEntity<List<BuyDollarsDto>> getNoAsignadasHoy() {
         return ResponseEntity.ok(buyDollarsService.getComprasNoAsignadasHoy());
     }
-    
+
     @PutMapping("/asignar/{id}")
-    public ResponseEntity<BuyDollars> asignarCompra(
-        @PathVariable Integer id,
-        @RequestBody BuyDollarsDto dto) {
-        BuyDollars updated = buyDollarsService.asignarCompra(id, dto);
-        return ResponseEntity.ok(updated);
+    public ResponseEntity<?> asignarCompra(
+            @PathVariable Integer id,
+            @RequestBody BuyDollarsDto dto) {
+        try {
+            BuyDollars updated = buyDollarsService.asignarCompra(id, dto);
+            return ResponseEntity.ok(updated);
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
+        }
     }
-
-
-
 
 }
