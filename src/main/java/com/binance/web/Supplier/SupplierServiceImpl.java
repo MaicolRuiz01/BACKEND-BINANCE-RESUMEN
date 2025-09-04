@@ -74,18 +74,7 @@ public class SupplierServiceImpl implements SupplierService {
 		return supplierRepository.findById(id).orElse(null);
 	}
 
-	@Override
-	public void addBuyDollars(BuyDollars buyDollars) {
-		// Se crea un nuevo BuyDollars
-		buyDollarsRepository.save(buyDollars);
 
-		// Actualizamos el balance del Supplier (aquí asumimos que el Supplier con id 1
-		// es el único)
-		Supplier supplier = supplierRepository.findById(1)
-				.orElseThrow(() -> new RuntimeException("Supplier not found"));
-		supplier.setBalance(supplier.getBalance() + buyDollars.getDollars());
-		supplierRepository.save(supplier);
-	}
 
 	@Override
 	public Supplier updateSupplierBalance(Integer id, Supplier supplier) {
@@ -101,5 +90,11 @@ public class SupplierServiceImpl implements SupplierService {
 	public List<Supplier> findAllSuppliers() {
 		List<Supplier> suppliers = supplierRepository.findAll();
 		return suppliers;
+	}
+
+	@Override
+	public void addBuyDollars(BuyDollars buyDollars) {
+		// TODO Auto-generated method stub
+		
 	}
 }

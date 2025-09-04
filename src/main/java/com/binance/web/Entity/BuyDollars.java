@@ -24,7 +24,8 @@ public class BuyDollars {
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Integer id;
 	private Double tasa;
-	private Double dollars;
+	private Double amount;
+	private String cryptoSymbol;
 	private Double pesos;
 	@ManyToOne
 	@JoinColumn(name = "supplier_id")
@@ -36,6 +37,5 @@ public class BuyDollars {
 	@JoinColumn(name = "account_binance_id")
 	private AccountBinance accountBinance;
 	private Boolean asignada;
-	private Double quivalenteciaTRX;
 	private Double saldoAnterior;
 }

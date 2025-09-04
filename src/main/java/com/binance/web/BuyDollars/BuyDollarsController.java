@@ -59,7 +59,7 @@ public class BuyDollarsController {
         List<BuyDollarsDto> dtos = compras.stream().map(buy -> {
             BuyDollarsDto dto = new BuyDollarsDto();
             dto.setId(buy.getId()); 
-            dto.setDollars(buy.getDollars());
+            //dto.setDollars(buy.getDollars());
             dto.setTasa(buy.getTasa());
             dto.setNameAccount(buy.getNameAccount());
             dto.setDate(buy.getDate());
@@ -102,8 +102,4 @@ public class BuyDollarsController {
         BuyDollars updated = buyDollarsService.asignarCompra(id, dto);
         return ResponseEntity.ok(updated);
     }
-
-
-
-
 }

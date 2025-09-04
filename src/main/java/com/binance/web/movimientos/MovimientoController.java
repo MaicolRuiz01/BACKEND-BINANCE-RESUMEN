@@ -40,6 +40,10 @@ public class MovimientoController {
     public Movimiento pago(@RequestParam Integer cuentaId, @RequestParam Integer clienteId, @RequestParam Double monto) {
     	return movimientoService.registrarPagoCliente(cuentaId, clienteId, monto);
     }
+    @PostMapping("/pago-proveedor")
+    public Movimiento pagoProveedor(@RequestParam Integer cuentaId, Integer caja, Integer proveedor, Double monto) {
+    	return movimientoService.registrarPagoProveedor(cuentaId, caja, proveedor, monto);
+    }
 
     @GetMapping("/listar")
     public List<Movimiento> listar() {
@@ -74,6 +78,7 @@ public class MovimientoController {
     			.toList();
     }
     
+    
     private MovimientoDTO mapToDto(Movimiento movimiento) {
 	    return new MovimientoDTO(
 	        movimiento.getTipo(),
@@ -82,7 +87,8 @@ public class MovimientoController {
 	        movimiento.getCuentaOrigen() != null ? movimiento.getCuentaOrigen().getName() : null,
 	        movimiento.getCuentaDestino() != null ? movimiento.getCuentaDestino().getName() : null,
 	        movimiento.getCaja() != null ? movimiento.getCaja().getName() : null,
-	        movimiento.getPagoCliente() != null ? movimiento.getPagoCliente().getNombre() : null
+	        movimiento.getPagoCliente() != null ? movimiento.getPagoCliente().getNombre() : null,
+	        movimiento.getPagoProveedor() != null ? movimiento.getPagoProveedor().getName() : null
 	    );
 	}
 
@@ -100,8 +106,4 @@ public ResponseEntity<Movimiento> actualizarMovimiento(
     );
     return ResponseEntity.ok(actualizado);
 }
-
-
-
-
 }

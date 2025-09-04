@@ -14,8 +14,9 @@ import com.fasterxml.jackson.annotation.JsonFormat;
 @AllArgsConstructor
 public class BuyDollarsDto {
 	private Integer id;
-    private Double dollars;      // Monto de dólares a comprar
-    private Double tasa;         // Tasa de cambio aplicada
+	private Double amount;
+	private String cryptoSymbol;
+	private Double tasa;         // Tasa de cambio aplicada
     private String nameAccount;  // Nombre de la cuenta
     //@JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss", timezone = "America/Bogota")
     private LocalDateTime date;           // Fecha de la operación
@@ -24,5 +25,4 @@ public class BuyDollarsDto {
     private Integer accountBinanceId;
 	private Integer supplierId;
 	private Boolean asignada;
-	private Double equivalenteciaTRX;
 }

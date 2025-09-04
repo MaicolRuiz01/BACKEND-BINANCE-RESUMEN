@@ -17,24 +17,24 @@ import java.time.LocalDateTime;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Transaction {
 
-	private Long binanceId;
+    private Long binanceId;
     private String orderId;
     @JsonProperty("transactionId")
     private String transactionId;
+    
+    // ✅ Agregado el campo 'currency' que contiene el símbolo de la criptomoneda
+    @JsonProperty("currency")
+    private String currency;
+    
     private Double amount;
     @JsonDeserialize(using = CustomLocalDateTimeDeserializer.class)
     private LocalDateTime transactionTime;
 
-    
     @JsonProperty("payerInfo")
-    private PayerInfo payerInfo;  // Clase interna para información del pagador
+    private PayerInfo payerInfo;
 
     @JsonProperty("receiverInfo")
-    private ReceiverInfo receiverInfo;  // Clase interna para información del receptor
-
-    // Getters y setters
-
-    
+    private ReceiverInfo receiverInfo;
 
     public Double getAmount() {
         return amount;
@@ -68,19 +68,24 @@ public class Transaction {
         this.receiverInfo = receiverInfo;
     }
     
+    // ✅ Getter y Setter para 'currency'
+    public String getCurrency() {
+        return currency;
+    }
     
-    
+    public void setCurrency(String currency) {
+        this.currency = currency;
+    }
+
     @Data
     @AllArgsConstructor
     @NoArgsConstructor
     @JsonIgnoreProperties(ignoreUnknown = true)
-    // Clases internas para PayerInfo y ReceiverInfo
     public static class PayerInfo {
         private String name;
         private String email;
         private Long binanceId;
 
-        // Getters y setters
         public String getName() {
             return name;
         }
@@ -102,13 +107,12 @@ public class Transaction {
     @AllArgsConstructor
     @NoArgsConstructor
     @JsonIgnoreProperties(ignoreUnknown = true)
-
     public static class ReceiverInfo {
         private String name;
         private String email;
         private Long binanceId;
-        private Long accountId; 
-        // Getters y setters
+        private Long accountId;
+
         public String getName() {
             return name;
         }
@@ -125,17 +129,20 @@ public class Transaction {
             this.email = email;
         }
         
-        public Long getBinanceId() {  // <-- Getter nuevo!
+        public Long getBinanceId() {
             return binanceId;
         }
-        public void setBinanceId(Long binanceId) { // <-- Setter nuevo!
+
+        public void setBinanceId(Long binanceId) {
             this.binanceId = binanceId;
         }
+
         public Long getAccountId() {
-        	return accountId;
+            return accountId;
         }
+
         public void setAccountId(Long accountId) {
-        	this.accountId= accountId;
+            this.accountId = accountId;
         }
     }
 }

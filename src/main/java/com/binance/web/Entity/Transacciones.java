@@ -33,7 +33,4 @@ public class Transacciones {
     private String tipo;
     private String idtransaccion;
     private String txId;
-	
-	
-
 }

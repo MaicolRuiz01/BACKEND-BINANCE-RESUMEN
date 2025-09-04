@@ -2,14 +2,14 @@ package com.binance.web.AccountBinance;
 
 import java.math.BigDecimal;
 import java.util.List;
-
+import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
 import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Repository.PurchaseRateRepository;
+import com.binance.web.model.AccountBinanceDTO;
 
 @RestController
 @RequestMapping("/cuenta-binance")
@@ -23,14 +23,20 @@ public class AccountBinanceController {
     }
 
     @GetMapping
-    public ResponseEntity<List<AccountBinance>> getAllAccounts() {
-        return ResponseEntity.ok(accountBinanceService.findAllAccountBinance());
+    public ResponseEntity<List<AccountBinanceDTO>> getAllAccounts() {
+        List<AccountBinanceDTO> out = accountBinanceService.findAllAccountBinance()
+            .stream()
+            .map(this::toDtoConBalance)
+            .toList();
+        return ResponseEntity.ok(out);
     }
 
+    // ==== OBTENER POR ID (también en DTO para consistencia) ====
     @GetMapping("/{id}")
-    public ResponseEntity<AccountBinance> getAccountById(@PathVariable Integer id) {
+    public ResponseEntity<AccountBinanceDTO> getAccountById(@PathVariable Integer id) {
         AccountBinance account = accountBinanceService.findByIdAccountBinance(id);
-        return account != null ? ResponseEntity.ok(account) : ResponseEntity.notFound().build();
+        if (account == null) return ResponseEntity.notFound().build();
+        return ResponseEntity.ok(toDtoConBalance(account));
     }
 
     @PostMapping
@@ -61,20 +67,18 @@ public class AccountBinanceController {
         AccountBinance account = accountBinanceService.findByName(name);
         return account != null ? ResponseEntity.ok(account) : ResponseEntity.notFound().build();
     }
-    //TRAE EL BALANCE INTERNO DE UNA CUENTA BINANCE
+ // Balance interno (según tu tabla) convertido a USD
     @GetMapping("/balance")
     public ResponseEntity<Double> getBalanceByName(@RequestParam String name) {
-        System.out.println("🟢 Consultando balance de: " + name); // <- agrega esto para probar si entra
-        AccountBinance account = accountBinanceService.findByName(name);
-        return account != null ? ResponseEntity.ok(account.getBalance()) : ResponseEntity.notFound().build();
+        Double usd = accountBinanceService.getInternalUsdBalance(name);
+        return ResponseEntity.ok(usd != null ? usd : 0.0);
     }
-    
-    //TRAE EL BALANCE externo DE UNA CUENTA BINANCE
+
+    // Balance EXTERNO en USDT (lo que ya calculabas con Binance/Tron) → asegurado Double
     @GetMapping("/balance-usdt")
-    public ResponseEntity<String> getUSDTBalance(@RequestParam String name) {
-        System.out.println("🟢 Consultando balance USDT de: " + name);
-        String usdtBalance = accountBinanceService.getUSDTBalance(name);
-        return ResponseEntity.ok(usdtBalance);
+    public ResponseEntity<Double> getUSDTBalance(@RequestParam String name) {
+        Double usdtBalance = accountBinanceService.getUSDTBalance(name);
+        return ResponseEntity.ok(usdtBalance != null ? usdtBalance : 0.0);
     }
     
     @GetMapping("/balance-total-externo")
@@ -93,5 +97,37 @@ public class AccountBinanceController {
     	BigDecimal result = accountBinanceService.getTotalBalanceInterno();
     	return ResponseEntity.ok(result);
     	}
+
+    @PostMapping("/sync-internal")
+    public ResponseEntity<Map<String, Double>> syncInternal(@RequestParam String name) {
+        // Sincroniza interno desde snapshot externo (soporta BINANCE y TRUST)
+        Map<String, Double> snapshot = accountBinanceService.syncInternalBalancesFromExternal(name);
+        return ResponseEntity.ok(snapshot);
+    }
+
+    @PostMapping("/sync-internal/all")
+    public ResponseEntity<String> syncAllInternal() {
+        accountBinanceService.syncAllInternalBalancesFromExternal();
+        return ResponseEntity.ok("Sincronización interna completada para todas las cuentas.");
+    }
+    
+    private AccountBinanceDTO toDtoConBalance(AccountBinance a) {
+        Double balanceUsd = 0.0;
+        try {
+            balanceUsd = accountBinanceService.getInternalUsdBalance(a.getName());
+        } catch (Exception ignored) {}
+        return AccountBinanceDTO.builder()
+                .id(a.getId())
+                .name(a.getName())
+                .referenceAccount(a.getReferenceAccount())
+                .correo(a.getCorreo())
+                .userBinance(a.getUserBinance())
+                .address(a.getAddress())
+                .tipo(a.getTipo())
+                .balance(balanceUsd != null ? balanceUsd : 0.0)
+                .build();
+    }
+
+
 
 }

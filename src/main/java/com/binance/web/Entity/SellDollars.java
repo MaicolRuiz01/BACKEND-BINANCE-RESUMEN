@@ -29,28 +29,39 @@ public class SellDollars {
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Integer id;
+
 	@Column(name="id_withdrawals")
 	private String idWithdrawals;
+
 	private Double tasa;
 	private Double dollars;
 	private Double pesos;
 	private LocalDateTime date;
 	private String nameAccount;
+
+	// 🔥 Nuevo campo
+	private String cryptoSymbol; // Ejemplo: "USDT", "TRX"
+
 	@ManyToOne
-	@JoinColumn(name = "account_binance_id")  // La columna que hace referencia a account_binance
+	@JoinColumn(name = "account_binance_id")
 	private AccountBinance accountBinance;
+
 	@ManyToOne
 	@JoinColumn(name = "supplier_id")
 	private Supplier supplier;
+
 	@OneToMany(mappedBy = "sellDollars", cascade = CascadeType.ALL, orphanRemoval = true)
 	@JsonIgnore
     private List<SellDollarsAccountCop> sellDollarsAccounts;
+
 	private Double utilidad;
 	private Boolean asignado;
-	
+
 	@ManyToOne
 	@JoinColumn(name = "cliente_id")
 	private Cliente cliente;
+
 	private Double comision;
+	private Double equivalenteciaTRX;
 
 }

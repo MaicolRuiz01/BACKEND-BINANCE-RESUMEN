@@ -8,6 +8,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -68,7 +69,11 @@ public class TronScanService {
         }
     }
 
-    public List<BuyDollarsDto> parseIncomingTransactions(String jsonResponse, String walletAddress, Set<String> assignedIds) {
+    public List<BuyDollarsDto> parseIncomingTransactions(
+            String jsonResponse,
+            String walletAddress,
+            Set<String> assignedIds) {
+
         List<BuyDollarsDto> result = new ArrayList<>();
 
         try {
@@ -78,35 +83,53 @@ public class TronScanService {
             if (data.isArray()) {
                 for (JsonNode tx : data) {
                     String toAddress = tx.path("toAddress").asText();
-                    String fromAddress = tx.path("ownerAddress").asText();
-                    String txId = tx.path("hash").asText();
-                    long timestamp = tx.path("timestamp").asLong();
+                    String txId      = tx.path("hash").asText();
+                    long timestamp   = tx.path("timestamp").asLong();
                     String amountStr = tx.path("amount").asText("0");
 
+                    // Solo entradas hacia nuestra wallet y que NO estén registradas
                     if (toAddress.equalsIgnoreCase(walletAddress) && !assignedIds.contains(txId)) {
-                        double amount = Double.parseDouble(amountStr) / 1_000_000.0;
+                        double amountTRX = 0.0;
+                        try {
+                            amountTRX = Double.parseDouble(amountStr) / 1_000_000.0; // SUN -> TRX
+                        } catch (NumberFormatException ignore) {}
+
+                        if (amountTRX <= 0) continue;
 
                         BuyDollarsDto dto = new BuyDollarsDto();
-                        dto.setDollars(amount);
-                        dto.setTasa(0.0);
-                        dto.setNameAccount("TRUST");
                         dto.setIdDeposit(txId);
+                        dto.setNameAccount("TRUST"); // o el nombre que uses para esa wallet
+                        dto.setDate(LocalDateTime.ofInstant(
+                                Instant.ofEpochMilli(timestamp),
+                                ZoneId.of("America/Bogota")
+                        ));
+
+                        // 🔥 Multi-cripto: como es transferencia nativa, es TRX
+                        dto.setAmount(amountTRX);
+                        dto.setCryptoSymbol("TRX");
+
+                        // Campos contables sin conversión aquí
+                        dto.setTasa(0.0);
                         dto.setPesos(0.0);
-                        dto.setDate(LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp), ZoneId.of("America/Bogota")));
+                        dto.setAsignada(false);
 
                         result.add(dto);
                     }
                 }
             }
-
         } catch (Exception e) {
             e.printStackTrace();
         }
 
         return result;
     }
+
     
-    public List<BuyDollarsDto> parseOutgoingTransactions(String jsonResponse, String walletAddress, Set<String> assignedIds) {
+    public List<BuyDollarsDto> parseOutgoingTransactions(
+            String jsonResponse,
+            String walletAddress,
+            Set<String> assignedIds) {
+
         List<BuyDollarsDto> result = new ArrayList<>();
 
         try {
@@ -116,27 +139,38 @@ public class TronScanService {
             if (data.isArray()) {
                 for (JsonNode tx : data) {
                     String fromAddress = tx.path("ownerAddress").asText();
-                    String toAddress = tx.path("toAddress").asText();
-                    String txId = tx.path("hash").asText();
-                    long timestamp = tx.path("timestamp").asLong();
-                    String amountStr = tx.path("amount").asText("0");
+                    String txId        = tx.path("hash").asText();
+                    long timestamp     = tx.path("timestamp").asLong();
+                    String amountStr   = tx.path("amount").asText("0");
 
                     if (fromAddress.equalsIgnoreCase(walletAddress) && !assignedIds.contains(txId)) {
-                        double amount = Double.parseDouble(amountStr) / 1_000_000.0;
+                        double amountTRX = 0.0;
+                        try {
+                            amountTRX = Double.parseDouble(amountStr) / 1_000_000.0; // SUN -> TRX
+                        } catch (NumberFormatException ignore) {}
+
+                        if (amountTRX <= 0) continue;
 
                         BuyDollarsDto dto = new BuyDollarsDto();
-                        dto.setDollars(amount);
-                        dto.setTasa(0.0);
-                        dto.setNameAccount("TRUST_OUT");  // Para distinguir salida
                         dto.setIdDeposit(txId);
+                        dto.setNameAccount("TRUST_OUT"); // etiqueta para diferenciar
+                        dto.setDate(LocalDateTime.ofInstant(
+                                Instant.ofEpochMilli(timestamp),
+                                ZoneId.of("America/Bogota")
+                        ));
+
+                        // Salida nativa = TRX
+                        dto.setAmount(amountTRX);
+                        dto.setCryptoSymbol("TRX");
+
+                        dto.setTasa(0.0);
                         dto.setPesos(0.0);
-                        dto.setDate(LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp), ZoneId.of("America/Bogota")));
+                        dto.setAsignada(false);
 
                         result.add(dto);
                     }
                 }
             }
-
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -144,13 +178,14 @@ public class TronScanService {
         return result;
     }
 
+
     //ventas de tron
-    public List<SellDollarsDto> parseTRC20OutgoingUSDTTransfers(
+    public List<SellDollarsDto> parseTRC20OutgoingTransfers(
             String jsonResponse,
             String walletAddress,
             String accountName,
             Set<String> assignedIds,
-            Map<String, Cliente> clientePorWallet) { // <-- nuevo parámetro
+            Map<String, Cliente> clientePorWallet) {
 
         List<SellDollarsDto> result = new ArrayList<>();
         LocalDate hoy = LocalDate.now(ZoneId.of("America/Bogota"));
@@ -162,14 +197,11 @@ public class TronScanService {
             if (data.isArray()) {
                 for (JsonNode tx : data) {
                     String fromAddress = tx.path("ownerAddress").asText();
-                    String toAddress = tx.path("toAddress").asText();
-                    String txId = tx.path("hash").asText();
-                    String symbol = tx.path("tokenInfo").path("tokenAbbr").asText();
+                    String toAddress   = tx.path("toAddress").asText();
+                    String txId        = tx.path("hash").asText();
+                    String symbol      = tx.path("tokenInfo").path("tokenAbbr").asText();
 
-                    if (fromAddress.equalsIgnoreCase(walletAddress) &&
-                        symbol.equalsIgnoreCase("trx") && // o "USDT" según el token
-                        !assignedIds.contains(txId)) {
-
+                    if (fromAddress.equalsIgnoreCase(walletAddress) && !assignedIds.contains(txId)) {
                         double amount = tx.path("amount").asDouble(0.0) / 1_000_000.0;
                         long timestamp = tx.path("timestamp").asLong();
                         LocalDate fechaTx = LocalDateTime.ofInstant(
@@ -180,6 +212,7 @@ public class TronScanService {
                         if (fechaTx.isEqual(hoy)) {
                             SellDollarsDto dto = new SellDollarsDto();
                             dto.setDollars(amount);
+                            dto.setCryptoSymbol(symbol);   // 🔥 token real enviado
                             dto.setTasa(0.0);
                             dto.setNameAccount(accountName);
                             dto.setIdWithdrawals(txId);
@@ -189,20 +222,11 @@ public class TronScanService {
                                     ZoneId.of("America/Bogota")
                             ));
 
-                            // --- Calcular comisión usando TronScan ---
+                            // --- Comisión en TRX ---
                             JsonNode txDetails = getTransactionDetailsFromTronScan(txId);
                             double feeInSun = txDetails.path("cost").path("energy_fee").asDouble(0.0);
-
                             double feeTRX = feeInSun / 1_000_000.0;
-                            if (feeTRX > 0) {
-                                double trxPriceAtTx = getTRXPriceAt(timestamp);
-                                double feeInUSDT = feeTRX * trxPriceAtTx;
-                                dto.setComision(feeInUSDT);
-                                dto.setEquivalenteciaTRX(feeTRX);
-                            } else {
-                                dto.setComision(0.0);
-                                dto.setEquivalenteciaTRX(0.0);
-                            }
+                            dto.setComision(feeTRX); // comisión real en TRX
 
                             // --- Asignar cliente si existe ---
                             Cliente cliente = clientePorWallet.get(toAddress.trim().toLowerCase());
@@ -220,6 +244,7 @@ public class TronScanService {
         }
         return result;
     }
+
 
 
 
@@ -264,7 +289,12 @@ public class TronScanService {
         }
     }
 
-    public List<BuyDollarsDto> parseTRC20IncomingUSDTTransfers(String jsonResponse, String walletAddress, String accountName, Set<String> assignedIds) {
+    public List<BuyDollarsDto> parseTRC20IncomingTransfers(
+            String jsonResponse,
+            String walletAddress,
+            String accountName,
+            Set<String> assignedIds) {
+
         List<BuyDollarsDto> result = new ArrayList<>();
         LocalDate hoy = LocalDate.now(ZoneId.of("America/Bogota"));
 
@@ -277,19 +307,28 @@ public class TronScanService {
                     String txId = tx.path("transaction_id").asText();
                     JsonNode tokenInfo = tx.path("token_info");
                     String symbol = tokenInfo.path("symbol").asText();
-                    if (toAddress.equalsIgnoreCase(walletAddress) && symbol.equalsIgnoreCase("USDT") && !assignedIds.contains(txId)) {
-                        double amount = Double.parseDouble(tx.path("value").asText("0")) / 1_000_000.0;
+                    double amount = Double.parseDouble(tx.path("value").asText("0")) / 1_000_000.0;
+
+                    if (toAddress.equalsIgnoreCase(walletAddress) && !assignedIds.contains(txId)) {
                         long timestamp = tx.path("block_timestamp").asLong();
-                        LocalDate fechaTx = LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp), ZoneId.of("America/Bogota")).toLocalDate();
+                        LocalDate fechaTx = LocalDateTime.ofInstant(
+                                Instant.ofEpochMilli(timestamp),
+                                ZoneId.of("America/Bogota")).toLocalDate();
 
                         if (fechaTx.isEqual(hoy)) {
                             BuyDollarsDto dto = new BuyDollarsDto();
-                            dto.setDollars(amount);
+                            dto.setAmount(amount);
+                            dto.setCryptoSymbol(symbol);     // 🔥 ahora acepta cualquier token
                             dto.setTasa(0.0);
                             dto.setNameAccount(accountName);
                             dto.setIdDeposit(txId);
                             dto.setPesos(0.0);
-                            dto.setDate(LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp), ZoneId.of("America/Bogota")));
+                            dto.setDate(LocalDateTime.ofInstant(
+                                    Instant.ofEpochMilli(timestamp),
+                                    ZoneId.of("America/Bogota")
+                            ));
+                            dto.setAsignada(false);
+
                             result.add(dto);
                         }
                     }
@@ -346,6 +385,41 @@ public class TronScanService {
             return 0.0;
         }
     }
+    
+ // TronScanService.java
+    public Map<String, Double> getBalancesByAsset(String walletAddress) {
+        Map<String, Double> out = new HashMap<>();
+        try {
+            String url = "https://apilist.tronscanapi.com/api/account?address=" + walletAddress;
+            String resp = restTemplate.getForObject(url, String.class);
+            JsonNode root = objectMapper.readTree(resp);
+
+            // TRX (en SUN)
+            double trxSun = root.path("balance").asDouble(0.0);
+            out.put("TRX", trxSun / 1_000_000.0);
+
+            // TRC20 tokens – distintos campos según endpoint
+            JsonNode arr = root.path("trc20token_balances");
+            if (!arr.isArray() || arr.size() == 0) arr = root.path("withPriceTokens");
+
+            if (arr.isArray()) {
+                for (JsonNode tok : arr) {
+                    String symbol = tok.path("tokenAbbr").asText(
+                            tok.path("tokenName").asText("UNKNOWN")
+                    ).toUpperCase();
+                    int dec = tok.path("tokenDecimal").asInt(6);
+                    String raw = tok.path("balance").asText(tok.path("quantity").asText("0"));
+                    double qty = 0.0;
+                    try { qty = Double.parseDouble(raw) / Math.pow(10, dec); } catch (NumberFormatException ignore) {}
+                    if (qty > 0) out.merge(symbol, qty, Double::sum);
+                }
+            }
+            return out;
+        } catch (Exception e) {
+            throw new RuntimeException("Error obteniendo snapshot TRUST: " + e.getMessage(), e);
+        }
+    }
+
 
 }
 

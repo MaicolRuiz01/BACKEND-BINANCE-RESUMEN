@@ -33,5 +33,7 @@ public class Movimiento {
 	private Double comision;
 	@ManyToOne
 	private Cliente pagoCliente;
+	@ManyToOne
+	private Supplier pagoProveedor;
 
 }

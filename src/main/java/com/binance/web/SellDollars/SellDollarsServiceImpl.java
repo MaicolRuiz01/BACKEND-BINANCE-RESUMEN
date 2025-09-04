@@ -15,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.binance.web.SaleP2P.AssignAccountDto;
+import com.binance.web.accountCryptoBalance.AccountCryptoBalanceService;
 import com.binance.web.model.Transaction;
 import com.binance.web.AccountCop.AccountCopService;
 import com.binance.web.BinanceAPI.BinanceService;
@@ -36,6 +37,7 @@ import com.binance.web.Repository.SellDollarsRepository;
 import com.binance.web.Repository.SupplierRepository;
 import com.binance.web.Entity.Supplier;
 import lombok.RequiredArgsConstructor;
+
 
 @Service
 @RequiredArgsConstructor
@@ -66,6 +68,8 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 	private TronScanController tronScanController;
 	@Autowired
 	private AverageRateRepository averageRateRepository;
+	@Autowired
+	private AccountCryptoBalanceService accountCryptoBalanceService;
 
 	@Override
 	@Transactional
@@ -85,8 +89,8 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 	    sale.setPesos(dto.getPesos());
 	    sale.setAsignado(true);
 	    // 3. Ajustar saldo de la cuenta Binance
-	    double currentBinanceBalance = accountBinance.getBalance() != null ? accountBinance.getBalance() : 0.0;
-	    accountBinance.setBalance(currentBinanceBalance - dto.getDollars());
+	    //double currentBinanceBalance = accountBinance.getBalance() != null ? accountBinance.getBalance() : 0.0;
+	  //  accountBinance.setBalance(currentBinanceBalance - dto.getDollars());
 
 	    // ⚡ Caso 1: Si hay cliente, se descuenta del saldo del cliente
 	    if (dto.getClienteId() != null) {
@@ -235,8 +239,18 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 	        supplierRepository.save(supplier);
 	    }
 
-	    // 6. Marcar como asignada y guardar
+	 // 6. Marcar como asignada
 	    existing.setAsignado(true);
+
+	    // 7. Descontar balance en la cuenta Binance (cripto vendida)
+	    String symbol = dto.getCryptoSymbol() != null ? dto.getCryptoSymbol() : "USDT";
+	    double comision = dto.getComision() != null ? dto.getComision() : 0.0;
+	    accountCryptoBalanceService.updateCryptoBalance(
+	        existing.getAccountBinance(),
+	        symbol,
+	        -(dto.getDollars() + comision)
+	    );
+
 	    return sellDollarsRepository.save(existing);
 	}
 	
@@ -378,6 +392,7 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 	    dto.setClienteId(
 	        venta.getCliente() != null ? venta.getCliente().getId() : null
 	    );
+	    dto.setEquivalenteciaTRX(venta.getEquivalenteciaTRX()); // ✅ Se añade la conversión a DTO
 
 	    if (venta.getSellDollarsAccounts() != null) {
 	        List<String> nombres = venta.getSellDollarsAccounts().stream()
@@ -544,21 +559,26 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 		        nueva.setIdWithdrawals(dto.getIdWithdrawals());
 		        nueva.setNameAccount(dto.getNameAccount());
 		        nueva.setDate(dto.getDate());
+		        
+		        // ✅ LÓGICA CORREGIDA: Asignar valores de dólares y TRX
 		        nueva.setDollars(dto.getDollars());
+		        nueva.setEquivalenteciaTRX(dto.getEquivalenteciaTRX());
+
 		        nueva.setTasa(0.0);
 		        nueva.setPesos(0.0);
 		        nueva.setAsignado(false);
 		        nueva.setAccountBinance(account);
 		        nueva.setComision(dto.getComision());
 
-		        // Descontar balance porque es una venta
-		        double actualBalance = account.getBalance() != null ? account.getBalance() : 0.0;
+		        String symbol = dto.getCryptoSymbol() != null ? dto.getCryptoSymbol() : "USDT";
 		        double comision = dto.getComision() != null ? dto.getComision() : 0.0;
-		        
-		        account.setBalance(actualBalance - dto.getDollars() - comision);
-		        
 
-		        accountBinanceRepository.save(account);
+		        accountCryptoBalanceService.updateCryptoBalance(
+		            account,
+		            symbol,
+		            -(dto.getDollars() + comision)
+		        );
+
 		        sellDollarsRepository.save(nueva);
 		    }
 		}catch (Exception e) {
@@ -569,3 +589,4 @@ public class SellDollarsServiceImpl implements SellDollarsService{
 	}
 
 }
+

@@ -2,6 +2,7 @@ package com.binance.web.AccountBinance;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 
 import com.binance.web.Entity.AccountBinance;
 
@@ -12,8 +13,10 @@ public interface AccountBinanceService {
     void updateAccountBinance(Integer id, AccountBinance accountBinance);
     void deleteAccountBinance(Integer id);
     AccountBinance findByName(String name);
+    /** @deprecated usar updateOrCreateCryptoBalance o subtractCryptoBalance */
+    @Deprecated
     void subtractBalance(String name, Double amount);
-    String getUSDTBalance(String name);
+    Double getUSDTBalance(String name);
     Double getEstimatedUSDTBalance(String name);
     BigDecimal getTotalBalance();
 
@@ -24,5 +27,20 @@ public interface AccountBinanceService {
     
     BigDecimal getTotalBalanceInterno();
     Double getTotalExternalBalance();
+	Double getCryptoBalance(String accountName, String cryptoSymbol);
+	void subtractCryptoBalance(Integer accountId, String cryptoSymbol, Double amount);
+	void updateOrCreateCryptoBalance(Integer accountId, String cryptoSymbol, Double amount);
+	
+	
+	Double getInternalUsdBalance(String accountName);        // ← nuevo
+    Double getTotalInternalUsdBalance();                     // ← opcional (todas las cuentas a USD)
+
+
+    void syncInternalBalancesFromExchange(String accountName);
+    void syncAllInternalBalancesFromExchange(); 
     
+ // 👉 nuevo: para obtener el snapshot externo (Spot+Funding) por símbolo
+    Map<String, Double> getExternalBalancesSnapshot(String accountName);
+	Map<String, Double> syncInternalBalancesFromExternal(String name);
+	void syncAllInternalBalancesFromExternal();
 }
