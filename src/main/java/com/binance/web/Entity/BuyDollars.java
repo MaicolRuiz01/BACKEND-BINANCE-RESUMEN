@@ -30,6 +30,9 @@ public class BuyDollars {
 	@ManyToOne
 	@JoinColumn(name = "supplier_id")
 	private Supplier supplier;
+	@ManyToOne
+	@JoinColumn(name = "cliente_id")
+	private Cliente cliente;
 	private LocalDateTime date;
 	private String nameAccount;
 	private String idDeposit;
@@ -37,5 +40,6 @@ public class BuyDollars {
 	@JoinColumn(name = "account_binance_id")
 	private AccountBinance accountBinance;
 	private Boolean asignada;
+
 	private Double saldoAnterior;
 }

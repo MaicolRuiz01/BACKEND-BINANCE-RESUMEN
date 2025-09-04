@@ -23,12 +23,12 @@ import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.AccountCryptoBalance;
 import com.binance.web.Entity.AverageRate;
 import com.binance.web.Entity.BuyDollars;
+import com.binance.web.Entity.Cliente;
 import com.binance.web.Entity.Supplier;
 import com.binance.web.Repository.AccountBinanceRepository;
 import com.binance.web.Repository.BuyDollarsRepository;
 import com.binance.web.Repository.ClienteRepository;
 import com.binance.web.Repository.SupplierRepository;
-import com.binance.web.Spot.SpotController;
 import com.binance.web.averageRate.AverageRateService;
 import com.binance.web.balance.PurchaseRate.PurchaseRateService;
 import com.binance.web.model.TransaccionesDTO;
@@ -36,17 +36,15 @@ import com.binance.web.model.TransaccionesDTO;
 @Service
 public class BuyDollarsServiceImpl implements BuyDollarsService {
 
-	@Autowired
-	private BuyDollarsRepository buyDollarsRepository;
+    @Autowired
+    private BuyDollarsRepository buyDollarsRepository;
 
-	@Autowired
-	private SupplierRepository supplierRepository;
+    @Autowired
+    private SupplierRepository supplierRepository;
 
-	@Autowired
-	private AccountBinanceRepository accountBinanceRepository;
-	
-	@Autowired
-	private AccountBinanceService accountBinanceService;
+    @Autowired
+    private ClienteRepository clienteRepository;
+
 
 	@Autowired
 	private PurchaseRateService purchaseRateService;
@@ -59,6 +57,10 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 	private SpotOrdersController spotOrdersController;
 	@Autowired
 	private TronScanController tronScanController;
+	@Autowired
+	private AccountBinanceService accountBinanceService; 
+	@Autowired
+	private AccountBinanceRepository accountBinanceRepository;
 	
 
 	/*
@@ -311,4 +313,5 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 		// TODO Auto-generated method stub
 		return null;
 	}
+
 }

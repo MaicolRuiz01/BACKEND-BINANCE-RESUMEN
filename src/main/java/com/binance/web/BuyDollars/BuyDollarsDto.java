@@ -24,5 +24,6 @@ public class BuyDollarsDto {
     private Double pesos;
     private Integer accountBinanceId;
 	private Integer supplierId;
+    private Integer clienteId;
 	private Boolean asignada;
 }
