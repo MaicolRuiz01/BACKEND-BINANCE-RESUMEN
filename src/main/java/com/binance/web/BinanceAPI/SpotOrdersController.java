@@ -345,14 +345,15 @@ public class SpotOrdersController {
         return ResponseEntity.ok(response);
     }
 
-    @GetMapping("/order-history")
-    public ResponseEntity<String> getOrderHistory(@RequestParam String account,
-            @RequestParam(defaultValue = "TRXUSDT") String symbol, @RequestParam(defaultValue = "100") int limit) {
-        try {
-            String response = binanceService.getOrderHistory(account, symbol, limit);
-            return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            return ResponseEntity.status(500).body("{\"error\": \"Error interno: " + e.getMessage() + "\"}");
-        }
-    }
+	/*
+	 * @GetMapping("/order-history") public ResponseEntity<String>
+	 * getOrderHistory(@RequestParam String account,
+	 * 
+	 * @RequestParam(defaultValue = "TRXUSDT") String
+	 * symbol, @RequestParam(defaultValue = "100") int limit) { try { String
+	 * response = binanceService.getOrderHistory(account, symbol, limit); return
+	 * ResponseEntity.ok(response); } catch (Exception e) { return
+	 * ResponseEntity.status(500).body("{\"error\": \"Error interno: " +
+	 * e.getMessage() + "\"}"); } }
+	 */
 }

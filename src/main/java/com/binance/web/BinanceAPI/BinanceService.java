@@ -973,23 +973,12 @@ public class BinanceService {
 	}
 
 	// Método para obtener el historial de órdenes completadas o canceladas
-	public String getOrderHistory(String account, String symbol, int limit) throws Exception {
-		String[] credentials = getApiCredentials(account);
-		if (credentials == null) {
-			return "{\"error\": \"Cuenta no válida.\"}";
-		}
-
-		String apiKey = credentials[0];
-		String secretKey = credentials[1];
-
-		long timestamp = getServerTime();
-
-		String query = "symbol=" + symbol + "&timestamp=" + timestamp + "&recvWindow=60000" + "&limit=" + limit;
-
-		String signature = hmacSha256(secretKey, query);
-		String url = "https://api.binance.com/api/v3/allOrders?" + query + "&signature=" + signature;
-
-		return sendBinanceRequestWithProxy(url, apiKey);
+	public String getOrderHistory(String apiKey, String secretKey, String symbol, int limit) throws Exception {
+	    long ts = getServerTime();
+	    String q = "symbol="+symbol+"&timestamp="+ts+"&recvWindow=60000&limit="+limit;
+	    String sig = hmacSha256(secretKey, q);
+	    String url = "https://api.binance.com/api/v3/allOrders?" + q + "&signature=" + sig;
+	    return sendBinanceRequestWithProxy(url, apiKey);
 	}
 	
 	public Double getPriceInUSDT(String asset) {
@@ -1090,26 +1079,12 @@ public class BinanceService {
 
 	// En BinanceService.java (añade al final)
 
-	public String getMyTradesByOrder(String account, String symbol, long orderId) {
-	    try {
-	        String[] creds = getApiCredentials(account);
-	        if (creds == null) return "{\"error\":\"Cuenta no válida.\"}";
-	        String apiKey = creds[0], secret = creds[1];
-
-	        long ts = getServerTime();
-	        // orderId filtra los fills de esa orden
-	        String q = "symbol=" + symbol +
-	                   "&orderId=" + orderId +
-	                   "&limit=1000" +
-	                   "&timestamp=" + ts +
-	                   "&recvWindow=60000";
-	        String sig = hmacSha256(secret, q);
-	        String url = "https://api.binance.com/api/v3/myTrades?" + q + "&signature=" + sig;
-
-	        return sendBinanceRequestWithProxy(url, apiKey);
-	    } catch (Exception e) {
-	        return "{\"error\":\"" + e.getMessage() + "\"}";
-	    }
+	public String getMyTradesByOrder(String apiKey, String secretKey, String symbol, long orderId) throws Exception {
+	    long ts = getServerTime();
+	    String q = "symbol="+symbol+"&orderId="+orderId+"&timestamp="+ts+"&recvWindow=60000";
+	    String sig = hmacSha256(secretKey, q);
+	    String url = "https://api.binance.com/api/v3/myTrades?" + q + "&signature=" + sig;
+	    return sendBinanceRequestWithProxy(url, apiKey);
 	}
 
 	/** Activos con balance > 0 (spot) para inferir símbolos probables. */

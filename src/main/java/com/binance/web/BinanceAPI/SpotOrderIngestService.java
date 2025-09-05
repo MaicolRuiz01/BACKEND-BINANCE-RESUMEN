@@ -8,6 +8,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.springframework.stereotype.Service;
 
@@ -30,224 +31,198 @@ import lombok.RequiredArgsConstructor;
 @Transactional
 public class SpotOrderIngestService {
 
-	private final BinanceService binanceService;
-	private final AccountBinanceRepository accountRepo;
-	private final SpotOrderRepository spotOrderRepo;
-	private final AccountBinanceService accountService;
+    private final BinanceService binanceService;
+    private final AccountBinanceRepository accountRepo;
+    private final SpotOrderRepository spotOrderRepo;
+    private final AccountBinanceService accountService;
 
-	private static final List<String> QUOTES = List.of("USDT", "USDC", "FDUSD", "BUSD", "TUSD", "USDP", "DAI");
-	private static final Set<String> SIMBOLOS_BASE_FIJOS = Set.of("BTC", "ETH", "TRX", "BNB", "XRP", "SOL", "TON"); // opcional
+ // solo cotizamos en USDT o USDC
+    private static final List<String> QUOTES = List.of("USDT","USDC");
 
-	private String detectQuote(String s) {
-		String u = s.toUpperCase();
-		for (String q : QUOTES)
-			if (u.endsWith(q))
-				return q;
-		throw new RuntimeException("Símbolo no soportado (quote): " + s);
-	}
+    // solo consideramos TRX como base frecuente
+    private static final Set<String> BASE_WHITELIST = Set.of("TRX");
 
-	/** Deducción dinámica de símbolos a consultar para UNA cuenta. */
-	private Set<String> resolverSimbolosParaCuenta(String accountName) {
-		Set<String> assets = new HashSet<>(binanceService.getNonZeroAssets(accountName));
-		assets.addAll(SIMBOLOS_BASE_FIJOS); // cobertura adicional
-		Set<String> symbols = new HashSet<>();
-		for (String base : assets) {
-			String b = base.trim().toUpperCase();
-			if (b.isBlank())
-				continue;
-			for (String q : QUOTES) {
-				// Evita “USDTUSDT”
-				if (b.equalsIgnoreCase(q))
-					continue;
-				symbols.add(b + q);
-			}
-		}
-		return symbols;
-	}
+    // por si hoy no hay TRX en balance, igual lo consultamos
+    private static final Set<String> SIMBOLOS_BASE_FIJOS = BASE_WHITELIST;
 
-	/**
-	 * Importa TODO para todas las cuentas BINANCE, símbolos deducidos, límite por
-	 * símbolo.
-	 */
-	public int importarTodasLasCuentasAuto(int limitPorSimbolo) {
-	    Set<String> tradables = binanceService.getTradableSymbolsByQuotes(QUOTES);
-	    int total = 0;
+    
+ // 🔹 caché simple por ejecución del servicio
+    private final Map<String, Double> priceCache = new ConcurrentHashMap<>();
 
-	    for (AccountBinance acc : accountRepo.findByTipo("BINANCE")) {
-	        Set<String> symbols;
-	        try {
-	            symbols = resolverSimbolosParaCuenta(acc.getName(), tradables);
-	        } catch (RuntimeException e) {
-	            System.err.println("⏭️ Saltando cuenta " + acc.getName() + ": " + e.getMessage());
-	            continue; // no frenamos todo
-	        }
+    private double getUsdtPriceCached(String asset) {
+        String a = asset == null ? "" : asset.toUpperCase();
+        if ("USDT".equals(a) || "USDC".equals(a)) return 1.0;
+        return priceCache.computeIfAbsent(a, x -> {
+            try { return binanceService.getPriceInUsdt(x); } catch (Exception e) { return 0.0; }
+        });
+    }
 
-	        for (String s : symbols) {
-	            try {
-	                total += importSymbol(acc, s, limitPorSimbolo);
-	            } catch (Exception ex) {
-	                System.err.println("⏭️ Saltando símbolo " + s + " (" + acc.getName() + "): " + ex.getMessage());
-	            }
-	        }
-	    }
-	    return total;
-	}
+    private String detectQuote(String s) {
+        String u = s.toUpperCase();
+        for (String q : QUOTES) if (u.endsWith(q)) return q;
+        throw new RuntimeException("Símbolo no soportado (quote): " + s);
+    }
+
+    /** Deducción dinámica super-reducida: solo TRX como base, quotes USDT/USDC */
+    private Set<String> resolverSimbolosParaCuenta(AccountBinance acc) {
+        Set<String> bases = new HashSet<>();
+        try {
+            bases.addAll(binanceService.getNonZeroAssets(acc.getName())); // puede fallar (401)
+        } catch (RuntimeException e) {
+            System.err.println("⚠️ No pude leer balances de " + acc.getName() + ": " + e.getMessage());
+        }
+
+        // nos quedamos solo con TRX (evita DOGE, SHIB, etc.)
+        bases.retainAll(BASE_WHITELIST);
+
+        // y aseguramos TRX aunque el balance sea 0 hoy
+        bases.addAll(SIMBOLOS_BASE_FIJOS);
+
+        Set<String> symbols = new HashSet<>();
+        for (String base : bases) {
+            String b = base == null ? "" : base.trim().toUpperCase();
+            if (b.isBlank()) continue;
+            for (String q : QUOTES) {
+                if (b.equalsIgnoreCase(q)) continue; // evita USDTUSDT, USDCUSDC
+                symbols.add(b + q);                  // TRXUSDT, TRXUSDC
+            }
+        }
+        return symbols;
+    }
 
 
-	/** Importa para una cuenta con lista de símbolos explícita. */
-	public int importarCuenta(String accountName, List<String> symbols, int limit) {
-		AccountBinance acc = accountRepo.findByName(accountName);
-		if (acc == null || !"BINANCE".equalsIgnoreCase(acc.getTipo()))
-			throw new RuntimeException("Cuenta BINANCE no encontrada: " + accountName);
+    /** Importa TODO para todas las cuentas BINANCE. */
+    public int importarTodasLasCuentasAuto(int limitPorSimbolo) {
+        int total = 0;
+        for (AccountBinance acc : accountRepo.findByTipo("BINANCE")) {
+            Set<String> symbols = resolverSimbolosParaCuenta(acc);
+            for (String s : symbols) {
+                try {
+                    total += importSymbol(acc, s, limitPorSimbolo);
+                } catch (Exception ex) {
+                    System.err.println("⏭️ Saltando símbolo " + s + " (" + acc.getName() + "): " + ex.getMessage());
+                }
+            }
+        }
+        return total;
+    }
 
-		int inserted = 0;
-		for (String s : symbols)
-			inserted += importSymbol(acc, s.toUpperCase(), limit);
-		return inserted;
-	}
+    /** Importa para una cuenta con lista de símbolos explícita. */
+    public int importarCuenta(String accountName, List<String> symbols, int limit) {
+        AccountBinance acc = accountRepo.findByName(accountName);
+        if (acc == null || !"BINANCE".equalsIgnoreCase(acc.getTipo()))
+            throw new RuntimeException("Cuenta BINANCE no encontrada: " + accountName);
 
-	/**
-	 * Importa un símbolo: guarda FILLED, calcula comisiones/avg, ajusta balances
-	 * (idempotente).
-	 */
-	private int importSymbol(AccountBinance acc, String symbol, int limit) {
-		try {
-			String raw = binanceService.getOrderHistory(acc.getName(), symbol, limit);
-			JsonElement parsed = JsonParser.parseString(raw);
-			if (!parsed.isJsonArray())
-				return 0;
+        int inserted = 0;
+        for (String s : symbols) inserted += importSymbol(acc, s.toUpperCase(), limit);
+        return inserted;
+    }
 
-			String quote = detectQuote(symbol);
-			String base = symbol.substring(0, symbol.length() - quote.length());
+    /** Importa un símbolo (idempotente): guarda FILLED, calcula fees/avg y ajusta balance. */
+    private int importSymbol(AccountBinance acc, String symbol, int limit) {
+        try {
+            // ✅ AQUÍ sí puedes obtener credenciales del 'acc'
+            final String apiKey = acc.getApiKey();
+            final String secret = acc.getApiSecret();
 
-			int count = 0;
-			for (JsonElement el : parsed.getAsJsonArray()) {
-				JsonObject o = el.getAsJsonObject();
-				if (!"FILLED".equalsIgnoreCase(o.get("status").getAsString()))
-					continue;
+            // Usa las sobrecargas nuevas (si ya las creaste). Si no, deja tus métodos viejos con accountName.
+            String raw = binanceService.getOrderHistory(apiKey, secret, symbol, limit);
+            JsonElement parsed = JsonParser.parseString(raw);
+            if (!parsed.isJsonArray()) return 0;
 
-				long orderId = o.get("orderId").getAsLong();
-				if (spotOrderRepo.existsByAccountAndOrderId(acc, orderId))
-					continue; // idempotencia
+            String quote = detectQuote(symbol);
+            String base  = symbol.substring(0, symbol.length() - quote.length());
 
-				String side = o.get("side").getAsString();
-				double execBase = o.get("executedQty").getAsDouble();
-				double execQ = o.get("cummulativeQuoteQty").getAsDouble();
+            int count = 0;
+            for (JsonElement el : parsed.getAsJsonArray()) {
+                JsonObject o = el.getAsJsonObject();
+                if (!"FILLED".equalsIgnoreCase(o.get("status").getAsString())) continue;
 
-				// --- fills: comisiones exactas y fecha real de ejecución (último fill)
-				String fillsRaw = binanceService.getMyTradesByOrder(acc.getName(), symbol, orderId);
-				Map<String, Double> feeByAsset = new HashMap<>();
-				double notionalQuote = 0.0, qtyBaseSum = 0.0;
-				long lastFillTs = 0L;
+                long orderId = o.get("orderId").getAsLong();
+                if (spotOrderRepo.existsByAccountAndOrderId(acc, orderId)) continue;
 
-				JsonElement fillsParsed = JsonParser.parseString(fillsRaw);
-				if (fillsParsed.isJsonArray()) {
-					for (JsonElement fe : fillsParsed.getAsJsonArray()) {
-						JsonObject f = fe.getAsJsonObject();
-						double qty = f.get("qty").getAsDouble();
-						double quoteQty = f.get("quoteQty").getAsDouble();
-						qtyBaseSum += qty;
-						notionalQuote += quoteQty;
+                String side     = o.get("side").getAsString();
+                double execBase = o.get("executedQty").getAsDouble();
+                double execQ    = o.get("cummulativeQuoteQty").getAsDouble();
 
-						String cAsset = f.get("commissionAsset").getAsString();
-						double cQty = f.get("commission").getAsDouble();
-						feeByAsset.merge(cAsset, cQty, Double::sum);
+                // Fills (credenciales aquí también)
+                String fillsRaw = binanceService.getMyTradesByOrder(apiKey, secret, symbol, orderId);
+                Map<String, Double> feeByAsset = new HashMap<>();
+                double notionalQuote = 0.0, qtyBaseSum = 0.0;
+                long lastFillTs = 0L;
 
-						if (f.has("time"))
-							lastFillTs = Math.max(lastFillTs, f.get("time").getAsLong());
-					}
-				}
+                JsonElement fillsParsed = JsonParser.parseString(fillsRaw);
+                if (fillsParsed.isJsonArray()) {
+                    for (JsonElement fe : fillsParsed.getAsJsonArray()) {
+                        JsonObject f = fe.getAsJsonObject();
+                        double qty      = f.get("qty").getAsDouble();
+                        double quoteQty = f.get("quoteQty").getAsDouble();
+                        qtyBaseSum   += qty;
+                        notionalQuote += quoteQty;
 
-				double avgPrice = (qtyBaseSum > 0 ? notionalQuote / qtyBaseSum
-						: (execBase > 0 ? execQ / execBase : 0.0));
+                        String cAsset  = f.get("commissionAsset").getAsString();
+                        double cQty    = f.get("commission").getAsDouble();
+                        feeByAsset.merge(cAsset, cQty, Double::sum);
 
-				double feeUsdt = 0.0; // aplanado a USDT
-				for (var e : feeByAsset.entrySet()) {
-					double px = binanceService.getPriceInUsdt(e.getKey());
-					if (px <= 0 && "USDT".equalsIgnoreCase(e.getKey()))
-						px = 1.0;
-					feeUsdt += e.getValue() * Math.max(px, 0.0);
-				}
+                        if (f.has("time")) lastFillTs = Math.max(lastFillTs, f.get("time").getAsLong());
+                    }
+                }
+                double avgPrice = qtyBaseSum > 0 ? notionalQuote / qtyBaseSum : (execBase > 0 ? execQ/execBase : 0.0);
 
-				// fecha real: último fill; si no hubo fills, usa updateTime o time
-				long ts = (lastFillTs > 0 ? lastFillTs
-						: (o.has("updateTime") ? o.get("updateTime").getAsLong() : o.get("time").getAsLong()));
+                double feeUsdt = 0.0;
+                for (var e : feeByAsset.entrySet()) {
+                	double px = getUsdtPriceCached(e.getKey());
+                	feeUsdt += e.getValue() * Math.max(px, 0.0);
 
-				SpotOrder so = new SpotOrder();
-				so.setAccount(acc);
-				so.setOrderId(orderId);
-				so.setClientOrderId(o.get("clientOrderId").getAsString());
-				so.setSymbol(symbol);
-				so.setBaseAsset(base);
-				so.setQuoteAsset(quote);
-				so.setSide(side);
-				so.setType(o.get("type").getAsString());
-				so.setStatus("FILLED");
-				so.setExecutedBaseQty(execBase);
-				so.setExecutedQuoteQty(execQ);
-				so.setAvgPrice(avgPrice);
-				so.setFeeTotalUsdt(feeUsdt);
-				so.setFeeBreakdownJson(new Gson().toJson(feeByAsset));
-				so.setFilledAt(LocalDateTime.ofInstant(Instant.ofEpochMilli(ts), ZoneId.of("America/Bogota")));
-				spotOrderRepo.save(so);
+                }
 
-				// Ajuste de balances internos exacto (compra/vende + comisiones por activo)
-				applyDeltas(acc, base, quote, side, execBase, execQ, feeByAsset);
+                long ts = (lastFillTs > 0 ? lastFillTs
+                        : (o.has("updateTime") ? o.get("updateTime").getAsLong() : o.get("time").getAsLong()));
 
-				count++;
-			}
-			return count;
-		} catch (Exception e) {
-			throw new RuntimeException("Import " + symbol + " (" + acc.getName() + "): " + e.getMessage(), e);
-		}
-	}
+                SpotOrder so = new SpotOrder();
+                so.setAccount(acc);
+                so.setOrderId(orderId);
+                so.setClientOrderId(o.get("clientOrderId").getAsString());
+                so.setSymbol(symbol);
+                so.setBaseAsset(base);
+                so.setQuoteAsset(quote);
+                so.setSide(side);
+                so.setType(o.get("type").getAsString());
+                so.setStatus("FILLED");
+                so.setExecutedBaseQty(execBase);
+                so.setExecutedQuoteQty(execQ);
+                so.setAvgPrice(avgPrice);
+                so.setFeeTotalUsdt(feeUsdt);
+                so.setFeeBreakdownJson(new Gson().toJson(feeByAsset));
+                so.setFilledAt(LocalDateTime.ofInstant(Instant.ofEpochMilli(ts), ZoneId.of("America/Bogota")));
+                spotOrderRepo.save(so);
 
-	private void applyDeltas(AccountBinance acc, String base, String quote, String side, double execBase,
-			double execQuote, Map<String, Double> feeByAsset) {
+                applyDeltas(acc, base, quote, side, execBase, execQ, feeByAsset);
+                count++;
+            }
+            return count;
+        } catch (Exception e) {
+            throw new RuntimeException("Import " + symbol + " (" + acc.getName() + "): " + e.getMessage(), e);
+        }
+    }
 
-		double feeBase = feeByAsset.getOrDefault(base, 0.0);
-		double feeQuote = feeByAsset.getOrDefault(quote, 0.0);
+    private void applyDeltas(AccountBinance acc, String base, String quote, String side,
+                             double execBase, double execQuote, Map<String, Double> feeByAsset) {
+        double feeBase  = feeByAsset.getOrDefault(base, 0.0);
+        double feeQuote = feeByAsset.getOrDefault(quote, 0.0);
 
-		if ("BUY".equalsIgnoreCase(side)) {
-			accountService.updateOrCreateCryptoBalance(acc.getId(), base, +execBase - feeBase);
-			accountService.updateOrCreateCryptoBalance(acc.getId(), quote, -execQuote - feeQuote);
-		} else {
-			accountService.updateOrCreateCryptoBalance(acc.getId(), base, -execBase - feeBase);
-			accountService.updateOrCreateCryptoBalance(acc.getId(), quote, +execQuote - feeQuote);
-		}
+        if ("BUY".equalsIgnoreCase(side)) {
+            accountService.updateOrCreateCryptoBalance(acc.getId(), base,  +execBase - feeBase);
+            accountService.updateOrCreateCryptoBalance(acc.getId(), quote, -execQuote - feeQuote);
+        } else {
+            accountService.updateOrCreateCryptoBalance(acc.getId(), base,  -execBase - feeBase);
+            accountService.updateOrCreateCryptoBalance(acc.getId(), quote, +execQuote - feeQuote);
+        }
 
-		for (var e : feeByAsset.entrySet()) {
-			String asset = e.getKey();
-			if (asset.equalsIgnoreCase(base) || asset.equalsIgnoreCase(quote))
-				continue;
-			accountService.updateOrCreateCryptoBalance(acc.getId(), asset, -e.getValue());
-		}
-	}
-	// SpotOrderIngestService.java
-	private Set<String> resolverSimbolosParaCuenta(String accountName, Set<String> tradables) {
-	    Set<String> assets = new HashSet<>();
-	    try {
-	        assets.addAll(binanceService.getNonZeroAssets(accountName)); // puede lanzar 401
-	    } catch (RuntimeException e) {
-	        System.err.println("⚠️ No pude leer balances de " + accountName + ": " + e.getMessage());
-	        // seguimos con un set vacío; opcional: agregar seeds
-	    }
-
-	    // opcional: añadir bases comunes como fallback
-	    assets.addAll(SIMBOLOS_BASE_FIJOS); // p.ej. Set.of("BTC","ETH","TRX")
-
-	    Set<String> symbols = new HashSet<>();
-	    for (String base : assets) {
-	        String b = base.trim().toUpperCase();
-	        if (b.isBlank()) continue;
-	        for (String q : QUOTES) {
-	            if (b.equalsIgnoreCase(q)) continue;
-	            String candidate = b + q;
-	            if (tradables.contains(candidate)) symbols.add(candidate);
-	        }
-	    }
-	    return symbols;
-	}
-
-
+        for (var e : feeByAsset.entrySet()) {
+            String asset = e.getKey();
+            if (asset.equalsIgnoreCase(base) || asset.equalsIgnoreCase(quote)) continue;
+            accountService.updateOrCreateCryptoBalance(acc.getId(), asset, -e.getValue());
+        }
+    }
 }

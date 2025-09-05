@@ -65,16 +65,26 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
     
     @Override
     public void updateOrCreateCryptoBalance(Integer accountId, String cryptoSymbol, Double delta) {
-        if (delta == null || cryptoSymbol == null) return;
+        if (accountId == null || cryptoSymbol == null || delta == null) return;
 
-        AccountBinance account = accountBinanceRepository.findById(accountId)
-            .orElseThrow(() -> new RuntimeException("Account not found: id=" + accountId));
+        // Proxy sin ir a DB (no accedas a propiedades del account)
+        AccountBinance accountRef = accountBinanceRepository.getReferenceById(accountId);
 
-        AccountCryptoBalance bal = findOrCreate(account, cryptoSymbol);
+        AccountCryptoBalance bal = accountCryptoBalanceRepository
+            .findByAccountBinance_IdAndCryptoSymbol(accountId, cryptoSymbol)
+            .orElseGet(() -> {
+                AccountCryptoBalance b = new AccountCryptoBalance();
+                b.setAccountBinance(accountRef);
+                b.setCryptoSymbol(cryptoSymbol.toUpperCase());
+                b.setBalance(0.0);
+                return b;
+            });
+
         double current = bal.getBalance() != null ? bal.getBalance() : 0.0;
         bal.setBalance(current + delta);
         accountCryptoBalanceRepository.save(bal);
     }
+
 
     @Override
     public List<AccountBinance> findAllAccountBinance() {
