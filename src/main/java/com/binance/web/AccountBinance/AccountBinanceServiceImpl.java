@@ -2,6 +2,7 @@ package com.binance.web.AccountBinance;
 
 import java.math.BigDecimal;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -39,6 +40,11 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
     private AverageRateRepository averageRateRepository;
     @Autowired
     private AccountCryptoBalanceRepository accountCryptoBalanceRepository;
+    
+    private volatile Set<String> dynamicStables = new HashSet<>(Set.of("USDT"));
+    private volatile long dynamicStablesTs = 0L;
+    private static final long STABLES_TTL_MS = 5 * 60 * 1000; // 5 min
+    private static final double STABLE_TOL = 0.02;            // ±2 %
 
 
     public AccountBinanceServiceImpl(
@@ -61,6 +67,63 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
                 b.setBalance(0.0);
                 return accountCryptoBalanceRepository.save(b);
             });
+    }
+    
+    private Set<String> getDynamicStables() {
+        long now = System.currentTimeMillis();
+        if (now - dynamicStablesTs < STABLES_TTL_MS && !dynamicStables.isEmpty()) {
+            return dynamicStables;
+        }
+        try {
+            List<String> syms = accountCryptoBalanceRepository.findDistinctSymbols();
+            Map<String, Double> pc = new HashMap<>();
+            Set<String> st = new HashSet<>();
+            st.add("USDT"); // siempre
+
+            for (String s : syms) {
+                if (s == null) continue;
+                String u = s.trim().toUpperCase();
+                if (u.isBlank() || "USDT".equals(u)) continue;
+
+                double px = usdtPriceRaw(u, pc); // precio directo
+                if (px > 0 && Math.abs(px - 1.0) <= STABLE_TOL) st.add(u);
+            }
+            dynamicStables = st;
+            dynamicStablesTs = now;
+        } catch (Exception ignore) {}
+        return dynamicStables;
+    }
+ // Precio con caché (respeta stables)
+    private double usdtPrice(String symbol, Map<String, Double> cache) {
+        if (symbol == null) return 0.0;
+        String s = symbol.trim().toUpperCase();
+        if (s.isEmpty()) return 0.0;
+        if ("USDT".equals(s) || getDynamicStables().contains(s)) return 1.0;
+
+        return cache.computeIfAbsent(s, key -> {
+            try {
+                Double px = binanceService.getPriceInUSDT(key);
+                return px != null ? px : 0.0;
+            } catch (Exception e) {
+                return 0.0;
+            }
+        });
+    }
+
+    // Versión “cruda” (sin tratar como stable) – solo para detectar stables
+    private double usdtPriceRaw(String symbol, Map<String, Double> cache) {
+        if (symbol == null) return 0.0;
+        String s = symbol.trim().toUpperCase();
+        if (s.isEmpty()) return 0.0;
+
+        return cache.computeIfAbsent(s, key -> {
+            try {
+                Double px = binanceService.getPriceInUSDT(key);
+                return px != null ? px : 0.0;
+            } catch (Exception e) {
+                return 0.0;
+            }
+        });
     }
     
     @Override
@@ -226,35 +289,51 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
     
     @Override
     public BigDecimal getTotalBalance() {
-        List<AccountBinance> accounts = accountBinanceRepository.findAll();
-        
-        BigDecimal totalBalance = accounts.stream()
-            .flatMap(a -> a.getCryptoBalances().stream())
-            .map(AccountCryptoBalance::getBalance)
-            .filter(Objects::nonNull)
-            .map(BigDecimal::valueOf)
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
-            
-        AverageRate rate = averageRateRepository.findTopByOrderByIdDesc()
-            .orElseThrow(() -> new RuntimeException("No purchase rate available"));
+        // primero calculamos el total en USDT (igual que arriba)
+        List<AccountCryptoBalanceRepository.SymbolQty> rows =
+                accountCryptoBalanceRepository.sumBySymbol();
 
-        if (rate.getAverageRate() == null) {
-            throw new RuntimeException("No purchase rate available");
+        Map<String, Double> priceCache = new HashMap<>();
+        double totalUsdt = 0.0;
+
+        for (var r : rows) {
+            String sym = r.getSymbol();
+            double qty = r.getQty() != null ? r.getQty() : 0.0;
+            if (qty <= 0) continue;
+
+            double px = usdtPrice(sym, priceCache);
+            totalUsdt += qty * px;
         }
-        
-        return totalBalance.multiply(BigDecimal.valueOf(rate.getAverageRate()));
+
+        // aplica tasa
+        AverageRate rate = averageRateRepository.findTopByOrderByIdDesc()
+                .orElseThrow(() -> new RuntimeException("No purchase rate available"));
+        double tasa = Optional.ofNullable(rate.getAverageRate())
+                .orElseThrow(() -> new RuntimeException("No purchase rate available"));
+
+        return BigDecimal.valueOf(totalUsdt).multiply(BigDecimal.valueOf(tasa));
     }
+
     
-    // ✅ Modificar este método para usar la nueva tabla
     @Override
     public BigDecimal getTotalBalanceInterno() {
-        return accountBinanceRepository.findAll().stream()
-            .flatMap(a -> a.getCryptoBalances().stream())
-            .map(AccountCryptoBalance::getBalance)
-            .filter(Objects::nonNull)
-            .map(BigDecimal::valueOf)
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
+        List<AccountCryptoBalanceRepository.SymbolQty> rows =
+                accountCryptoBalanceRepository.sumBySymbol();
+
+        Map<String, Double> priceCache = new HashMap<>();
+        double totalUsdt = 0.0;
+
+        for (var r : rows) {
+            String sym = r.getSymbol();
+            double qty = r.getQty() != null ? r.getQty() : 0.0;
+            if (qty <= 0) continue;
+
+            double px = usdtPrice(sym, priceCache); // 1.0 si es stable detectada
+            totalUsdt += qty * px;
+        }
+        return BigDecimal.valueOf(totalUsdt);
     }
+
     
     private double priceInUSDT(String symbol) {
         if (symbol == null) return 0.0;
@@ -273,20 +352,23 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
     // Balance interno de UNA cuenta, convertido a USD
     @Override
     public Double getInternalUsdBalance(String accountName) {
-        AccountBinance acc = accountBinanceRepository.findByName(accountName);
-        if (acc == null) return 0.0;
+        List<AccountCryptoBalanceRepository.SymbolQty> rows =
+                accountCryptoBalanceRepository.sumBySymbolForAccount(accountName);
 
-        double sum = 0.0;
-        for (AccountCryptoBalance b : acc.getCryptoBalances()) {
-            if (b == null) continue;
-            double qty = b.getBalance() != null ? b.getBalance() : 0.0;
+        Map<String, Double> priceCache = new HashMap<>();
+        double totalUsdt = 0.0;
+
+        for (var r : rows) {
+            String sym = r.getSymbol();
+            double qty = r.getQty() != null ? r.getQty() : 0.0;
             if (qty <= 0) continue;
-            String symbol = b.getCryptoSymbol();
-            double px = priceInUSDT(symbol);
-            sum += qty * px;
+
+            double px = usdtPrice(sym, priceCache);
+            totalUsdt += qty * px;
         }
-        return sum;
+        return totalUsdt;
     }
+
 
     // (Opcional) Suma de TODAS las cuentas, convertido a USD
     @Override
