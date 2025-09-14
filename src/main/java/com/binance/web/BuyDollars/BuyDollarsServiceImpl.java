@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.binance.web.AccountBinance.AccountBinanceService;
 import com.binance.web.BinanceAPI.PaymentController;
+import com.binance.web.BinanceAPI.SolanaController;
 import com.binance.web.BinanceAPI.SpotOrdersController;
 import com.binance.web.BinanceAPI.TronScanController;
 import com.binance.web.Entity.AccountBinance;
@@ -61,6 +62,9 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 	private AccountBinanceService accountBinanceService; 
 	@Autowired
 	private AccountBinanceRepository accountBinanceRepository;
+	@Autowired
+	private SolanaController solanaController;
+
 	
 
 	/*
@@ -190,7 +194,7 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
             List<BuyDollarsDto> binancePay = binancePayController.getComprasNoRegistradas().getBody();
             List<BuyDollarsDto> spot = spotOrdersController.getComprasNoRegistradas(20).getBody();
             List<BuyDollarsDto> trust = tronScanController.getUSDTIncomingTransfers().getBody();
-
+            List<BuyDollarsDto> sol = solanaController.getSolanaIncomingTransfers().getBody();
             Set<String> existentes = buyDollarsRepository.findAll().stream()
                 .map(BuyDollars::getIdDeposit)
                 .collect(Collectors.toSet());
@@ -199,7 +203,7 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
             if (binancePay != null) todas.addAll(binancePay);
             if (spot != null) todas.addAll(spot);
             if (trust != null) todas.addAll(trust);
-
+            if (sol != null) todas.addAll(sol);
             todas.sort(Comparator.comparing(BuyDollarsDto::getDate));
 
             for (BuyDollarsDto dto : todas) {
