@@ -1,7 +1,4 @@
 package com.binance.web.BinanceAPI;
-
-
-
 import com.binance.web.Entity.Cliente;
 import com.binance.web.SellDollars.SellDollarsDto;
 import com.binance.web.BinanceAPI.BinanceService;
@@ -11,7 +8,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.util.UriComponentsBuilder;
 
 import java.time.*;
 import java.util.*;
@@ -40,18 +39,21 @@ public class SolscanService {
     // Pública (por si no hay API key / fallback)
     private static final String PUB_BASE = "https://public-api.solscan.io";
 
-    /* ===================== Helpers de headers ===================== */
-
     private HttpEntity<Void> solscanEntity() {
         HttpHeaders h = new HttpHeaders();
-        // Solscan Pro acepta "Authorization: Bearer <token>".
-        // También hay instalaciones que aceptan 'token:<jwt>'. Enviamos ambos inofensivamente.
+        h.set("Accept", "application/json");
+        // Algunos WAF (Cloudflare) bloquean si no hay User-Agent razonable
+        h.set("User-Agent", "PochonanceBot/1.0 (+support@tudominio.com)");
+
         if (solscanApiKey != null && !solscanApiKey.isBlank()) {
-            h.set("Authorization", "Bearer " + solscanApiKey);
+            // variantes que distintos despliegues aceptan
+            h.set("Authorization", "Bearer " + solscanApiKey); // v2
             h.set("token", solscanApiKey);
+            h.set("X-API-KEY", solscanApiKey);
         }
         return new HttpEntity<>(h);
     }
+
 
     private String pickBase() {
         return (solscanApiKey != null && !solscanApiKey.isBlank()) ? PRO_BASE : PUB_BASE;
@@ -72,12 +74,24 @@ public class SolscanService {
         return restTemplate.exchange(url, HttpMethod.GET, solscanEntity(), String.class).getBody();
     }
 
-    /** Transferencias SPL (USDC, etc.) de una cuenta. */
     public String getSplTransfersRaw(String address, int limit) {
-        // en algunos esquemas: /account/splTransfers?address=...&limit=...
-        String url = pickBase() + "/account/splTransfers?address=" + address + "&limit=" + limit;
-        return restTemplate.exchange(url, HttpMethod.GET, solscanEntity(), String.class).getBody();
+        String base = pickBase();
+        String url = UriComponentsBuilder.fromHttpUrl(base + "/account/splTransfers")
+                .queryParam("address", address)
+                .queryParam("limit", (limit <= 0 ? 50 : limit))
+                .toUriString();
+
+        System.out.println("➡️ Solscan splTransfers URL=" + url);
+
+        try {
+            return restTemplate.exchange(url, HttpMethod.GET, solscanEntity(), String.class).getBody();
+        } catch (HttpClientErrorException.Forbidden e) {
+            // ⚠️ Cloudflare bloqueó: no tumbes tu proceso, devuelve vacío
+            System.out.println("🚫 403 Solscan (splTransfers). Devuelvo vacío. " + e.getMessage());
+            return "{\"data\":[]}";
+        }
     }
+
 
     /** Transferencias nativas SOL de una cuenta. */
     public String getSolTransfersRaw(String address, int limit) {
@@ -365,7 +379,8 @@ public class SolscanService {
                 dto.setDate(LocalDateTime.ofInstant(Instant.ofEpochMilli(ts), ZoneId.of("America/Bogota")));
                 dto.setDollars(qty);
                 dto.setCryptoSymbol(symbol);
-                dto.setComision(feeSol);   // comisión real en SOL
+                dto.setNetworkFeeInSOL(feeSol);  // ✅ fee real en SOL
+                dto.setComision(0.0);            // ✅ deja comision en 0 para no descontar mal otro token
                 dto.setTasa(0.0);
                 dto.setPesos(0.0);
 
