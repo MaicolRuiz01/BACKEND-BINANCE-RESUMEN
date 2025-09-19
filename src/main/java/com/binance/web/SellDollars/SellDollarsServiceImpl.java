@@ -302,7 +302,6 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 				transaccionesValidasPorCuenta.put(cuenta, filtradas);
 			}
 		}
-
 		return transaccionesValidasPorCuenta;
 	}
 

@@ -1,10 +1,11 @@
 package com.binance.web.BinanceAPI;
-import com.binance.web.Entity.Cliente;
-import com.binance.web.SellDollars.SellDollarsDto;
-import com.binance.web.BinanceAPI.BinanceService;
+
 import com.binance.web.BuyDollars.BuyDollarsDto;
+import com.binance.web.SellDollars.SellDollarsDto;
+import com.binance.web.Entity.Cliente;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.*;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
@@ -22,135 +23,246 @@ public class SolscanService {
     private final RestTemplate restTemplate = new RestTemplate();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    // Lee el token desde application.properties (igual que haces con Tron)
     @Value("${solscan.apiKey:}")
     private String solscanApiKey;
 
-    // Para precios en USDT (SOL, etc.). Lo inyectamos para reutilizar tu misma lógica de precios.
+    // Fallback alternativo (muy estable)
+    @Value("${helius.apiKey:}")
+    private String heliusApiKey;
+
     private final BinanceService binanceService;
 
     public SolscanService(BinanceService binanceService) {
         this.binanceService = binanceService;
     }
 
-    /* ===================== Base URLs (Pro y Pública) ===================== */
-    // Pro (con API key) – v2
+    /* ===================== Bases ===================== */
     private static final String PRO_BASE = "https://api.solscan.io/v2";
-    // Pública (por si no hay API key / fallback)
     private static final String PUB_BASE = "https://public-api.solscan.io";
+    private static final String HELIUS_BASE = "https://api.helius.xyz";
 
-    private HttpEntity<Void> solscanEntity() {
+    /* ===================== Headers ===================== */
+    private HttpHeaders commonHeaders() {
         HttpHeaders h = new HttpHeaders();
-        h.set("Accept", "application/json");
-        // Algunos WAF (Cloudflare) bloquean si no hay User-Agent razonable
-        h.set("User-Agent", "PochonanceBot/1.0 (+support@tudominio.com)");
-
+        h.set("accept", "application/json");
+        h.set("accept-language", "es-ES,es;q=0.9,en;q=0.8");
+        h.set("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                + "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36");
+        h.set("origin", "https://solscan.io");
+        h.set("referer", "https://solscan.io/");
         if (solscanApiKey != null && !solscanApiKey.isBlank()) {
-            // variantes que distintos despliegues aceptan
-            h.set("Authorization", "Bearer " + solscanApiKey); // v2
-            h.set("token", solscanApiKey);
-            h.set("X-API-KEY", solscanApiKey);
+            // distintos despliegues aceptan alguno de estos
+            h.set("token", solscanApiKey.trim());
+            h.set("Authorization", "Bearer " + solscanApiKey.trim());
+            h.set("X-API-KEY", solscanApiKey.trim());
         }
-        return new HttpEntity<>(h);
+        return h;
     }
 
+    private HttpEntity<Void> solscanEntity() {
+        return new HttpEntity<>(commonHeaders());
+    }
 
     private String pickBase() {
         return (solscanApiKey != null && !solscanApiKey.isBlank()) ? PRO_BASE : PUB_BASE;
     }
 
-    /* ===================== Endpoints RAW (tolerantes al esquema) ===================== */
+    /* ===================== RAW Solscan ===================== */
 
-    /** Info de cuenta (lamports, owner, etc.). */
     public String getAccountRaw(String address) {
         String url = pickBase() + "/account?address=" + address;
         return restTemplate.exchange(url, HttpMethod.GET, solscanEntity(), String.class).getBody();
     }
 
-    /** Tokens SPL de la cuenta; con precio cuando está disponible. */
     public String getAccountTokensRaw(String address) {
-        // muchos despliegues exponen /account/tokens?address=...&price=1
         String url = pickBase() + "/account/tokens?address=" + address + "&price=1";
         return restTemplate.exchange(url, HttpMethod.GET, solscanEntity(), String.class).getBody();
     }
 
+    /** Intenta PRO -> PUBLIC. Si ambos devuelven 403, cae a Helius y construye un JSON compatible. */
     public String getSplTransfersRaw(String address, int limit) {
-        String base = pickBase();
-        String url = UriComponentsBuilder.fromHttpUrl(base + "/account/splTransfers")
+        int lim = (limit <= 0 ? 50 : limit);
+        String proUrl = UriComponentsBuilder.fromHttpUrl(PRO_BASE + "/account/splTransfers")
                 .queryParam("address", address)
-                .queryParam("limit", (limit <= 0 ? 50 : limit))
+                .queryParam("limit", lim)
+                .toUriString();
+        String pubUrl = UriComponentsBuilder.fromHttpUrl(PUB_BASE + "/account/splTransfers")
+                .queryParam("address", address)
+                .queryParam("limit", lim)
                 .toUriString();
 
-        System.out.println("➡️ Solscan splTransfers URL=" + url);
-
         try {
-            return restTemplate.exchange(url, HttpMethod.GET, solscanEntity(), String.class).getBody();
+            System.out.println("➡️ Solscan splTransfers PRO URL=" + proUrl);
+            return restTemplate.exchange(proUrl, HttpMethod.GET, solscanEntity(), String.class).getBody();
         } catch (HttpClientErrorException.Forbidden e) {
-            // ⚠️ Cloudflare bloqueó: no tumbes tu proceso, devuelve vacío
-            System.out.println("🚫 403 Solscan (splTransfers). Devuelvo vacío. " + e.getMessage());
+            System.out.println("🚫 403 Solscan PRO. Probando PUBLIC...");
+            try {
+                System.out.println("➡️ Solscan splTransfers PUBLIC URL=" + pubUrl);
+                return restTemplate.exchange(pubUrl, HttpMethod.GET, solscanEntity(), String.class).getBody();
+            } catch (HttpClientErrorException.Forbidden e2) {
+                System.out.println("🚫 403 Solscan PUBLIC. Fallback a Helius si hay API key.");
+                if (heliusApiKey != null && !heliusApiKey.isBlank()) {
+                    return heliusTransfersAsSolscan(address, lim); // JSON “data”: [...]
+                }
+                // último recurso: evita romper el flujo
+                return "{\"data\":[]}";
+            } catch (Exception ex2) {
+                System.out.println("⚠️ Error Solscan PUBLIC: " + ex2.getMessage());
+                if (heliusApiKey != null && !heliusApiKey.isBlank()) {
+                    return heliusTransfersAsSolscan(address, lim);
+                }
+                return "{\"data\":[]}";
+            }
+        } catch (Exception ex) {
+            System.out.println("⚠️ Error Solscan PRO: " + ex.getMessage());
+            if (heliusApiKey != null && !heliusApiKey.isBlank()) {
+                return heliusTransfersAsSolscan(address, lim);
+            }
             return "{\"data\":[]}";
         }
     }
 
-
-    /** Transferencias nativas SOL de una cuenta. */
     public String getSolTransfersRaw(String address, int limit) {
-        // en algunos esquemas: /account/solTransfers?address=...&limit=...
         String url = pickBase() + "/account/solTransfers?address=" + address + "&limit=" + limit;
         return restTemplate.exchange(url, HttpMethod.GET, solscanEntity(), String.class).getBody();
     }
 
-    /** Detalle de transacción por signature. Útil para leer fee en SOL (lamports). */
+    /** Intenta Solscan. Si 403, intenta Helius (POST /v0/transactions) para extraer el fee. */
     public JsonNode getTxDetails(String signature) {
-        // común: /transaction?tx=<signature>
         String url = pickBase() + "/transaction?tx=" + signature;
         try {
             String raw = restTemplate.exchange(url, HttpMethod.GET, solscanEntity(), String.class).getBody();
             return objectMapper.readTree(raw);
+        } catch (HttpClientErrorException.Forbidden e) {
+            if (heliusApiKey == null || heliusApiKey.isBlank()) return objectMapper.createObjectNode();
+            try {
+                HttpHeaders h = new HttpHeaders();
+                h.setContentType(MediaType.APPLICATION_JSON);
+                h.setAccept(List.of(MediaType.APPLICATION_JSON));
+                String txUrl = HELIUS_BASE + "/v0/transactions?api-key=" + heliusApiKey.trim();
+                ArrayNode body = objectMapper.createArrayNode();
+                body.add(signature);
+                HttpEntity<String> req = new HttpEntity<>(body.toString(), h);
+                String raw = restTemplate.exchange(txUrl, HttpMethod.POST, req, String.class).getBody();
+                ArrayNode arr = (ArrayNode) objectMapper.readTree(raw);
+                if (arr.size() == 0) return objectMapper.createObjectNode();
+
+                JsonNode first = arr.get(0);
+                long fee = first.path("fee").asLong(0L);
+
+                ObjectNode out = objectMapper.createObjectNode();
+                ObjectNode meta = objectMapper.createObjectNode();
+                meta.put("fee", fee);
+                out.set("meta", meta);
+                return out;
+            } catch (Exception ignore) {
+                return objectMapper.createObjectNode();
+            }
         } catch (Exception e) {
             return objectMapper.createObjectNode();
         }
     }
 
+    /* ===================== Fallback Helius → formateo estilo Solscan ===================== */
+
+    // Mints comunes → símbolo/decimales (extiende si usas otros tokens)
+    private static final Map<String, String> MINT_TO_SYMBOL = Map.of(
+        "EPjFWdd5AufqSSqeM2q9JV5xQ6G8TLVL4Qp7q4G4Q1k", "USDC", // USDC
+        "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", "USDT"  // USDT (legacy)
+    );
+    private static final Map<String, Integer> SYMBOL_DECIMALS = Map.of(
+        "USDC", 6,
+        "USDT", 6
+    );
+
+    /** Devuelve un JSON con campo "data":[...] compatible con los parsers actuales. */
+    private String heliusTransfersAsSolscan(String address, int limit) {
+        try {
+            String url = HELIUS_BASE + "/v0/addresses/" + address
+                    + "/transactions?api-key=" + heliusApiKey.trim()
+                    + "&limit=" + limit;
+            System.out.println("➡️ Helius TX URL=" + url);
+
+            HttpHeaders h = new HttpHeaders();
+            h.setAccept(List.of(MediaType.APPLICATION_JSON));
+            String raw = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(h), String.class).getBody();
+
+            ArrayNode hel = (ArrayNode) objectMapper.readTree(raw);
+            ArrayNode data = objectMapper.createArrayNode();
+
+            for (JsonNode tx : hel) {
+                String sig = tx.path("signature").asText(null);
+                long ts = tx.path("timestamp").asLong(0L);
+
+                // tokenTransfers → generamos una “fila” por cada transferencia SPL
+                JsonNode tokenTransfers = tx.path("tokenTransfers");
+                if (tokenTransfers.isArray()) {
+                    for (JsonNode t : tokenTransfers) {
+                        String from = t.path("fromUserAccount").asText(null);
+                        String to = t.path("toUserAccount").asText(null);
+                        String mint = t.path("mint").asText(null);
+
+                        String symbol = MINT_TO_SYMBOL.getOrDefault(mint, null);
+                        String uiAmount = t.path("tokenAmount").asText(null);
+                        if (symbol == null || uiAmount == null || sig == null) continue;
+
+                        ObjectNode row = objectMapper.createObjectNode();
+                        row.put("src", from);
+                        row.put("dst", to);
+                        row.put("signature", sig);
+                        row.put("blockTime", ts);
+                        row.put("symbol", symbol);
+
+                        int dec = SYMBOL_DECIMALS.getOrDefault(symbol, 6);
+                        // nuestro parser acepta uiAmountString, así evitamos cruce decimales
+                        ObjectNode tokenAmount = objectMapper.createObjectNode();
+                        tokenAmount.put("uiAmountString", uiAmount);
+                        tokenAmount.put("decimals", dec);
+                        row.set("tokenAmount", tokenAmount);
+                        data.add(row);
+                    }
+                }
+            }
+            ObjectNode out = objectMapper.createObjectNode();
+            out.set("data", data);
+            return out.toString();
+        } catch (Exception e) {
+            System.out.println("⚠️ Error Helius fallback: " + e.getMessage());
+            return "{\"data\":[]}";
+        }
+    }
+
     /* ===================== Negocio: balances y totales ===================== */
 
-    /** Snapshot: símbolo → cantidad (normalizada) de una wallet de Solana. Incluye SOL y SPL. */
     public Map<String, Double> getBalancesByAsset(String address) {
         Map<String, Double> out = new HashMap<>();
-
         try {
-            // 1) SOL nativo (lamports)
             String accRaw = getAccountRaw(address);
             JsonNode acc = objectMapper.readTree(accRaw);
-            // distintos esquemas: lamports en "lamports" o "balance"
             long lamports = acc.path("lamports").asLong(acc.path("balance").asLong(0L));
-            double sol = lamports / 1_000_000_000.0; // 1 SOL = 1e9 lamports
+            double sol = lamports / 1_000_000_000.0;
             if (sol > 0) out.put("SOL", sol);
 
-            // 2) SPL tokens
             String tokRaw = getAccountTokensRaw(address);
             JsonNode tokens = objectMapper.readTree(tokRaw);
-            JsonNode data = tokens.isArray() ? tokens : tokens.path("data"); // pro/público varía
-
+            JsonNode data = tokens.isArray() ? tokens : tokens.path("data");
             if (data != null && data.isArray()) {
                 for (JsonNode t : data) {
-                    // símbolos pueden venir en "symbol" o "tokenSymbol"
                     String sym = pickUpper(
-                            t.path("symbol").asText(null),
-                            t.path("tokenSymbol").asText(null),
-                            t.path("tokenName").asText(null)
+                        t.path("symbol").asText(null),
+                        t.path("tokenSymbol").asText(null),
+                        t.path("tokenName").asText(null)
                     );
                     if (sym == null) continue;
 
-                    // cantidad: puede venir como tokenAmount.amount + decimals, o balance/uiAmount
                     int dec = firstNonNeg(
-                            t.path("decimals").asInt(-1),
-                            t.path("tokenAmount").path("decimals").asInt(-1)
+                        t.path("decimals").asInt(-1),
+                        t.path("tokenAmount").path("decimals").asInt(-1)
                     );
                     String amountStr = firstNonBlank(
-                            t.path("tokenAmount").path("amount").asText(null),
-                            t.path("balance").asText(null),
-                            t.path("quantity").asText(null)
+                        t.path("tokenAmount").path("amount").asText(null),
+                        t.path("balance").asText(null),
+                        t.path("quantity").asText(null)
                     );
 
                     double qty = 0.0;
@@ -158,96 +270,57 @@ public class SolscanService {
                         if (amountStr != null && dec >= 0) {
                             qty = Double.parseDouble(amountStr) / Math.pow(10, dec);
                         } else {
-                            // fallback: uiAmount / uiAmountString
                             String ui = firstNonBlank(
-                                    t.path("tokenAmount").path("uiAmountString").asText(null),
-                                    t.path("uiAmountString").asText(null),
-                                    t.path("uiAmount").asText(null)
+                                t.path("tokenAmount").path("uiAmountString").asText(null),
+                                t.path("uiAmountString").asText(null),
+                                t.path("uiAmount").asText(null)
                             );
                             if (ui != null) qty = Double.parseDouble(ui);
                         }
-                    } catch (Exception ignore) { /* tolerante */ }
-
+                    } catch (Exception ignore) {}
                     if (qty > 0) out.merge(sym, qty, Double::sum);
                 }
             }
-
             return out;
         } catch (Exception e) {
             throw new RuntimeException("Error obteniendo snapshot SOLANA: " + e.getMessage(), e);
         }
     }
 
-    /** Total en USD de una wallet Solana (usa precios USDT vía tu BinanceService). */
     public double getTotalAssetUsd(String address) {
         Map<String, Double> balances = getBalancesByAsset(address);
-        if (balances.isEmpty()) return 0.0;
-
         double total = 0.0;
         for (Map.Entry<String, Double> e : balances.entrySet()) {
             String sym = e.getKey();
             double qty = e.getValue();
-            double px;
-            if ("USDT".equalsIgnoreCase(sym) || "USDC".equalsIgnoreCase(sym)) {
-                px = 1.0;
-            } else {
-                Double p = binanceService.getPriceInUSDT(sym); // misma ruta que ya usas
-                px = (p != null) ? p : 0.0;
-            }
+            double px = ("USDT".equalsIgnoreCase(sym) || "USDC".equalsIgnoreCase(sym)) ? 1.0
+                        : Optional.ofNullable(binanceService.getPriceInUSDT(sym)).orElse(0.0);
             total += qty * px;
         }
         return total;
     }
 
-    /* ===================== Parsers estilo Tron (entradas/salidas SPL) ===================== */
-    // Nota: Solana maneja "lamports" (1e9 = 1 SOL). Fees se pagan en SOL.
+    /* ===================== Parsers estilo Tron ===================== */
 
-    /** Entradas SPL → BuyDollarsDto (hoy). */
     public List<BuyDollarsDto> parseSplIncomingTransfers(
-            String jsonResponse,
-            String walletAddress,
-            String accountName,
-            Set<String> assignedIds
+            String jsonResponse, String walletAddress, String accountName, Set<String> assignedIds
     ) {
         List<BuyDollarsDto> out = new ArrayList<>();
         LocalDate hoy = LocalDate.now(ZoneId.of("America/Bogota"));
-
         try {
             JsonNode root = objectMapper.readTree(jsonResponse);
             JsonNode data = root.isArray() ? root : root.path("data");
             if (!data.isArray()) return out;
 
             for (JsonNode tx : data) {
-                // esquemas típicos:
-                String to = pickLower(
-                        tx.path("dst").asText(null),
-                        tx.path("to").asText(null),
-                        tx.path("destination").asText(null)
-                );
-                String sig = firstNonBlank(
-                        tx.path("txHash").asText(null),
-                        tx.path("signature").asText(null),
-                        tx.path("transactionHash").asText(null)
-                );
-                String symbol = pickUpper(
-                        tx.path("symbol").asText(null),
-                        tx.path("tokenSymbol").asText(null)
-                );
+                String to = pickLower(tx.path("dst").asText(null), tx.path("to").asText(null), tx.path("destination").asText(null));
+                String sig = firstNonBlank(tx.path("txHash").asText(null), tx.path("signature").asText(null), tx.path("transactionHash").asText(null));
+                String symbol = pickUpper(tx.path("symbol").asText(null), tx.path("tokenSymbol").asText(null));
 
-                String rawValue = firstNonBlank(
-                        tx.path("changeAmount").asText(null),
-                        tx.path("amount").asText(null),
-                        tx.path("tokenAmount").path("amount").asText(null)
-                );
-                int dec = firstNonNeg(
-                        tx.path("decimals").asInt(-1),
-                        tx.path("tokenAmount").path("decimals").asInt(-1)
-                );
-
-                long ts = firstNonZero(
-                        tx.path("blockTime").asLong(0L),
-                        tx.path("timeStamp").asLong(0L)
-                ) * 1000L; // muchos endpoints devuelven segundos
+                String rawValue = firstNonBlank(tx.path("changeAmount").asText(null), tx.path("amount").asText(null),
+                        tx.path("tokenAmount").path("amount").asText(null));
+                int dec = firstNonNeg(tx.path("decimals").asInt(-1), tx.path("tokenAmount").path("decimals").asInt(-1));
+                long ts = firstNonZero(tx.path("blockTime").asLong(0L), tx.path("timeStamp").asLong(0L)) * 1000L;
 
                 if (to == null || sig == null || symbol == null) continue;
                 if (!to.equalsIgnoreCase(walletAddress)) continue;
@@ -261,13 +334,11 @@ public class SolscanService {
                     if (rawValue != null && dec >= 0) {
                         qty = Double.parseDouble(rawValue) / Math.pow(10, dec);
                     } else {
-                        String ui = firstNonBlank(
-                                tx.path("uiAmountString").asText(null),
-                                tx.path("tokenAmount").path("uiAmountString").asText(null)
-                        );
+                        String ui = firstNonBlank(tx.path("uiAmountString").asText(null),
+                                tx.path("tokenAmount").path("uiAmountString").asText(null));
                         if (ui != null) qty = Double.parseDouble(ui);
                     }
-                } catch (Exception ignore) { }
+                } catch (Exception ignore) {}
 
                 if (qty <= 0) continue;
 
@@ -282,64 +353,31 @@ public class SolscanService {
                 dto.setAsignada(false);
                 out.add(dto);
             }
-
             return out;
         } catch (Exception e) {
             return out;
         }
     }
 
-    /** Salidas SPL → SellDollarsDto (hoy) con comisión en SOL. */
     public List<SellDollarsDto> parseSplOutgoingTransfers(
-            String jsonResponse,
-            String walletAddress,
-            String accountName,
-            Set<String> assignedIds,
-            Map<String, Cliente> clientePorWallet // si quieres mapear destino→cliente
+            String jsonResponse, String walletAddress, String accountName, Set<String> assignedIds, Map<String, Cliente> clientePorWallet
     ) {
         List<SellDollarsDto> out = new ArrayList<>();
         LocalDate hoy = LocalDate.now(ZoneId.of("America/Bogota"));
-
         try {
             JsonNode root = objectMapper.readTree(jsonResponse);
             JsonNode data = root.isArray() ? root : root.path("data");
             if (!data.isArray()) return out;
 
             for (JsonNode tx : data) {
-                String from = pickLower(
-                        tx.path("src").asText(null),
-                        tx.path("from").asText(null),
-                        tx.path("source").asText(null)
-                );
-                String to = pickLower(
-                        tx.path("dst").asText(null),
-                        tx.path("to").asText(null),
-                        tx.path("destination").asText(null)
-                );
-                String sig = firstNonBlank(
-                        tx.path("txHash").asText(null),
-                        tx.path("signature").asText(null),
-                        tx.path("transactionHash").asText(null)
-                );
-                String symbol = pickUpper(
-                        tx.path("symbol").asText(null),
-                        tx.path("tokenSymbol").asText(null)
-                );
-
-                String rawValue = firstNonBlank(
-                        tx.path("changeAmount").asText(null),
-                        tx.path("amount").asText(null),
-                        tx.path("tokenAmount").path("amount").asText(null)
-                );
-                int dec = firstNonNeg(
-                        tx.path("decimals").asInt(-1),
-                        tx.path("tokenAmount").path("decimals").asInt(-1)
-                );
-
-                long ts = firstNonZero(
-                        tx.path("blockTime").asLong(0L),
-                        tx.path("timeStamp").asLong(0L)
-                ) * 1000L;
+                String from = pickLower(tx.path("src").asText(null), tx.path("from").asText(null), tx.path("source").asText(null));
+                String to = pickLower(tx.path("dst").asText(null), tx.path("to").asText(null), tx.path("destination").asText(null));
+                String sig = firstNonBlank(tx.path("txHash").asText(null), tx.path("signature").asText(null), tx.path("transactionHash").asText(null));
+                String symbol = pickUpper(tx.path("symbol").asText(null), tx.path("tokenSymbol").asText(null));
+                String rawValue = firstNonBlank(tx.path("changeAmount").asText(null), tx.path("amount").asText(null),
+                        tx.path("tokenAmount").path("amount").asText(null));
+                int dec = firstNonNeg(tx.path("decimals").asInt(-1), tx.path("tokenAmount").path("decimals").asInt(-1));
+                long ts = firstNonZero(tx.path("blockTime").asLong(0L), tx.path("timeStamp").asLong(0L)) * 1000L;
 
                 if (from == null || sig == null || symbol == null) continue;
                 if (!from.equalsIgnoreCase(walletAddress)) continue;
@@ -353,25 +391,20 @@ public class SolscanService {
                     if (rawValue != null && dec >= 0) {
                         qty = Double.parseDouble(rawValue) / Math.pow(10, dec);
                     } else {
-                        String ui = firstNonBlank(
-                                tx.path("uiAmountString").asText(null),
-                                tx.path("tokenAmount").path("uiAmountString").asText(null)
-                        );
+                        String ui = firstNonBlank(tx.path("uiAmountString").asText(null),
+                                tx.path("tokenAmount").path("uiAmountString").asText(null));
                         if (ui != null) qty = Double.parseDouble(ui);
                     }
-                } catch (Exception ignore) { }
+                } catch (Exception ignore) {}
 
                 if (qty <= 0) continue;
 
-                // Comisión en SOL: consultar la transacción y leer "fee" en lamports
                 double feeSol = 0.0;
                 try {
                     JsonNode txDetails = getTxDetails(sig);
-                    long feeLamports = txDetails.path("meta").path("fee").asLong(
-                            txDetails.path("fee").asLong(0L)
-                    );
+                    long feeLamports = txDetails.path("meta").path("fee").asLong(txDetails.path("fee").asLong(0L));
                     feeSol = feeLamports / 1_000_000_000.0;
-                } catch (Exception ignore) { }
+                } catch (Exception ignore) {}
 
                 SellDollarsDto dto = new SellDollarsDto();
                 dto.setIdWithdrawals(sig);
@@ -379,17 +412,15 @@ public class SolscanService {
                 dto.setDate(LocalDateTime.ofInstant(Instant.ofEpochMilli(ts), ZoneId.of("America/Bogota")));
                 dto.setDollars(qty);
                 dto.setCryptoSymbol(symbol);
-                dto.setNetworkFeeInSOL(feeSol);  // ✅ fee real en SOL
-                dto.setComision(0.0);            // ✅ deja comision en 0 para no descontar mal otro token
+                dto.setNetworkFeeInSOL(feeSol);
+                dto.setComision(0.0); // muy importante para no restar fee del token
                 dto.setTasa(0.0);
                 dto.setPesos(0.0);
 
-                // si enviaste a la wallet de un cliente, asígnalo
                 if (to != null && clientePorWallet != null) {
                     Cliente c = clientePorWallet.get(to.trim().toLowerCase());
                     if (c != null) dto.setClienteId(c.getId());
                 }
-
                 out.add(dto);
             }
             return out;
@@ -398,8 +429,7 @@ public class SolscanService {
         }
     }
 
-    /* ===================== Utils internos ===================== */
-
+    /* ===================== Utils ===================== */
     private static String pickUpper(String... vals) {
         for (String v : vals) if (v != null && !v.isBlank()) return v.trim().toUpperCase();
         return null;
@@ -420,38 +450,20 @@ public class SolscanService {
         for (long v : vals) if (v != 0L) return v;
         return 0L;
     }
-    
-    /** Wrapper para traer transferencias SPL y devolver BUYs de HOY. */
-    public List<BuyDollarsDto> listIncomingToday(
-            String walletAddress,
-            String accountName,
-            Set<String> assignedIds
-    ) {
-        // pide las últimas (sube el limit si lo necesitas)
+
+    /* ===================== Wrappers de alto nivel ===================== */
+
+    public List<BuyDollarsDto> listIncomingToday(String walletAddress, String accountName, Set<String> assignedIds) {
         String raw = getSplTransfersRaw(walletAddress, 200);
-        // reutiliza el parser que ya tienes
         return parseSplIncomingTransfers(raw, walletAddress, accountName, assignedIds);
     }
 
-    /** Wrapper para traer transferencias SPL y devolver SELLs de HOY. */
     public List<SellDollarsDto> listOutgoingToday(
-            String walletAddress,
-            String accountName,
-            Set<String> assignedIds,
-            Map<String, Cliente> clientePorWallet
+            String walletAddress, String accountName, Set<String> assignedIds, Map<String, Cliente> clientePorWallet
     ) {
         String raw = getSplTransfersRaw(walletAddress, 200);
-        List<SellDollarsDto> out =
-            parseSplOutgoingTransfers(raw, walletAddress, accountName, assignedIds, clientePorWallet);
-
-        // IMPORTANTE para tu flujo actual:
-        // En tu SellDollarsService descuentas (dólares + comisión) del MISMO símbolo.
-        // En Solana la comisión es en SOL. Para no restar SOL a un token (p.ej. USDC),
-        // seteamos comisión = 0 aquí. Si luego quieres descontar el fee en SOL,
-        // hazlo aparte en SellDollarsService (te digo cómo si lo necesitas).
-        out.forEach(dto -> dto.setComision(0.0));
-
+        List<SellDollarsDto> out = parseSplOutgoingTransfers(raw, walletAddress, accountName, assignedIds, clientePorWallet);
+        out.forEach(dto -> dto.setComision(0.0)); // nunca descuentas fee del token
         return out;
     }
 }
-

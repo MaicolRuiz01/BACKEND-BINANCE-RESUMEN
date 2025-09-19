@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.SellDollars;
 import com.binance.web.Repository.AccountBinanceRepository;
+import com.binance.web.Repository.SellDollarsRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import jakarta.transaction.Transactional;
@@ -29,6 +30,8 @@ import lombok.RequiredArgsConstructor;
 public class SellDollarsController {
     
     private final SellDollarsService service;
+    
+    private SellDollarsRepository sellDollarsRepository;
 
     @Autowired
     private AccountBinanceRepository accountBinanceRepository;  // Inyección del repositorio
@@ -56,9 +59,10 @@ public class SellDollarsController {
     
     @GetMapping("/no-asignadas")
     public ResponseEntity<List<SellDollars>> getVentasNoAsignadas() {
-        List<SellDollars> ventas = service.registrarYObtenerVentasNoAsignadas();
-        return ResponseEntity.ok(ventas);
+        service.registrarVentasAutomaticamente();   // 👈 importa todo antes de listar
+        return ResponseEntity.ok(sellDollarsRepository.findByAsignadoFalse());
     }
+
     
     @GetMapping("/listar-dto")
     public ResponseEntity<List<SellDollarsDto>> listarVentasDto() {

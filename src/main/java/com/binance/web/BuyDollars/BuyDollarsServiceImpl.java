@@ -280,7 +280,7 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
         existing.setTasa(dto.getTasa());
         // ✅ Uso del nuevo campo 'amount' en lugar de 'dollars'
         existing.setPesos(existing.getAmount() * dto.getTasa());
-        existing.setCryptoSymbol(dto.getCryptoSymbol());
+       // existing.setCryptoSymbol(dto.getCryptoSymbol());
 
         // Asignar proveedor
         Supplier supplier = supplierRepository.findById(dto.getSupplierId())

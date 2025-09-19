@@ -67,11 +67,12 @@ public class TronScanService {
         return restTemplate.exchange(url, HttpMethod.GET, tronScanEntity(), String.class).getBody();
     }
 
-    /** Transfers TRC20 (cualquier token) via TronGrid. */
     public String getTRC20TransfersUsingTronGrid(String address) {
-        String url = "https://api.trongrid.io/v1/accounts/" + address + "/transactions/trc20?limit=50";
+        String url = "https://api.trongrid.io/v1/accounts/" + address
+                + "/transactions/trc20?limit=100&only_confirmed=true&order_by=block_timestamp,desc";
         return restTemplate.exchange(url, HttpMethod.GET, tronGridEntity(), String.class).getBody();
     }
+
 
     /** Detalle de transacción (para leer comisión/energy) via TronScan. */
     public JsonNode getTransactionDetailsFromTronScan(String txId) {
@@ -221,47 +222,74 @@ public class TronScanService {
         try {
             JsonNode root = objectMapper.readTree(jsonResponse);
             JsonNode data = root.path("data");
+            if (!data.isArray()) return result;
 
-            if (data.isArray()) {
-                for (JsonNode tx : data) {
-                    String fromAddress = tx.path("ownerAddress").asText();
-                    String toAddress   = tx.path("toAddress").asText();
-                    String txId        = tx.path("hash").asText();
-                    String symbol      = tx.path("tokenInfo").path("tokenAbbr").asText();
+            for (JsonNode tx : data) {
+                // ----- CAMPOS DE TRONGRID -----
+                String fromAddress = tx.path("from").asText(null);
+                String toAddress   = tx.path("to").asText(null);
+                String txId        = tx.path("transaction_id").asText(null);
 
-                    if (fromAddress.equalsIgnoreCase(walletAddress) && !assignedIds.contains(txId)) {
-                        double amount   = tx.path("amount").asDouble(0.0) / 1_000_000.0;
-                        long timestamp  = tx.path("timestamp").asLong();
-                        LocalDate fechaTx = LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp), ZoneId.of("America/Bogota")).toLocalDate();
+                JsonNode tokenInfo = tx.path("token_info");
+                String symbol      = tokenInfo.path("symbol").asText(null);
 
-                        if (fechaTx.isEqual(hoy)) {
-                            SellDollarsDto dto = new SellDollarsDto();
-                            dto.setDollars(amount);
-                            dto.setCryptoSymbol(symbol);
-                            dto.setTasa(0.0);
-                            dto.setNameAccount(accountName);
-                            dto.setIdWithdrawals(txId);
-                            dto.setPesos(0.0);
-                            dto.setDate(LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp), ZoneId.of("America/Bogota")));
-
-                            // Comisión real en TRX
-                            JsonNode txDetails = getTransactionDetailsFromTronScan(txId);
-                            double feeInSun = txDetails.path("cost").path("energy_fee").asDouble(0.0);
-                            double feeTRX   = feeInSun / 1_000_000.0;
-                            dto.setComision(feeTRX);
-
-                            // asignar cliente si existe
-                            Cliente cliente = clientePorWallet.get(toAddress.trim().toLowerCase());
-                            if (cliente != null) dto.setClienteId(cliente.getId());
-
-                            result.add(dto);
-                        }
-                    }
+                // decimales pueden venir como int o string
+                int decimals = 6;
+                if (tokenInfo.has("decimals")) {
+                    try { decimals = Integer.parseInt(tokenInfo.get("decimals").asText()); } catch (Exception ignore) {}
                 }
+
+                String rawValue = tx.path("value").asText("0");
+                double amount = 0.0;
+                try { amount = Double.parseDouble(rawValue) / Math.pow(10, decimals); } catch (NumberFormatException ignore) {}
+
+                long ts = tx.path("block_timestamp").asLong(0L);
+
+                // Filtro: solo salidas de esta wallet, no repetidas y de HOY
+                if (fromAddress == null || txId == null || symbol == null) continue;
+                if (!fromAddress.equalsIgnoreCase(walletAddress)) continue;
+                if (assignedIds.contains(txId)) continue;
+
+                LocalDate fechaTx = LocalDateTime.ofInstant(
+                        Instant.ofEpochMilli(ts), ZoneId.of("America/Bogota")).toLocalDate();
+                if (!fechaTx.isEqual(hoy)) continue;
+
+                // ----- Construcción del DTO -----
+                SellDollarsDto dto = new SellDollarsDto();
+                dto.setIdWithdrawals(txId);
+                dto.setNameAccount(accountName);
+                dto.setDate(LocalDateTime.ofInstant(Instant.ofEpochMilli(ts), ZoneId.of("America/Bogota")));
+                dto.setDollars(amount);
+                dto.setCryptoSymbol(symbol);
+                dto.setTasa(0.0);
+                dto.setPesos(0.0);
+
+                // Comisión real en TRX (desde TronScan, usando el mismo txId)
+                try {
+                    JsonNode txDetails = getTransactionDetailsFromTronScan(txId);
+                    double feeInSun = txDetails.path("cost").path("energy_fee").asDouble(0.0);
+                    double feeTRX   = feeInSun / 1_000_000.0;
+                    dto.setComision(feeTRX); // OJO: esto es TRX, no USDT
+                } catch (Exception ignore) {
+                    dto.setComision(0.0);
+                }
+
+                // asignar cliente si coincide la wallet destino
+                if (toAddress != null && clientePorWallet != null) {
+                    Cliente c = clientePorWallet.get(toAddress.trim().toLowerCase());
+                    if (c != null) dto.setClienteId(c.getId());
+                }
+
+                result.add(dto);
             }
-        } catch (Exception ignore) {}
+        } catch (Exception e) {
+            // log opcional
+            System.out.println("parseTRC20OutgoingTransfers error: " + e.getMessage());
+        }
+
         return result;
     }
+
 
     public List<BuyDollarsDto> parseTRC20IncomingTransfers(
             String jsonResponse,

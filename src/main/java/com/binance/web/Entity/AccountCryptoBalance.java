@@ -1,5 +1,7 @@
 package com.binance.web.Entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
@@ -29,5 +31,6 @@ public class AccountCryptoBalance {
     // Esta columna almacenará la clave foránea (id de la cuenta)
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "account_binance_id", nullable = false)
+    @JsonIgnore
     private AccountBinance accountBinance;
 }
