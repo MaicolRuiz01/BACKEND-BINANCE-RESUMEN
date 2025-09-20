@@ -2,6 +2,7 @@ package com.binance.web.SellDollars;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -155,15 +156,14 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 	@Override
 	@Transactional
 	public SellDollars asignarVenta(Integer id, SellDollarsDto dto) {
-		// 1. Buscar la venta no asignada
 		SellDollars existing = sellDollarsRepository.findById(id)
 				.orElseThrow(() -> new RuntimeException("Venta no encontrada"));
 
 		if (Boolean.TRUE.equals(existing.getAsignado())) {
 			throw new RuntimeException("Venta ya fue asignada");
-
 		}
-		// 2. Actualizar datos básicos
+
+		// Datos monetarios
 		existing.setTasa(dto.getTasa());
 		existing.setPesos(dto.getDollars() * dto.getTasa());
 
@@ -172,22 +172,20 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 
 		if (tasaPromedioAnterior != null) {
 			Double costoEnPesos = existing.getDollars() * tasaPromedioAnterior.getAverageRate();
-			Double comision = existing.getComision() != null ? existing.getComision() : 0.0;
+			Double comision = existing.getComision() != null ? existing.getComision() : 0.0; // TRX/SOL solo informativo
+																								// aquí
 			Double utilidad = existing.getPesos() - costoEnPesos - comision;
 			existing.setUtilidad(utilidad);
 		} else {
-			// En caso de que no haya una tasa anterior, la utilidad es 0
 			existing.setUtilidad(0.0);
 		}
 
-		// 3. Limpiar relaciones anteriores
-		// ⚠️ Importante: Limpiamos la colección para que Hibernate elimine las viejas
-		// cuentas COP.
+		// Limpiar relaciones anteriores
 		if (existing.getSellDollarsAccounts() != null) {
 			existing.getSellDollarsAccounts().clear();
 		}
 
-		// 4. Lógica para cliente o proveedor
+		// Cliente o proveedor (solo COP/deuda)
 		if (dto.getClienteId() != null) {
 			Cliente cliente = clienteRepository.findById(dto.getClienteId())
 					.orElseThrow(() -> new RuntimeException("Cliente no encontrado"));
@@ -206,7 +204,6 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 
 			double totalAsignadoACuentas = 0.0;
 
-			// ✅ AHORA AGREGAMOS LAS NUEVAS CUENTAS A LA COLECCIÓN
 			if (dto.getAccounts() != null && !dto.getAccounts().isEmpty()) {
 				for (AssignAccountDto assignDto : dto.getAccounts()) {
 					AccountCop acc = accountCopService.findByIdAccountCop(assignDto.getAccountCop());
@@ -215,23 +212,18 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 					acc.setBalance(currentCopBalance + assignDto.getAmount());
 					accountCopService.saveAccountCop(acc);
 
-					SellDollarsAccountCop detalle = new SellDollarsAccountCop();
-					detalle.setSellDollars(existing); // Establecemos la relación bidireccional
-					detalle.setAccountCop(acc);
-					detalle.setAmount(assignDto.getAmount());
-					detalle.setNameAccount(assignDto.getNameAccount());
-
-					// ✅ Agregamos el nuevo objeto a la colección
-					existing.getSellDollarsAccounts().add(detalle);
+					SellDollarsAccountCop det = new SellDollarsAccountCop();
+					det.setSellDollars(existing);
+					det.setAccountCop(acc);
+					det.setAmount(assignDto.getAmount());
+					det.setNameAccount(assignDto.getNameAccount());
+					existing.getSellDollarsAccounts().add(det);
 
 					totalAsignadoACuentas += assignDto.getAmount();
 				}
 			}
 
-			// 5. Ajustar saldo del proveedor
-			double montoEnPesos = existing.getPesos();
-			double restanteParaProveedor = montoEnPesos - totalAsignadoACuentas;
-
+			double restanteParaProveedor = existing.getPesos() - totalAsignadoACuentas;
 			if (restanteParaProveedor > 0.0) {
 				double currentSupplierBalance = supplier.getBalance() != null ? supplier.getBalance() : 0.0;
 				supplier.setBalance(currentSupplierBalance - restanteParaProveedor);
@@ -239,25 +231,8 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 			supplierRepository.save(supplier);
 		}
 
-		// 6. Marcar como asignada
+		// Marcar como asignada (sin tocar balances cripto)
 		existing.setAsignado(true);
-
-		// 7. Descontar balance en la cuenta Binance (cripto vendida)
-		String symbol = dto.getCryptoSymbol() != null ? dto.getCryptoSymbol() : "USDT";
-
-		// 1) Descontar SOLO el token vendido
-		accountCryptoBalanceService.updateCryptoBalance(existing.getAccountBinance(), symbol, -dto.getDollars());
-
-		// 2) Si viene fee de Solana, descuéntalo en SOL
-		if (dto.getNetworkFeeInSOL() != null && dto.getNetworkFeeInSOL() > 0) {
-			accountCryptoBalanceService.updateCryptoBalance(existing.getAccountBinance(), "SOL",
-					-dto.getNetworkFeeInSOL());
-		}
-
-		// 3) Si viene fee TRON (tu campo comision lo usas para TRX), descuéntalo en TRX
-		if (dto.getComision() != null && dto.getComision() > 0) {
-			accountCryptoBalanceService.updateCryptoBalance(existing.getAccountBinance(), "TRX", -dto.getComision());
-		}
 
 		return sellDollarsRepository.save(existing);
 	}
@@ -285,7 +260,7 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 
 		Map<String, List<Transaction>> transaccionesValidasPorCuenta = new HashMap<>();
 
-		LocalDate hoy = LocalDate.now();
+		LocalDate hoy = LocalDate.now(ZoneId.of("America/Bogota"));
 
 		for (String cuenta : binanceService.getAllAccountNames()) {
 			String json = binanceService.getPaymentHistory(cuenta);
@@ -529,45 +504,50 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 			todas.sort(Comparator.comparing(SellDollarsDto::getDate));
 
 			for (SellDollarsDto dto : todas) {
-				if (dto.getIdWithdrawals() == null || existentes.contains(dto.getIdWithdrawals()))
-					continue;
+			    if (dto.getIdWithdrawals() == null || existentes.contains(dto.getIdWithdrawals()))
+			        continue;
 
-				AccountBinance account = accountBinanceRepository.findByName(dto.getNameAccount());
-				// if (account == null) continue;
+			    AccountBinance account = accountBinanceRepository.findByName(dto.getNameAccount());
 
-				SellDollars nueva = new SellDollars();
-				nueva.setIdWithdrawals(dto.getIdWithdrawals());
-				nueva.setNameAccount(dto.getNameAccount());
-				nueva.setDate(dto.getDate());
+			    try {
+			        if (account != null) {
+			            String symbol = dto.getCryptoSymbol() != null ? dto.getCryptoSymbol() : "USDT";
 
-				// ✅ LÓGICA CORREGIDA: Asignar valores de dólares y TRX
-				nueva.setDollars(dto.getDollars());
-				nueva.setEquivalenteciaTRX(dto.getEquivalenteciaTRX());
+			            // token vendido (permitimos negativo SOLO en import automático)
+			            accountCryptoBalanceService.updateCryptoBalance(account, symbol, -dto.getDollars(), true);
 
-				nueva.setTasa(0.0);
-				nueva.setPesos(0.0);
-				nueva.setAsignado(false);
-				nueva.setAccountBinance(account);
-				nueva.setComision(dto.getComision());
+			            // fee Solana
+			            if (dto.getNetworkFeeInSOL() != null && dto.getNetworkFeeInSOL() > 0) {
+			                accountCryptoBalanceService.updateCryptoBalance(account, "SOL", -dto.getNetworkFeeInSOL(), true);
+			            }
+			            // fee TRON (TRX)
+			            if (dto.getComision() != null && dto.getComision() > 0) {
+			                accountCryptoBalanceService.updateCryptoBalance(account, "TRX", -dto.getComision(), true);
+			            }
+			        } else {
+			            System.out.println("⚠️ Cuenta no encontrada por name: " + dto.getNameAccount() + " (se registra venta igual)");
+			        }
+			    } catch (Exception ex) {
+			        // no tumbar todo el import por una sola venta
+			        System.out.println("⚠️ No se pudo ajustar balance cripto: " + ex.getMessage());
+			    }
 
-				String symbol = dto.getCryptoSymbol() != null ? dto.getCryptoSymbol() : "USDT";
+			    SellDollars nueva = new SellDollars();
+			    nueva.setIdWithdrawals(dto.getIdWithdrawals());
+			    nueva.setNameAccount(dto.getNameAccount());
+			    nueva.setDate(dto.getDate());
+			    nueva.setDollars(dto.getDollars());
+			    nueva.setEquivalenteciaTRX(dto.getEquivalenteciaTRX());
+			    nueva.setTasa(0.0);
+			    nueva.setPesos(0.0);
+			    nueva.setAsignado(false);
+			    nueva.setAccountBinance(account);
+			    nueva.setComision(dto.getComision());
 
-				// token vendido
-				accountCryptoBalanceService.updateCryptoBalance(account, symbol, -dto.getDollars());
-
-				// fee de Solana (si aplica)
-				if (dto.getNetworkFeeInSOL() != null && dto.getNetworkFeeInSOL() > 0) {
-				    accountCryptoBalanceService.updateCryptoBalance(account, "SOL", -dto.getNetworkFeeInSOL());
-				}
-
-				// fee de TRON (si aplica)
-				if (dto.getComision() != null && dto.getComision() > 0) {
-				    accountCryptoBalanceService.updateCryptoBalance(account, "TRX", -dto.getComision());
-				}
-
-
-				sellDollarsRepository.save(nueva);
+			    sellDollarsRepository.save(nueva);
 			}
+
+
 		} catch (Exception e) {
 			// TODO: handle exception
 			throw new RuntimeException("Error al registrar compras automáticamente", e);

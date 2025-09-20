@@ -13,41 +13,41 @@ import lombok.RequiredArgsConstructor;
 @Service
 @RequiredArgsConstructor
 public class AccountCryptoBalanceService {
-	
-	private final AccountBinanceRepository accountBinanceRepository;
+
+    private final AccountBinanceRepository accountBinanceRepository;
     private final AccountCryptoBalanceRepository accountCryptoBalanceRepository;
 
-    /**
-     * Actualiza el balance de una cripto específica en una cuenta.
-     * @param account   La cuenta de Binance
-     * @param symbol    El símbolo de la cripto ("USDT", "TRX", "BTC", etc.)
-     * @param delta     El cambio en el balance (positivo = sumar, negativo = restar)
-     */
+    // Estricto (no permite negativos)
     @Transactional
     public void updateCryptoBalance(AccountBinance account, String symbol, Double delta) {
-        AccountCryptoBalance cb = account.getCryptoBalances().stream()
-            .filter(c -> c.getCryptoSymbol().equalsIgnoreCase(symbol))
-            .findFirst()
-            .orElse(null);
-
-        if (cb != null) {
-            double nuevoSaldo = (cb.getBalance() != null ? cb.getBalance() : 0.0) + delta;
-            if (nuevoSaldo < 0) {
-                throw new RuntimeException("Saldo insuficiente en " + symbol + " para la cuenta " + account.getName());
-            }
-            cb.setBalance(nuevoSaldo);
-        } else {
-            if (delta < 0) {
-                throw new RuntimeException("No existe balance en " + symbol + " para descontar");
-            }
-            cb = new AccountCryptoBalance();
-            cb.setCryptoSymbol(symbol);
-            cb.setBalance(delta);
-            cb.setAccountBinance(account);
-            account.getCryptoBalances().add(cb);
-        }
-
-        accountBinanceRepository.save(account); // cascada actualiza también balances
+        updateCryptoBalance(account, symbol, delta, false);
     }
 
+    // Permite negativos cuando allowNegative = true
+    @Transactional
+    public void updateCryptoBalance(AccountBinance account, String symbol, Double delta, boolean allowNegative) {
+        if (account == null) throw new IllegalArgumentException("AccountBinance es null");
+        String sym = (symbol == null ? "USDT" : symbol.trim().toUpperCase());
+
+        AccountCryptoBalance cb = accountCryptoBalanceRepository
+                .findByAccountBinanceIdAndCryptoSymbol(account.getId(), sym)
+                .orElse(null);
+
+        if (cb == null) {
+            cb = new AccountCryptoBalance();
+            cb.setAccountBinance(account);
+            cb.setCryptoSymbol(sym);
+            cb.setBalance(0.0);
+        }
+
+        double current = cb.getBalance() == null ? 0.0 : cb.getBalance();
+        double next = current + (delta == null ? 0.0 : delta);
+
+        if (!allowNegative && next < -1e-6) {
+            throw new RuntimeException("Saldo insuficiente en " + sym + " para la cuenta " + account.getName());
+        }
+
+        cb.setBalance(next);
+        accountCryptoBalanceRepository.save(cb);
+    }
 }

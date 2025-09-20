@@ -43,5 +43,12 @@ public interface AccountCryptoBalanceRepository extends JpaRepository<AccountCry
     // Para stables dinámicas (símbolos distintos)
     @Query("select distinct upper(b.cryptoSymbol) from AccountCryptoBalance b")
     List<String> findDistinctSymbols();
+    
+ // busca por accountBinance.id y por cryptoSymbol
+    Optional<AccountCryptoBalance> findByAccountBinanceIdAndCryptoSymbol(
+            Integer accountBinanceId,
+            String cryptoSymbol
+    );
+
 
 }

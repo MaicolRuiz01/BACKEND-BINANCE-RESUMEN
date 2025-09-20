@@ -31,7 +31,8 @@ public class SellDollarsController {
     
     private final SellDollarsService service;
     
-    private SellDollarsRepository sellDollarsRepository;
+    
+    private final SellDollarsRepository sellDollarsRepository;
 
     @Autowired
     private AccountBinanceRepository accountBinanceRepository;  // Inyección del repositorio
@@ -59,8 +60,8 @@ public class SellDollarsController {
     
     @GetMapping("/no-asignadas")
     public ResponseEntity<List<SellDollars>> getVentasNoAsignadas() {
-        service.registrarVentasAutomaticamente();   // 👈 importa todo antes de listar
-        return ResponseEntity.ok(sellDollarsRepository.findByAsignadoFalse());
+        //service.registrarVentasAutomaticamente();   // 👈 importa todo antes de listar
+        return ResponseEntity.ok(service.registrarYObtenerVentasNoAsignadas());
     }
 
     
