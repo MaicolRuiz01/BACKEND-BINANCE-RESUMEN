@@ -509,10 +509,13 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 
 			    AccountBinance account = accountBinanceRepository.findByName(dto.getNameAccount());
 
+			    // 👇 calcula el símbolo una sola vez (con fallback a USDT)
+			    String symbol = (dto.getCryptoSymbol() != null && !dto.getCryptoSymbol().isBlank())
+			            ? dto.getCryptoSymbol().trim().toUpperCase()
+			            : "USDT";
+
 			    try {
 			        if (account != null) {
-			            String symbol = dto.getCryptoSymbol() != null ? dto.getCryptoSymbol() : "USDT";
-
 			            // token vendido (permitimos negativo SOLO en import automático)
 			            accountCryptoBalanceService.updateCryptoBalance(account, symbol, -dto.getDollars(), true);
 
@@ -528,7 +531,6 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 			            System.out.println("⚠️ Cuenta no encontrada por name: " + dto.getNameAccount() + " (se registra venta igual)");
 			        }
 			    } catch (Exception ex) {
-			        // no tumbar todo el import por una sola venta
 			        System.out.println("⚠️ No se pudo ajustar balance cripto: " + ex.getMessage());
 			    }
 
@@ -544,15 +546,17 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 			    nueva.setAccountBinance(account);
 			    nueva.setComision(dto.getComision());
 
+			    // 👈👈👈 AQUÍ EL FIX
+			    nueva.setCryptoSymbol(symbol);
+
 			    sellDollarsRepository.save(nueva);
 			}
+
 
 
 		} catch (Exception e) {
 			// TODO: handle exception
 			throw new RuntimeException("Error al registrar compras automáticamente", e);
 		}
-
 	}
-
 }
