@@ -54,25 +54,28 @@ public class BuyDollarsController {
 
     @GetMapping("/listado")
     public ResponseEntity<List<BuyDollarsDto>> getBuyDollarsList() {
-        List<BuyDollars> compras = buyDollarsService.getAllBuyDollars();
-
-        List<BuyDollarsDto> dtos = compras.stream().map(buy -> {
-            BuyDollarsDto dto = new BuyDollarsDto();
-
-            dto.setId(buy.getId()); 
-            //dto.setDollars(buy.getDollars());
-            dto.setTasa(buy.getTasa());
-            dto.setNameAccount(buy.getNameAccount());
-            dto.setDate(buy.getDate());
-            dto.setIdDeposit(buy.getIdDeposit());
-            dto.setPesos(buy.getPesos());
-            dto.setAccountBinanceId(buy.getAccountBinance().getId());
-            dto.setSupplierId(buy.getSupplier().getId());
-            return dto;
-        }).collect(Collectors.toList());
+        List<BuyDollarsDto> dtos = buyDollarsService.getAllBuyDollars().stream()
+            .filter(b -> Boolean.TRUE.equals(b.getAsignada())) // ✅ solo asignadas
+            .map(buy -> {
+                BuyDollarsDto dto = new BuyDollarsDto();
+                dto.setId(buy.getId());
+                dto.setTasa(buy.getTasa());
+                dto.setNameAccount(buy.getNameAccount());
+                dto.setDate(buy.getDate());
+                dto.setIdDeposit(buy.getIdDeposit());
+                dto.setPesos(buy.getPesos());
+                dto.setAccountBinanceId(buy.getAccountBinance() != null ? buy.getAccountBinance().getId() : null);
+                dto.setSupplierId(buy.getSupplier() != null ? buy.getSupplier().getId() : null);
+                // si tu DTO/Entidad lo tienen:
+                dto.setCryptoSymbol(buy.getCryptoSymbol());
+                dto.setAmount(buy.getAmount());
+                return dto;
+            })
+            .toList();
 
         return ResponseEntity.ok(dtos);
     }
+
 
     @PutMapping("/{id}")
     public ResponseEntity<BuyDollars> updateBuyDollars(@PathVariable Integer id, @RequestBody BuyDollarsDto dto) {
