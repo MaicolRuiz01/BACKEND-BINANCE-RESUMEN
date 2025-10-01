@@ -55,6 +55,8 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
         private ClienteRepository clienteRepository;
         @Autowired
         private SupplierRepository supplierRepository;
+        @Autowired
+        private AccountCopRepository accountCopRepository;
 
         @Override
         @Transactional
@@ -150,6 +152,7 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
             balance.setSaldoClientes(clientesSaldo);
             balance.setComisionTrust(comisionTrust);
             balance.setProveedores(deudaProveedores);
+            balance.setCuentasCop(saldoCop);
 
             balanceRepo.save(balance);
         }

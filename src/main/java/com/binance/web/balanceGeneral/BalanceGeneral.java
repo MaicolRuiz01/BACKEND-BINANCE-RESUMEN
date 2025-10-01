@@ -40,5 +40,6 @@ public class BalanceGeneral {
     private Double comisionTrust; //comisiones del las selldollars
     private Double saldoCuentasBinance;
     private Double proveedores;
+    private Double cuentasCop;
 
 }
