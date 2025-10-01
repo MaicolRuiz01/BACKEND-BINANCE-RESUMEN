@@ -38,5 +38,7 @@ public class BalanceGeneral {
     private Double saldoClientes; //saldo total de clientes
     
     private Double comisionTrust; //comisiones del las selldollars
+    private Double saldoCuentasBinance;
+    private Double proveedores;
 
 }
