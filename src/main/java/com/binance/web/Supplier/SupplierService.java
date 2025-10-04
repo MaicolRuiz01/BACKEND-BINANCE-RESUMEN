@@ -16,4 +16,6 @@ public interface SupplierService {
 	Supplier getSupplierById(int id);
 	void addBuyDollars(BuyDollars buyDollars);
 	Supplier updateSupplierBalance(Integer id, Supplier supplier);
+	void transferFromClientToSupplier(Integer clientId, Integer supplierId, Double amount);
+
 }

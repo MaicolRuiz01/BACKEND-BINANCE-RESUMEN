@@ -64,4 +64,18 @@ public class SupplierController {
 		return ResponseEntity.ok().build();
 	}
 
+	// Transferencia Cliente → Proveedor
+    @PostMapping("/transfer/client-to-supplier")
+    public ResponseEntity<String> transferClientToSupplier(
+            @RequestParam Integer clientId,
+            @RequestParam Integer supplierId,
+            @RequestParam Double amount) {
+        try {
+            supplierService.transferFromClientToSupplier(clientId, supplierId, amount);
+            return ResponseEntity.ok("Transferencia Cliente → Proveedor realizada con éxito");
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body("Error: " + e.getMessage());
+        }
+	}
+
 }
