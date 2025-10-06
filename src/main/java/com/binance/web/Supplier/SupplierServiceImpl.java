@@ -9,10 +9,12 @@ import org.springframework.stereotype.Service;
 
 import com.binance.web.Entity.AccountCop;
 import com.binance.web.Entity.BuyDollars;
+import com.binance.web.Entity.Cliente;
 import com.binance.web.Entity.Supplier;
 import com.binance.web.OrderP2P.OrderP2PDto;
 import com.binance.web.Repository.AccountCopRepository;
 import com.binance.web.Repository.BuyDollarsRepository;
+import com.binance.web.Repository.ClienteRepository;
 import com.binance.web.Repository.SupplierRepository;
 
 @Service
@@ -26,6 +28,9 @@ public class SupplierServiceImpl implements SupplierService {
 
 	@Autowired
 	private BuyDollarsRepository buyDollarsRepository;
+
+	@Autowired
+	private ClienteRepository clienteRepository;
 
 	@Override
 	public void saveSupplier(Supplier supplier) {
@@ -97,4 +102,21 @@ public class SupplierServiceImpl implements SupplierService {
 		// TODO Auto-generated method stub
 		
 	}
+
+	@Override
+public void transferFromClientToSupplier(Integer clientId, Integer supplierId, Double amount) {
+    Cliente cliente = clienteRepository.findById(clientId)
+            .orElseThrow(() -> new RuntimeException("Cliente no encontrado"));
+    Supplier supplier = supplierRepository.findById(supplierId)
+            .orElseThrow(() -> new RuntimeException("Proveedor no encontrado"));
+
+    // Restar saldo al cliente
+    cliente.setSaldo(cliente.getSaldo() - amount);
+    clienteRepository.save(cliente);
+
+    // Sumar saldo al proveedor
+    supplier.setBalance(supplier.getBalance() + amount);
+    supplier.setLastPaymentDate(LocalDateTime.now());
+    supplierRepository.save(supplier);
+}
 }
