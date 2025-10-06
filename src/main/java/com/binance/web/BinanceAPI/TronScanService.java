@@ -20,6 +20,8 @@ import org.springframework.web.client.RestTemplate;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.beans.factory.annotation.Value;
@@ -356,6 +358,119 @@ public class TronScanService {
             return 0.0;
         } catch (Exception e) {
             return 0.0;
+        }
+    }
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+ // == helpers Trongrid (sin tocar lo demás) ==
+    public String getTrongridTrc20(String address, int limit) {
+        String url = "https://api.trongrid.io/v1/accounts/" + address
+                + "/transactions/trc20?limit=" + limit
+                + "&only_confirmed=true&order_by=block_timestamp,desc";
+        return restTemplate.exchange(url, HttpMethod.GET, tronGridEntity(), String.class).getBody();
+    }
+    public String getTrongridAccountTx(String address, int limit) {
+        String url = "https://api.trongrid.io/v1/accounts/" + address
+                + "/transactions?limit=" + limit
+                + "&only_confirmed=true&order_by=block_timestamp,desc";
+        return restTemplate.exchange(url, HttpMethod.GET, tronGridEntity(), String.class).getBody();
+    }
+    
+    public String getUnifiedMovementsJson(String address, int limit) {
+        ArrayNode out = objectMapper.createArrayNode();
+
+        // TRC20
+        try {
+            String raw20 = getTrongridTrc20(address, limit);
+            JsonNode data = objectMapper.readTree(raw20).path("data");
+            if (data.isArray()) {
+                for (JsonNode tx : data) {
+                    String txId = tx.path("transaction_id").asText(null);
+                    long ts     = tx.path("block_timestamp").asLong(0L);
+                    String from = tx.path("from").asText((String) null);
+                    String to   = tx.path("to").asText((String) null);
+
+                    JsonNode token = tx.path("token_info");
+                    String symbol  = token.path("symbol").asText("TOKEN");
+                    int decimals   = 6;
+                    if (token.has("decimals")) {
+                        try { decimals = Integer.parseInt(token.get("decimals").asText()); } catch (Exception ignore) {}
+                    }
+                    double amount = 0.0;
+                    try { amount = Double.parseDouble(tx.path("value").asText("0")) / Math.pow(10, decimals); } catch (Exception ignore) {}
+
+                    if (txId != null && ts > 0) {
+                        ObjectNode row = objectMapper.createObjectNode();
+                        row.put("txId", txId);
+                        row.put("timestamp", ts);
+                        row.put("from", from);
+                        row.put("to", to);
+                        row.put("symbol", symbol);
+                        row.put("amount", amount);
+                        row.put("source", "TRC20");
+                        out.add(row);
+                    }
+                }
+            }
+        } catch (Exception ignore) {}
+
+        // TRX nativo
+        try {
+            String rawAcc = getTrongridAccountTx(address, limit);
+            JsonNode data = objectMapper.readTree(rawAcc).path("data");
+            if (data.isArray()) {
+                for (JsonNode tx : data) {
+                    String txId = tx.path("txID").asText(tx.path("transaction_id").asText(null));
+                    long ts     = tx.path("block_timestamp").asLong(0L);
+
+                    JsonNode contracts = tx.path("raw_data").path("contract");
+                    if (contracts.isArray() && contracts.size() > 0) {
+                        JsonNode c0 = contracts.get(0);
+                        if ("TransferContract".equals(c0.path("type").asText())) {
+                            JsonNode val = c0.path("parameter").path("value");
+                            long sun   = val.path("amount").asLong(0L);
+                            String from = val.path("owner_address").asText((String) null);
+                            String to   = val.path("to_address").asText((String) null);
+                            double trx  = sun / 1_000_000.0;
+
+                            if (txId != null && ts > 0) {
+                                ObjectNode row = objectMapper.createObjectNode();
+                                row.put("txId", txId);
+                                row.put("timestamp", ts);
+                                row.put("from", from);
+                                row.put("to", to);
+                                row.put("symbol", "TRX");
+                                row.put("amount", trx);
+                                row.put("source", "TRX");
+                                out.add(row);
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignore) {}
+
+        // ordenar (desc) por timestamp
+        try {
+            List<JsonNode> tmp = new ArrayList<>();
+            out.forEach(tmp::add);
+            tmp.sort((a,b) -> Long.compare(b.path("timestamp").asLong(0L), a.path("timestamp").asLong(0L)));
+            ArrayNode sorted = objectMapper.createArrayNode();
+            tmp.forEach(sorted::add);
+            return objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(sorted);
+        } catch (Exception e) {
+            return out.toString();
         }
     }
 }

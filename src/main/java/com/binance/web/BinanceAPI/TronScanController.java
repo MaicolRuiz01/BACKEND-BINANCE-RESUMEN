@@ -56,7 +56,8 @@ public class TronScanController {
 
 	@Autowired
 	private ClienteRepository clienteRepository;
-
+	
+	@GetMapping
 	private List<String> getAllTrustWallets() {
 		return accountBinanceRepository.findAll().stream()
 				.filter(account -> "TRUST".equalsIgnoreCase(account.getTipo())).map(AccountBinance::getAddress)
@@ -227,4 +228,17 @@ public class TronScanController {
 		double totalUsd = tronScanService.getTotalAssetTokenOverview(walletAddress);
 		return ResponseEntity.ok(totalUsd);
 	}
+	
+	// TronScanController
+	@GetMapping("/trongrid/movements-flat")
+	public ResponseEntity<String> unifiedMovements(
+	        @RequestParam String address,
+	        @RequestParam(defaultValue = "200") int limit) {
+
+	    String json = tronScanService.getUnifiedMovementsJson(address, limit);
+	    return ResponseEntity.ok()
+	            .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+	            .body(json);
+	}
+
 }

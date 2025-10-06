@@ -1,7 +1,9 @@
 package com.binance.web.BinanceAPI;
 
+import java.net.http.HttpHeaders;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -9,12 +11,16 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.client.RestTemplate;
 
 import com.binance.web.Repository.AccountBinanceRepository;
 import com.binance.web.Repository.BuyDollarsRepository;
@@ -93,6 +99,43 @@ public class SolanaController {
 	) {
 		String raw = solscanService.getTransfersRaw(address, page, pageSize, tokenType);
 		return ResponseEntity.ok(raw);
+	}
+	// En SolanaController
+	@GetMapping("/transfers-raw")
+	public ResponseEntity<String> getTransfersRaw(@RequestParam String address) {
+	    String raw = solscanService.getSplTransfersRawHeliusOnly(address, 20);
+	    return ResponseEntity.ok(raw);
+	}
+	
+	@GetMapping("/test-endpoints")
+	public ResponseEntity<Map<String, Object>> testSolscanEndpoints(@RequestParam String address) {
+	    Map<String, Object> result = solscanService.testTransfersEndpoints(address);
+	    return ResponseEntity.ok(result);
+	}
+	
+	// En SolanaController
+	@GetMapping("/debug-config")
+	public ResponseEntity<Map<String, Object>> debugConfig() {
+	    Map<String, Object> debug = new HashMap<>();
+	    debug.put("helius_configured", solscanService.isHeliusConfigured());
+	    debug.put("solscan_configured", solscanService.isSolscanConfigured());
+	    return ResponseEntity.ok(debug);
+	}
+	
+	// En SolanaController - TEMPORAL PARA DEBUG
+	@GetMapping("/debug-helius")
+	public ResponseEntity<String> debugHelius(@RequestParam String address) {
+	    try {
+	        String url = "https://api.helius.xyz/v0/addresses/" + address + 
+	                     "/transactions?api-key=9609e311-f36d-429b-a403-8499591b6583&limit=2";
+	        
+	        RestTemplate rt = new RestTemplate();
+	        String raw = rt.getForObject(url, String.class);
+	        
+	        return ResponseEntity.ok(raw);
+	    } catch (Exception e) {
+	        return ResponseEntity.ok("{\"error\":\"" + e.getMessage() + "\"}");
+	    }
 	}
 
 }

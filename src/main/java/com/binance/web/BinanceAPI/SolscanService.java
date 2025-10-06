@@ -181,9 +181,11 @@ public class SolscanService {
 
 	private static final Set<String> SOLANA_WHITELIST = Set.of("SOL", "USDC", "USDT");
 
-	// Mints comunes → símbolo/decimales (extiende si usas otros tokens)
-	private static final Map<String, String> MINT_TO_SYMBOL = Map.of("EPjFWdd5AufqSSqeM2q9JV5xQ6G8TLVL4Qp7q4G4Q1k",
-			"USDC", "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", "USDT");
+	// Cambia esta línea en tu SolscanService (línea ~170 aprox)
+	private static final Map<String, String> MINT_TO_SYMBOL = Map.of(
+	    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "USDC",  // ✅ Correcto
+	    "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", "USDT"
+	);
 
 	private static final Map<String, Integer> SYMBOL_DECIMALS = Map.of("USDC", 6, "USDT", 6);
 
@@ -246,69 +248,25 @@ public class SolscanService {
 		}
 	}
 
-	/* ===================== Negocio: balances y totales ===================== */
-
+	// Reemplaza getBalancesByAsset para que use Helius directamente
 	public Map<String, Double> getBalancesByAsset(String address) {
-		Map<String, Double> out = new HashMap<>();
-		try {
-			String accRaw = getAccountRaw(address);
-			JsonNode acc = objectMapper.readTree(accRaw);
-			long lamports = acc.path("lamports").asLong(acc.path("balance").asLong(0L));
-			double sol = lamports / 1_000_000_000.0;
-			if (sol > 0)
-				out.put("SOL", sol);
-
-			String tokRaw = getAccountTokensRaw(address);
-			JsonNode tokens = objectMapper.readTree(tokRaw);
-			JsonNode data = tokens.isArray() ? tokens : tokens.path("data");
-			if (data != null && data.isArray()) {
-				for (JsonNode t : data) {
-					String sym = pickUpper(t.path("symbol").asText(null), t.path("tokenSymbol").asText(null),
-							t.path("tokenName").asText(null));
-					if (sym == null)
-						continue;
-					sym = sym.toUpperCase(Locale.ROOT);
-					if (!SOLANA_WHITELIST.contains(sym))
-						continue; // 👈 ignora tokens raros
-
-					int dec = firstNonNeg(t.path("decimals").asInt(-1),
-							t.path("tokenAmount").path("decimals").asInt(-1));
-					String amountStr = firstNonBlank(t.path("tokenAmount").path("amount").asText(null),
-							t.path("balance").asText(null), t.path("quantity").asText(null));
-
-					double qty = 0.0;
-					try {
-						if (amountStr != null && dec >= 0) {
-							qty = Double.parseDouble(amountStr) / Math.pow(10, dec);
-						} else {
-							String ui = firstNonBlank(t.path("tokenAmount").path("uiAmountString").asText(null),
-									t.path("uiAmountString").asText(null), t.path("uiAmount").asText(null));
-							if (ui != null)
-								qty = Double.parseDouble(ui);
-						}
-					} catch (Exception ignore) {
-					}
-					if (qty > 0)
-						out.merge(sym, qty, Double::sum);
-				}
-			}
-			return out;
-		} catch (Exception e) {
-			throw new RuntimeException("Error obteniendo snapshot SOLANA: " + e.getMessage(), e);
-		}
+	    // IR DIRECTO A HELIUS
+	    if (heliusApiKey != null && !heliusApiKey.isBlank()) {
+	        return getBalancesByAssetHeliusOnly(address);
+	    }
+	    
+	    // Fallback vacío si no hay Helius
+	    return new HashMap<>();
 	}
 
+	// Reemplaza getTotalAssetUsd para que use Helius directamente
 	public double getTotalAssetUsd(String address) {
-		Map<String, Double> balances = getBalancesByAsset(address);
-		double total = 0.0;
-		for (Map.Entry<String, Double> e : balances.entrySet()) {
-			String sym = e.getKey();
-			double qty = e.getValue();
-			double px = ("USDT".equalsIgnoreCase(sym) || "USDC".equalsIgnoreCase(sym)) ? 1.0
-					: Optional.ofNullable(binanceService.getPriceInUSDT(sym)).orElse(0.0);
-			total += qty * px;
-		}
-		return total;
+	    // IR DIRECTO A HELIUS
+	    if (heliusApiKey != null && !heliusApiKey.isBlank()) {
+	        return getTotalAssetUsdHeliusOnly(address);
+	    }
+	    
+	    return 0.0;
 	}
 
 	/* ===================== Parsers estilo Tron ===================== */
@@ -499,52 +457,36 @@ public class SolscanService {
 		return 0L;
 	}
 
-	// ====== splTransfers con orden PRO v2 → PRO raíz → PUBLIC → Helius ======
+	// REEMPLAZA COMPLETAMENTE el método getSplTransfersRaw existente
 	public String getSplTransfersRaw(String address, int limit) {
-		int lim = (limit <= 0 ? 50 : limit);
+	    int lim = (limit <= 0 ? 50 : limit);
 
-		List<String> urls = List.of(
-				// PRO v2
-				PRO_BASE_V2 + "/account/splTransfers?address=" + address + "&limit=" + lim,
-				PRO_BASE_V2 + "/account/splTransfers?account=" + address + "&limit=" + lim,
-
-				// PRO raíz (algunos despliegues no enrutan /v2 aquí)
-				PRO_BASE + "/v2/account/splTransfers?address=" + address + "&limit=" + lim,
-				PRO_BASE + "/v2/account/splTransfers?account=" + address + "&limit=" + lim,
-				PRO_BASE + "/account/splTransfers?address=" + address + "&limit=" + lim,
-				PRO_BASE + "/account/splTransfers?account=" + address + "&limit=" + lim,
-
-				// Público (PUB) con y sin /v2
-				PUB_BASE + "/v2/account/splTransfers?address=" + address + "&limit=" + lim,
-				PUB_BASE + "/v2/account/splTransfers?account=" + address + "&limit=" + lim,
-				PUB_BASE + "/account/splTransfers?address=" + address + "&limit=" + lim,
-				PUB_BASE + "/account/splTransfers?account=" + address + "&limit=" + lim);
-
-		String body = tryUrlsInOrder(urls);
-		if (body != null)
-			return body;
-
-		// Fallback final a Helius si hay apiKey
-		if (heliusApiKey != null && !heliusApiKey.isBlank()) {
-			return heliusTransfersAsSolscan(address, lim);
-		}
-		return "{\"data\":[]}";
+	    // 🔥 IR DIRECTO A HELIUS - SIN INTENTAR SOLSCAN
+	    if (heliusApiKey != null && !heliusApiKey.isBlank()) {
+	        System.out.println("🚀 Usando Helius directamente (Solscan no disponible)");
+	        return heliusTransfersAsSolscan(address, lim);
+	    }
+	    
+	    System.out.println("⚠️ No hay API key de Helius configurada");
+	    return "{\"data\":[]}";
 	}
 
 	/* ===================== Wrappers de alto nivel ===================== */
 
 	public List<BuyDollarsDto> listIncomingToday(String walletAddress, String accountName, Set<String> assignedIds) {
-		String raw = getSplTransfersRaw(walletAddress, 200);
-		return parseSplIncomingTransfers(raw, walletAddress, accountName, assignedIds);
+	    // CAMBIA getSplTransfersRaw por getSplTransfersRawHeliusOnly
+	    String raw = getSplTransfersRawHeliusOnly(walletAddress, 20);
+	    return parseSplIncomingTransfers(raw, walletAddress, accountName, assignedIds);
 	}
 
 	public List<SellDollarsDto> listOutgoingToday(String walletAddress, String accountName, Set<String> assignedIds,
-			Map<String, Cliente> clientePorWallet) {
-		String raw = getSplTransfersRaw(walletAddress, 200);
-		List<SellDollarsDto> out = parseSplOutgoingTransfers(raw, walletAddress, accountName, assignedIds,
-				clientePorWallet);
-		out.forEach(dto -> dto.setComision(0.0)); // nunca descuentas fee del token
-		return out;
+	        Map<String, Cliente> clientePorWallet) {
+	    // CAMBIA getSplTransfersRaw por getSplTransfersRawHeliusOnly
+	    String raw = getSplTransfersRawHeliusOnly(walletAddress, 20);
+	    List<SellDollarsDto> out = parseSplOutgoingTransfers(raw, walletAddress, accountName, assignedIds,
+	            clientePorWallet);
+	    out.forEach(dto -> dto.setComision(0.0));
+	    return out;
 	}
 
 	public List<BuyDollarsDto> parseSplIncomingTransfersHistory(String jsonResponse, String walletAddress,
@@ -740,5 +682,157 @@ public class SolscanService {
 		} catch (Exception e) {
 			return "{\"success\":false,\"message\":\"" + e.getMessage() + "\",\"data\":[]}";
 		}
+	}
+	
+	public Map<String, Object> testTransfersEndpoints(String address) {
+	    Map<String, Object> result = new HashMap<>();
+	    
+	    // Lista de endpoints a probar
+	    List<String> endpoints = List.of(
+	        PRO_BASE + "/v2.0/account/transfer?address=" + address + "&page=1&page_size=20",
+	        PRO_BASE_V2 + "/account/transfer?address=" + address + "&page=1&page_size=20",
+	        PRO_BASE + "/v2/account/transfer?address=" + address + "&page=1&page_size=20",
+	        PRO_BASE + "/account/transfer?address=" + address + "&page=1&page_size=20",
+	        PRO_BASE_V2 + "/account/splTransfers?address=" + address + "&limit=20",
+	        PRO_BASE + "/account/splTransfers?address=" + address + "&limit=20",
+	        PUB_BASE + "/account/splTransfers?address=" + address + "&limit=20"
+	    );
+	    
+	    List<Map<String, Object>> results = new ArrayList<>();
+	    
+	    for (String endpoint : endpoints) {
+	        Map<String, Object> testResult = new HashMap<>();
+	        testResult.put("endpoint", endpoint);
+	        
+	        try {
+	            // Probar con header "token"
+	            HttpHeaders h = new HttpHeaders();
+	            h.setAccept(List.of(MediaType.APPLICATION_JSON));
+	            if (solscanApiKey != null && !solscanApiKey.isBlank()) {
+	                h.set("token", solscanApiKey.trim());
+	            }
+	            
+	            ResponseEntity<String> res = restTemplate.exchange(
+	                endpoint, HttpMethod.GET, new HttpEntity<>(h), String.class
+	            );
+	            
+	            testResult.put("status", res.getStatusCodeValue());
+	            testResult.put("success", true);
+	            String body = res.getBody();
+	            if (body != null) {
+	                testResult.put("body_preview", body.substring(0, Math.min(200, body.length())));
+	                testResult.put("has_data", hasUsableData(body));
+	            }
+	            results.add(testResult);
+	            
+	        } catch (HttpStatusCodeException e) {
+	            testResult.put("status", e.getStatusCode().value());
+	            testResult.put("success", false);
+	            testResult.put("error", e.getMessage());
+	            testResult.put("response_body", e.getResponseBodyAsString());
+	            results.add(testResult);
+	        } catch (Exception e) {
+	            testResult.put("success", false);
+	            testResult.put("error", e.getMessage());
+	            results.add(testResult);
+	        }
+	    }
+	    
+	    result.put("tests", results);
+	    result.put("total_tests", results.size());
+	    result.put("successful", results.stream().filter(r -> (Boolean) r.getOrDefault("success", false)).count());
+	    
+	    return result;
+	}
+	public String getSplTransfersRawHeliusOnly(String address, int limit) {
+	    int lim = (limit <= 0 ? 50 : limit);
+	    
+	    // 🔥 HELIUS SOLO ACEPTA MÁXIMO 100
+	    if (lim > 100) {
+	        lim = 100;
+	    }
+	    
+	    if (heliusApiKey == null || heliusApiKey.isBlank()) {
+	        return "{\"data\":[]}";
+	    }
+	    
+	    System.out.println("🚀 Usando Helius para SPL transfers (limit=" + lim + ")");
+	    return heliusTransfersAsSolscan(address, lim);
+	}
+	
+	// En SolscanService
+	public boolean isHeliusConfigured() {
+	    return heliusApiKey != null && !heliusApiKey.isBlank();
+	}
+
+	public boolean isSolscanConfigured() {
+	    return solscanApiKey != null && !solscanApiKey.isBlank();
+	}
+	
+	// Nuevo método que usa SOLO Helius para obtener balances
+	public Map<String, Double> getBalancesByAssetHeliusOnly(String address) {
+	    Map<String, Double> out = new HashMap<>();
+	    
+	    if (heliusApiKey == null || heliusApiKey.isBlank()) {
+	        return out;
+	    }
+	    
+	    try {
+	        // Helius tiene endpoint para obtener balances de tokens
+	        String url = HELIUS_BASE + "/v0/addresses/" + address + "/balances?api-key=" + heliusApiKey.trim();
+	        
+	        HttpHeaders h = new HttpHeaders();
+	        h.setAccept(List.of(MediaType.APPLICATION_JSON));
+	        String raw = restTemplate.exchange(url, HttpMethod.GET, new HttpEntity<>(h), String.class).getBody();
+	        
+	        JsonNode response = objectMapper.readTree(raw);
+	        
+	        // Procesar SOL nativo
+	        long lamports = response.path("nativeBalance").asLong(0L);
+	        double sol = lamports / 1_000_000_000.0;
+	        if (sol > 0) {
+	            out.put("SOL", sol);
+	        }
+	        
+	        // Procesar tokens SPL
+	        JsonNode tokens = response.path("tokens");
+	        if (tokens != null && tokens.isArray()) {
+	            for (JsonNode token : tokens) {
+	                String mint = token.path("mint").asText(null);
+	                String symbol = MINT_TO_SYMBOL.get(mint);
+	                
+	                if (symbol != null && SOLANA_WHITELIST.contains(symbol)) {
+	                    double amount = token.path("amount").asDouble(0.0);
+	                    int decimals = token.path("decimals").asInt(6);
+	                    double qty = amount / Math.pow(10, decimals);
+	                    
+	                    if (qty > 0) {
+	                        out.put(symbol, qty);
+	                    }
+	                }
+	            }
+	        }
+	        
+	        return out;
+	    } catch (Exception e) {
+	        System.out.println("⚠️ Error obteniendo balances de Helius: " + e.getMessage());
+	        return out;
+	    }
+	}
+
+	// Versión simplificada que calcula total en USD usando Helius
+	public double getTotalAssetUsdHeliusOnly(String address) {
+	    Map<String, Double> balances = getBalancesByAssetHeliusOnly(address);
+	    double total = 0.0;
+	    
+	    for (Map.Entry<String, Double> e : balances.entrySet()) {
+	        String sym = e.getKey();
+	        double qty = e.getValue();
+	        double px = ("USDT".equalsIgnoreCase(sym) || "USDC".equalsIgnoreCase(sym)) ? 1.0
+	                : Optional.ofNullable(binanceService.getPriceInUSDT(sym)).orElse(0.0);
+	        total += qty * px;
+	    }
+	    
+	    return total;
 	}
 }

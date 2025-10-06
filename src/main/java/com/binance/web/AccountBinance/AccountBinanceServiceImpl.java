@@ -134,26 +134,29 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
 	}
 
 	@Override
+	@Transactional
 	public void updateOrCreateCryptoBalance(Integer accountId, String cryptoSymbol, Double delta) {
-		if (accountId == null || cryptoSymbol == null || delta == null)
-			return;
+	    if (accountId == null || cryptoSymbol == null || delta == null) return;
 
-		// Proxy sin ir a DB (no accedas a propiedades del account)
-		AccountBinance accountRef = accountBinanceRepository.getReferenceById(accountId);
+	    final String sym = cryptoSymbol.trim().toUpperCase(); // 👈 normaliza
 
-		AccountCryptoBalance bal = accountCryptoBalanceRepository
-				.findByAccountBinance_IdAndCryptoSymbol(accountId, cryptoSymbol).orElseGet(() -> {
-					AccountCryptoBalance b = new AccountCryptoBalance();
-					b.setAccountBinance(accountRef);
-					b.setCryptoSymbol(cryptoSymbol.toUpperCase());
-					b.setBalance(0.0);
-					return b;
-				});
+	    AccountBinance accountRef = accountBinanceRepository.getReferenceById(accountId);
 
-		double current = bal.getBalance() != null ? bal.getBalance() : 0.0;
-		bal.setBalance(current + delta);
-		accountCryptoBalanceRepository.save(bal);
+	    AccountCryptoBalance bal = accountCryptoBalanceRepository
+	        .findByAccountBinanceIdAndCryptoSymbol(accountId, sym)  // usa el normalizado
+	        .orElseGet(() -> {
+	            AccountCryptoBalance b = new AccountCryptoBalance();
+	            b.setAccountBinance(accountRef);
+	            b.setCryptoSymbol(sym); // 👈 guardas normalizado
+	            b.setBalance(0.0);
+	            return b;
+	        });
+
+	    double current = bal.getBalance() != null ? bal.getBalance() : 0.0;
+	    bal.setBalance(current + delta);
+	    accountCryptoBalanceRepository.save(bal);
 	}
+
 
 	@Override
 	public List<AccountBinance> findAllAccountBinance() {
