@@ -35,6 +35,7 @@ public class SellDollarsDto {
     private List<String> nombresCuentasAsignadas;
     private Double comision;
     private Double networkFeeInSOL;
-    // 🔥 Nuevo: símbolo de la cripto vendida
+    // Nuevo: símbolo de la cripto vendida
     private String cryptoSymbol; // Ej: "USDT", "TRX"
+    private String tipoCuenta;
 }

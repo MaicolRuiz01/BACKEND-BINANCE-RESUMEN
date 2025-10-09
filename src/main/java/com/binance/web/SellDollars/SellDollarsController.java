@@ -19,6 +19,7 @@ import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.SellDollars;
 import com.binance.web.Repository.AccountBinanceRepository;
 import com.binance.web.Repository.SellDollarsRepository;
+import com.binance.web.SaleP2P.AssignAccountDto;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import jakarta.transaction.Transactional;
@@ -98,6 +99,16 @@ public class SellDollarsController {
     
     @PutMapping("/asignar/{id}")
     public ResponseEntity<SellDollars> asignar(@PathVariable Integer id, @RequestBody SellDollarsDto dto) {
+        return ResponseEntity.ok(service.asignarVenta(id, dto));
+    }
+    
+    @PutMapping("/asignar-solana/{id}")
+    public ResponseEntity<SellDollars> asignarVentaSolana(
+        @PathVariable Integer id,
+        @RequestBody Map<String, List<AssignAccountDto>> body
+    ) {
+        SellDollarsDto dto = new SellDollarsDto();
+        dto.setAccounts(body.get("accounts"));
         return ResponseEntity.ok(service.asignarVenta(id, dto));
     }
 

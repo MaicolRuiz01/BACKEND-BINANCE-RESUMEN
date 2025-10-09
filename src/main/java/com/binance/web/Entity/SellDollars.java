@@ -63,5 +63,7 @@ public class SellDollars {
 
 	private Double comision;
 	private Double equivalenteciaTRX;
+	@Column(name = "tipo_cuenta", length = 32)
+    private String tipoCuenta;
 
 }

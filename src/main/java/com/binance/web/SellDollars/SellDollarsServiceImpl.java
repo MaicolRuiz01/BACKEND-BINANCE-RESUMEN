@@ -73,6 +73,8 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 	private AccountCryptoBalanceService accountCryptoBalanceService;
 	@Autowired
 	private SolanaController solanaController;
+	
+	
 
 	@Override
 	@Transactional
@@ -156,86 +158,116 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 	@Override
 	@Transactional
 	public SellDollars asignarVenta(Integer id, SellDollarsDto dto) {
-		SellDollars existing = sellDollarsRepository.findById(id)
-				.orElseThrow(() -> new RuntimeException("Venta no encontrada"));
+	    SellDollars existing = sellDollarsRepository.findById(id)
+	            .orElseThrow(() -> new RuntimeException("Venta no encontrada"));
 
-		if (Boolean.TRUE.equals(existing.getAsignado())) {
-			throw new RuntimeException("Venta ya fue asignada");
-		}
+	    if (Boolean.TRUE.equals(existing.getAsignado())) {
+	        throw new RuntimeException("Venta ya fue asignada");
+	    }
 
-		// Datos monetarios
-		existing.setTasa(dto.getTasa());
-		existing.setPesos(dto.getDollars() * dto.getTasa());
+	    // Asegura colección de detalles
+	    if (existing.getSellDollarsAccounts() == null) {
+	        existing.setSellDollarsAccounts(new ArrayList<>());
+	    } else {
+	        existing.getSellDollarsAccounts().clear();
+	    }
 
-		AverageRate tasaPromedioAnterior = averageRateRepository
-				.findTopByFechaBeforeOrderByFechaDesc(existing.getDate()).orElse(null);
+	    final boolean esSolana = isSolanaSale(existing);
 
-		if (tasaPromedioAnterior != null) {
-			Double costoEnPesos = existing.getDollars() * tasaPromedioAnterior.getAverageRate();
-			Double comision = existing.getComision() != null ? existing.getComision() : 0.0; // TRX/SOL solo informativo
-																								// aquí
-			Double utilidad = existing.getPesos() - costoEnPesos - comision;
-			existing.setUtilidad(utilidad);
-		} else {
-			existing.setUtilidad(0.0);
-		}
+	    double pesosAsignados = 0.0;
 
-		// Limpiar relaciones anteriores
-		if (existing.getSellDollarsAccounts() != null) {
-			existing.getSellDollarsAccounts().clear();
-		}
+	    // 1) Siempre asignamos el dinero recibido a las cuentas COP indicadas en el DTO
+	    if (dto.getAccounts() != null && !dto.getAccounts().isEmpty()) {
+	        for (AssignAccountDto assignDto : dto.getAccounts()) {
+	            AccountCop acc = accountCopService.findByIdAccountCop(assignDto.getAccountCop());
+	            double current = acc.getBalance() != null ? acc.getBalance() : 0.0;
+	            double monto = assignDto.getAmount() != null ? assignDto.getAmount() : 0.0;
 
-		// Cliente o proveedor (solo COP/deuda)
-		if (dto.getClienteId() != null) {
-			Cliente cliente = clienteRepository.findById(dto.getClienteId())
-					.orElseThrow(() -> new RuntimeException("Cliente no encontrado"));
-			existing.setCliente(cliente);
-			existing.setSupplier(null);
+	            acc.setBalance(current + monto);
+	            accountCopService.saveAccountCop(acc);
 
-			double saldoActual = cliente.getSaldo() != null ? cliente.getSaldo() : 0.0;
-			cliente.setSaldo(saldoActual - existing.getPesos());
-			clienteRepository.save(cliente);
+	            SellDollarsAccountCop det = new SellDollarsAccountCop();
+	            det.setSellDollars(existing);
+	            det.setAccountCop(acc);
+	            det.setAmount(monto);
+	            det.setNameAccount(assignDto.getNameAccount());
+	            existing.getSellDollarsAccounts().add(det);
 
-		} else {
-			Supplier supplier = supplierRepository.findById(dto.getSupplier())
-					.orElseThrow(() -> new RuntimeException("Supplier no encontrado"));
-			existing.setSupplier(supplier);
-			existing.setCliente(null);
+	            pesosAsignados += monto;
+	        }
+	    }
 
-			double totalAsignadoACuentas = 0.0;
+	    if (esSolana) {
+	        // 2) SOLANA: no cliente/proveedor; tasa se calcula a partir de lo asignado en COP
+	        existing.setCliente(null);
+	        existing.setSupplier(null);
 
-			if (dto.getAccounts() != null && !dto.getAccounts().isEmpty()) {
-				for (AssignAccountDto assignDto : dto.getAccounts()) {
-					AccountCop acc = accountCopService.findByIdAccountCop(assignDto.getAccountCop());
+	        existing.setPesos(pesosAsignados);
+	        double dollars = existing.getDollars() != null ? existing.getDollars() : 0.0;
+	        double tasaCalc = (dollars > 0.0) ? (pesosAsignados / dollars) : 0.0;
+	        existing.setTasa(tasaCalc);
 
-					double currentCopBalance = acc.getBalance() != null ? acc.getBalance() : 0.0;
-					acc.setBalance(currentCopBalance + assignDto.getAmount());
-					accountCopService.saveAccountCop(acc);
+	        // 3) Utilidad contra tasa promedio del día anterior
+	        AverageRate tasaPromedioAnterior = averageRateRepository
+	                .findTopByFechaBeforeOrderByFechaDesc(existing.getDate())
+	                .orElse(null);
 
-					SellDollarsAccountCop det = new SellDollarsAccountCop();
-					det.setSellDollars(existing);
-					det.setAccountCop(acc);
-					det.setAmount(assignDto.getAmount());
-					det.setNameAccount(assignDto.getNameAccount());
-					existing.getSellDollarsAccounts().add(det);
+	        if (tasaPromedioAnterior != null) {
+	            double costoEnPesos = dollars * tasaPromedioAnterior.getAverageRate();
+	            double comision = existing.getComision() != null ? existing.getComision() : 0.0; // fee de red (opcional)
+	            existing.setUtilidad(existing.getPesos() - costoEnPesos - comision);
+	        } else {
+	            existing.setUtilidad(0.0);
+	        }
 
-					totalAsignadoACuentas += assignDto.getAmount();
-				}
-			}
+	    } else {
+	        // === FLUJO NORMAL (no SOLANA): igual que tenías ===
+	        existing.setTasa(dto.getTasa());
+	        existing.setPesos(existing.getDollars() * dto.getTasa());
 
-			double restanteParaProveedor = existing.getPesos() - totalAsignadoACuentas;
-			if (restanteParaProveedor > 0.0) {
-				double currentSupplierBalance = supplier.getBalance() != null ? supplier.getBalance() : 0.0;
-				supplier.setBalance(currentSupplierBalance - restanteParaProveedor);
-			}
-			supplierRepository.save(supplier);
-		}
+	        AverageRate tasaPromedioAnterior = averageRateRepository
+	                .findTopByFechaBeforeOrderByFechaDesc(existing.getDate()).orElse(null);
 
-		// Marcar como asignada (sin tocar balances cripto)
-		existing.setAsignado(true);
+	        if (tasaPromedioAnterior != null) {
+	            Double costoEnPesos = existing.getDollars() * tasaPromedioAnterior.getAverageRate();
+	            Double comision = existing.getComision() != null ? existing.getComision() : 0.0;
+	            Double utilidad = existing.getPesos() - costoEnPesos - comision;
+	            existing.setUtilidad(utilidad);
+	        } else {
+	            existing.setUtilidad(0.0);
+	        }
 
-		return sellDollarsRepository.save(existing);
+	        // Cliente o proveedor (solo COP/deuda) – como lo tenías
+	        if (dto.getClienteId() != null) {
+	            Cliente cliente = clienteRepository.findById(dto.getClienteId())
+	                    .orElseThrow(() -> new RuntimeException("Cliente no encontrado"));
+	            existing.setCliente(cliente);
+	            existing.setSupplier(null);
+
+	            double saldoActual = cliente.getSaldo() != null ? cliente.getSaldo() : 0.0;
+	            cliente.setSaldo(saldoActual - existing.getPesos());
+	            clienteRepository.save(cliente);
+
+	        } else {
+	            Supplier supplier = supplierRepository.findById(dto.getSupplier())
+	                    .orElseThrow(() -> new RuntimeException("Supplier no encontrado"));
+	            existing.setSupplier(supplier);
+	            existing.setCliente(null);
+
+	            double totalAsignadoACuentas = pesosAsignados; // ya acumulado arriba
+	            double restanteParaProveedor = existing.getPesos() - totalAsignadoACuentas;
+	            if (restanteParaProveedor > 0.0) {
+	                double currentSupplierBalance = supplier.getBalance() != null ? supplier.getBalance() : 0.0;
+	                supplier.setBalance(currentSupplierBalance - restanteParaProveedor);
+	            }
+	            supplierRepository.save(supplier);
+	        }
+	    }
+
+	    existing.setAsignado(true);
+	    return sellDollarsRepository.save(existing);
 	}
+
 
 	@Override
 	public List<SellDollars> obtenerVentasEntreFechas(LocalDateTime inicio, LocalDateTime fin) {
@@ -357,6 +389,8 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 					.collect(Collectors.toList());
 			dto.setNombresCuentasAsignadas(nombres);
 		}
+		
+		dto.setTipoCuenta(venta.getTipoCuenta() != null ? venta.getTipoCuenta() : null);
 
 		return dto;
 	}
@@ -533,6 +567,10 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 			    } catch (Exception ex) {
 			        System.out.println("⚠️ No se pudo ajustar balance cripto: " + ex.getMessage());
 			    }
+			    
+			    String tipoCuenta = (account != null && account.getTipo() != null && !account.getTipo().isBlank())
+			            ? account.getTipo()
+			            : dto.getTipoCuenta();
 
 			    SellDollars nueva = new SellDollars();
 			    nueva.setIdWithdrawals(dto.getIdWithdrawals());
@@ -545,7 +583,7 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 			    nueva.setAsignado(false);
 			    nueva.setAccountBinance(account);
 			    nueva.setComision(dto.getComision());
-
+			    nueva.setTipoCuenta(tipoCuenta);
 			    // 👈👈👈 AQUÍ EL FIX
 			    nueva.setCryptoSymbol(symbol);
 
@@ -559,4 +597,15 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 			throw new RuntimeException("Error al registrar compras automáticamente", e);
 		}
 	}
+	private boolean isSolanaSale(SellDollars s) {
+	    AccountBinance src = s.getAccountBinance();
+	    if (src == null && s.getNameAccount() != null) {
+	        src = accountBinanceRepository.findByName(s.getNameAccount());
+	    }
+	    String tipo = (src != null && src.getTipo() != null) ? src.getTipo() : "";
+	    return tipo.equalsIgnoreCase("SOLANA") || tipo.equalsIgnoreCase("PHANTOM");
+	}
+	
+	
+
 }
