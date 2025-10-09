@@ -194,7 +194,7 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
             List<BuyDollarsDto> binancePay = binancePayController.getComprasNoRegistradas().getBody();
             List<BuyDollarsDto> spot = spotOrdersController.getComprasNoRegistradas(20).getBody();
             List<BuyDollarsDto> trust = tronScanController.getUSDTIncomingTransfers().getBody();
-            List<BuyDollarsDto> sol = solanaController.getSolanaIncomingTransfers().getBody();
+           // List<BuyDollarsDto> sol = solanaController.getSolanaIncomingTransfers().getBody(); miton dijo que no interesaba las entradas de solana 
             Set<String> existentes = buyDollarsRepository.findAll().stream()
                 .map(BuyDollars::getIdDeposit)
                 .collect(Collectors.toSet());
@@ -203,7 +203,7 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
             if (binancePay != null) todas.addAll(binancePay);
             if (spot != null) todas.addAll(spot);
             if (trust != null) todas.addAll(trust);
-            if (sol != null) todas.addAll(sol);
+            //if (sol != null) todas.addAll(sol);
             todas.sort(Comparator.comparing(BuyDollarsDto::getDate));
 
             for (BuyDollarsDto dto : todas) {
