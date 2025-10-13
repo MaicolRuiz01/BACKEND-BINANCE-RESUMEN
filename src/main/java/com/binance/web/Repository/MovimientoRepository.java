@@ -9,5 +9,7 @@ import com.binance.web.Entity.Movimiento;
 public interface MovimientoRepository extends JpaRepository<Movimiento, Integer> {
 	
 	List<Movimiento> findByTipo(String tipo);
+	List<Movimiento> findByTipoAndPagoProveedor_Id(String tipo, Integer proveedorId);
+
 
 }

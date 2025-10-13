@@ -18,92 +18,102 @@ import com.binance.web.Entity.Movimiento;
 @RestController
 @RequestMapping("/movimiento")
 public class MovimientoController {
-	
-	@Autowired
+
+    @Autowired
     private MovimientoService movimientoService;
 
     @PostMapping("/deposito")
-    public Movimiento deposito(@RequestParam Integer cuentaId,@RequestParam Integer cajaId, @RequestParam Double monto) {
-        return movimientoService.RegistrarDeposito(cuentaId,cajaId, monto);
+    public Movimiento deposito(@RequestParam Integer cuentaId, @RequestParam Integer cajaId,
+            @RequestParam Double monto) {
+        return movimientoService.RegistrarDeposito(cuentaId, cajaId, monto);
     }
 
     @PostMapping("/retiro")
-    public Movimiento retiro(@RequestParam Integer cuentaId,@RequestParam Integer cajaId, @RequestParam Double monto) {
-        return movimientoService.RegistrarRetiro(cuentaId,cajaId, monto);
+    public Movimiento retiro(@RequestParam Integer cuentaId, @RequestParam Integer cajaId, @RequestParam Double monto) {
+        return movimientoService.RegistrarRetiro(cuentaId, cajaId, monto);
     }
 
     @PostMapping("/transferencia")
-    public Movimiento transferencia(@RequestParam Integer origenId, @RequestParam Integer destinoId, @RequestParam Double monto) {
+    public Movimiento transferencia(@RequestParam Integer origenId, @RequestParam Integer destinoId,
+            @RequestParam Double monto) {
         return movimientoService.RegistrarTransferencia(origenId, destinoId, monto);
     }
+
     @PostMapping("/pago")
-    public Movimiento pago(@RequestParam Integer cuentaId, @RequestParam Integer clienteId, @RequestParam Double monto) {
-    	return movimientoService.registrarPagoCliente(cuentaId, clienteId, monto);
+    public Movimiento pago(@RequestParam Integer cuentaId, @RequestParam Integer clienteId,
+            @RequestParam Double monto) {
+        return movimientoService.registrarPagoCliente(cuentaId, clienteId, monto);
     }
+
     @PostMapping("/pago-proveedor")
     public Movimiento pagoProveedor(@RequestParam Integer cuentaId, Integer caja, Integer proveedor, Double monto) {
-    	return movimientoService.registrarPagoProveedor(cuentaId, caja, proveedor, monto);
+        return movimientoService.registrarPagoProveedor(cuentaId, caja, proveedor, monto);
     }
 
     @GetMapping("/listar")
     public List<Movimiento> listar() {
         return movimientoService.listar();
     }
-    
+
     @GetMapping("/retiros")
     public List<MovimientoDTO> listarRetiros() {
         return movimientoService.listarRetiros().stream()
-            .map(this::mapToDto)
-            .toList();
+                .map(this::mapToDto)
+                .toList();
     }
 
     @GetMapping("/depositos")
     public List<MovimientoDTO> listarDepositos() {
         return movimientoService.listarDepositos().stream()
-            .map(this::mapToDto)
-            .toList();
+                .map(this::mapToDto)
+                .toList();
     }
 
     @GetMapping("/transferencias")
     public List<MovimientoDTO> listarTransferencias() {
         return movimientoService.listarTransferencias().stream()
-            .map(this::mapToDto)
-            .toList();
+                .map(this::mapToDto)
+                .toList();
     }
-    
+
     @GetMapping("/pagos")
-    public List<MovimientoDTO> listarPagos(){
-    	return movimientoService.listarPagos().stream()
-    			.map(this::mapToDto)
-    			.toList();
+    public List<MovimientoDTO> listarPagos() {
+        return movimientoService.listarPagos().stream()
+                .map(this::mapToDto)
+                .toList();
     }
-    
-    
+
     private MovimientoDTO mapToDto(Movimiento movimiento) {
-	    return new MovimientoDTO(
-	        movimiento.getTipo(),
-	        movimiento.getFecha(),
-	        movimiento.getMonto(),
-	        movimiento.getCuentaOrigen() != null ? movimiento.getCuentaOrigen().getName() : null,
-	        movimiento.getCuentaDestino() != null ? movimiento.getCuentaDestino().getName() : null,
-	        movimiento.getCaja() != null ? movimiento.getCaja().getName() : null,
-	        movimiento.getPagoCliente() != null ? movimiento.getPagoCliente().getNombre() : null,
-	        movimiento.getPagoProveedor() != null ? movimiento.getPagoProveedor().getName() : null
-	    );
-	}
+        return new MovimientoDTO(
+                movimiento.getTipo(),
+                movimiento.getFecha(),
+                movimiento.getMonto(),
+                movimiento.getCuentaOrigen() != null ? movimiento.getCuentaOrigen().getName() : null,
+                movimiento.getCuentaDestino() != null ? movimiento.getCuentaDestino().getName() : null,
+                movimiento.getCaja() != null ? movimiento.getCaja().getName() : null,
+                movimiento.getPagoCliente() != null ? movimiento.getPagoCliente().getNombre() : null,
+                movimiento.getPagoProveedor() != null ? movimiento.getPagoProveedor().getName() : null);
+    }
 
     @PutMapping("/{id}")
-public ResponseEntity<Movimiento> actualizarMovimiento(
-        @PathVariable Integer id,
-        @RequestBody MovimientoUpdateDTO dto) {
-    
-    Movimiento actualizado = movimientoService.actualizarMovimiento(
-        id,
-        dto.getMonto(),
-        dto.getCuentaOrigenId(),
-        dto.getCuentaDestinoId(),
-        dto.getCajaId()
-    );
-    return ResponseEntity.ok(actualizado);
-}
+    public ResponseEntity<Movimiento> actualizarMovimiento(
+            @PathVariable Integer id,
+            @RequestBody MovimientoUpdateDTO dto) {
+
+        Movimiento actualizado = movimientoService.actualizarMovimiento(
+                id,
+                dto.getMonto(),
+                dto.getCuentaOrigenId(),
+                dto.getCuentaDestinoId(),
+                dto.getCajaId());
+        return ResponseEntity.ok(actualizado);
+    }
+
+    @GetMapping("/pagos-proveedor/{proveedorId}")
+    public List<MovimientoDTO> listarPagosProveedorPorId(@PathVariable Integer proveedorId) {
+        return movimientoService.listarPagosProveedorPorId(proveedorId).stream()
+                .map(this::mapToDto)
+                .toList();
+    }
+
 }
