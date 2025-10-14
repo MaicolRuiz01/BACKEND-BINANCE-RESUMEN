@@ -116,4 +116,9 @@ public class MovimientoController {
                 .toList();
     }
 
+    @GetMapping("/pagos-cliente/test")
+        public String test() {
+    return "MovimientoController activo";
+}
+
 }
