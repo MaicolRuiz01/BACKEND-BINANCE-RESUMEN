@@ -16,13 +16,13 @@ import com.binance.web.AccountCop.AccountCopService;
 import com.binance.web.BinanceAPI.BinanceService;
 import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.AccountCop;
-import com.binance.web.Entity.PurchaseRate;
+
 import com.binance.web.Entity.SaleP2P;
 import com.binance.web.Entity.SaleP2pAccountCop;
 import com.binance.web.OrderP2P.OrderP2PDto;
 import com.binance.web.OrderP2P.OrderP2PService;
 import com.binance.web.Repository.AccountBinanceRepository;
-import com.binance.web.Repository.PurchaseRateRepository;
+
 import com.binance.web.Repository.SaleP2PRepository;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -33,9 +33,6 @@ public class SaleP2PServiceImpl implements SaleP2PService {
 
     @Autowired
     private SaleP2PRepository saleP2PRepository;
-
-    @Autowired
-    private PurchaseRateRepository purchaseRateRepository;
 
     @Autowired
     private AccountCopService accountCopService;
@@ -135,7 +132,7 @@ public class SaleP2PServiceImpl implements SaleP2PService {
             sale.setCommission(commission);
             sale.setTasa(calculateTasaVenta(sale));
             sale = assignAccountBinance(sale, account);
-            sale.setUtilidad(generateUtilidad(sale));
+
 
             saveSaleP2P(sale);
         }
@@ -153,27 +150,7 @@ public class SaleP2PServiceImpl implements SaleP2PService {
         return sale.getPesosCop() / sale.getDollarsUs();
     }
 
-    private Double generateUtilidad(SaleP2P sale) {
-        PurchaseRate lastRate = purchaseRateRepository.findTopByOrderByDateDesc();
 
-        if (lastRate == null) {
-            // Log de advertencia para saber que no había tasa registrada
-            System.err.println("⚠ No existe una tasa de compra registrada. Usando tasa = 0.");
-            lastRate = new PurchaseRate();
-            lastRate.setRate(0.0);
-        }
-
-        Double pesosUsdtVendidos = sale.getPesosCop() != null ? sale.getPesosCop() : 0.0;
-        Double usdtVendidos =
-            (sale.getDollarsUs() != null ? sale.getDollarsUs() : 0.0) +
-            (sale.getCommission() != null ? sale.getCommission() : 0.0);
-
-        Double utilidad = pesosUsdtVendidos
-                - (usdtVendidos * lastRate.getRate())
-                - (pesosUsdtVendidos * 0.004);
-
-        return utilidad;
-    }
 
 
     private Double generateTax(SaleP2P sale) {

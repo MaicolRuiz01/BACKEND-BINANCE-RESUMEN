@@ -21,12 +21,12 @@ import com.binance.web.BinanceAPI.TronScanService;
 import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.AccountCryptoBalance;
 import com.binance.web.Entity.AverageRate;
-import com.binance.web.Entity.PurchaseRate;
+
 import com.binance.web.Repository.AccountBinanceRepository;
 import com.binance.web.Repository.AccountCryptoBalanceRepository;
 import com.binance.web.Repository.AverageRateRepository;
-import com.binance.web.Repository.PurchaseRateRepository;
-import com.binance.web.balance.PurchaseRate.PurchaseRateService;
+
+
 
 import org.springframework.transaction.annotation.Transactional;
 

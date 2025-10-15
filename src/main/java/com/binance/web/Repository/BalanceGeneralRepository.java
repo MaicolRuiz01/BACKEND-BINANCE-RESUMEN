@@ -5,7 +5,7 @@ import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 
-import com.binance.web.balanceGeneral.BalanceGeneral;
+import com.binance.web.Entity.BalanceGeneral;
 
 public interface BalanceGeneralRepository extends JpaRepository<BalanceGeneral, Integer> {
     Optional<BalanceGeneral> findByDate(LocalDate date);

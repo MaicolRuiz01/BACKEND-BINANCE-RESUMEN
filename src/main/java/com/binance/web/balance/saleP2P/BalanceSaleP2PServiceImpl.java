@@ -6,9 +6,9 @@ import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import com.binance.web.Entity.PurchaseRate;
+
 import com.binance.web.Entity.SaleP2P;
-import com.binance.web.Repository.PurchaseRateRepository;
+
 import com.binance.web.Repository.SaleP2PRepository;
 
 @Service
@@ -17,8 +17,6 @@ public class BalanceSaleP2PServiceImpl implements BalanceSaleP2PService{
 	@Autowired
 	private SaleP2PRepository p2pRepository;
 
-	@Autowired
-	private PurchaseRateRepository purchaseRateRepository;
 	
 	public BalanceSaleP2PDto balanceSaleP2PDay(LocalDate fecha) {
 		List<SaleP2P> daySales = generateListSaleP2PDay(fecha);
@@ -40,7 +38,7 @@ public class BalanceSaleP2PServiceImpl implements BalanceSaleP2PService{
 		Double	comision = 0.0;
 		Double	impuestos = 0.0;
 		Double dolares = 0.0;
-		Double purchaseRate = getPurchaseRateDay(fecha);
+
 		for (SaleP2P saleP2P : daySales) {
 			vendidos += saleP2P.getPesosCop();
 			comision += saleP2P.getCommission();
@@ -51,18 +49,10 @@ public class BalanceSaleP2PServiceImpl implements BalanceSaleP2PService{
 		balanceSaleP2P.setComisionUsdt(comision);
 		balanceSaleP2P.setImpuestosCol(impuestos);
 		balanceSaleP2P.setTasaVenta(vendidos / dolares);
-		balanceSaleP2P.setTasaCompra(purchaseRate);
-		
-		Double total = vendidos - (impuestos + (comision * purchaseRate));
-		
-		balanceSaleP2P.setTotal(total);
 		
 		return balanceSaleP2P;
 	}
 	
-	private Double getPurchaseRateDay(LocalDate fecha) {
-		PurchaseRate purchaseRate = purchaseRateRepository.findByDateWithoutTime(fecha);
-		return purchaseRate.getRate();
-	}
+
 
 }

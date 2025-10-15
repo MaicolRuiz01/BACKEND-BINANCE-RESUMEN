@@ -31,7 +31,7 @@ import com.binance.web.Repository.BuyDollarsRepository;
 import com.binance.web.Repository.ClienteRepository;
 import com.binance.web.Repository.SupplierRepository;
 import com.binance.web.averageRate.AverageRateService;
-import com.binance.web.balance.PurchaseRate.PurchaseRateService;
+
 import com.binance.web.model.TransaccionesDTO;
 
 @Service
@@ -46,9 +46,6 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
     @Autowired
     private ClienteRepository clienteRepository;
 
-
-	@Autowired
-	private PurchaseRateService purchaseRateService;
 	
 	@Autowired
 	private AverageRateService averageRateService;

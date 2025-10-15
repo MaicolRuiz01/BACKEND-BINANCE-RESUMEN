@@ -24,6 +24,7 @@ public class Cliente {
 	private String nombre;
 	private String nameUser;
 	private String correo;
+	//saldo a favor o en contra
 	private Double saldo;
 	private Integer accountId;
 	private String wallet;
