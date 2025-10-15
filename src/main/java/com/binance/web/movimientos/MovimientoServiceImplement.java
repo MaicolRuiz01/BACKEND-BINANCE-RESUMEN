@@ -45,7 +45,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 		Double comision = monto * 0.004;
 
 		Movimiento nuevoMoviento = new Movimiento(null, "TRANSFERENCIA", LocalDateTime.now(), monto, cuentaTo,
-				cuentaFrom, null, comision, null, null);
+				cuentaFrom, null, comision, null,null, null);
 
 		cuentaFrom.setBalance(cuentaFrom.getBalance() - montoConComision);
 		cuentaTo.setBalance(cuentaTo.getBalance() + monto);
@@ -64,7 +64,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 		Double comision = monto * 0.004;
 		Double montoConComision = monto * 1.004;
 		Movimiento retiro = new Movimiento(null, "RETIRO", LocalDateTime.now(), monto, cuentaOrigen, null, caja,
-				montoConComision, null, null);
+				montoConComision, null,null, null);
 
 		cuentaOrigen.setBalance(cuentaOrigen.getBalance() - montoConComision);
 		caja.setSaldo(caja.getSaldo() + monto);
@@ -85,7 +85,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 		caja.setSaldo(caja.getSaldo() - monto);
 
 		Movimiento deposito = new Movimiento(null, "DEPOSITO", LocalDateTime.now(), monto, null, cuentaDestino, caja,
-				0.0, null, null);
+				0.0, null,null, null);
 
 		accountCopRepository.save(cuentaDestino);
 		efectivoRepository.save(caja);
@@ -102,7 +102,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 		cuentaDestino.setBalance(cuentaDestino.getBalance() + monto);
 
 		Movimiento pago = new Movimiento(null, "PAGO", LocalDateTime.now(), monto, null, cuentaDestino, null, 0.0,
-				cliente, null);
+				cliente,null, null);
 
 		accountCopRepository.save(cuentaDestino);
 		clienteRepository.save(cliente);
@@ -112,13 +112,13 @@ public class MovimientoServiceImplement implements MovimientoService {
 
 	@Override
 	@Transactional
-	public Movimiento registrarPagoProveedor(Integer cuentaCopId, Integer cajaId, Integer proveedorId, Double monto) {
+	public Movimiento registrarPagoProveedor(Integer cuentaCopId, Integer cajaId, Integer proveedorOrigenId,Integer proveedorDestinoId, Double monto) {
 
-		if (cuentaCopId == null && cajaId == null) {
-			throw new IllegalArgumentException("Debe proporcionar una cuenta o una caja para el pago.");
+		if (cuentaCopId == null && cajaId == null && proveedorOrigenId == null) {
+			throw new IllegalArgumentException("Debe proporcionar una cuenta, una caja o un proveedor para el pago.");
 		}
 
-		Supplier supplier = supplierRepository.findById(proveedorId)
+		Supplier supplier = supplierRepository.findById(proveedorDestinoId)
 				.orElseThrow(() -> new RuntimeException("Proveedor no encontrado."));
 
 		Movimiento pagoProveedor = new Movimiento();
@@ -141,7 +141,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 
 		}
 		// 4. Lógica para el pago desde la caja (efectivo)
-		else {
+		else if (cajaId != null){
 			Efectivo caja = efectivoRepository.findById(cajaId)
 					.orElseThrow(() -> new RuntimeException("Caja no encontrada."));
 
@@ -152,6 +152,12 @@ public class MovimientoServiceImplement implements MovimientoService {
 			// Crear el objeto Movimiento
 			pagoProveedor.setCaja(caja);
 			pagoProveedor.setComision(0.0); // No hay comisión por pagos en efectivo
+		}
+		else if(proveedorOrigenId != null) {
+			Supplier proveedorOrigen = supplierRepository.findById(proveedorOrigenId).orElseThrow(()->new RuntimeException("Proveedor Origen no encontrado"));
+			proveedorOrigen.setBalance(proveedorOrigen.getBalance() + monto);
+			supplierRepository.save(proveedorOrigen);
+			pagoProveedor.setProveedorOrigen(proveedorOrigen);
 		}
 
 		// 5. Lógica común para ambos casos

@@ -34,6 +34,8 @@ public class Movimiento {
 	@ManyToOne
 	private Cliente pagoCliente;
 	@ManyToOne
+	private Supplier proveedorOrigen;
+	@ManyToOne
 	private Supplier pagoProveedor;
 
 }
