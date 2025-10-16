@@ -33,6 +33,8 @@ public class MovimientoServiceImplement implements MovimientoService {
 	private ClienteRepository clienteRepository;
 	@Autowired
 	private SupplierRepository supplierRepository;
+	
+
 
 	@Override
 	public Movimiento RegistrarTransferencia(Integer idCuentoFrom, Integer idCuentaTo, Double monto) {
@@ -112,9 +114,9 @@ public class MovimientoServiceImplement implements MovimientoService {
 
 	@Override
 	@Transactional
-	public Movimiento registrarPagoProveedor(Integer cuentaCopId, Integer cajaId, Integer proveedorOrigenId,Integer proveedorDestinoId, Double monto) {
+	public Movimiento registrarPagoProveedor(Integer cuentaCopId, Integer cajaId, Integer proveedorOrigenId,Integer proveedorDestinoId, Integer clienteId,  Double monto) {
 
-		if (cuentaCopId == null && cajaId == null && proveedorOrigenId == null) {
+		if (cuentaCopId == null && cajaId == null && proveedorOrigenId == null && clienteId == null) {
 			throw new IllegalArgumentException("Debe proporcionar una cuenta, una caja o un proveedor para el pago.");
 		}
 
@@ -158,6 +160,11 @@ public class MovimientoServiceImplement implements MovimientoService {
 			proveedorOrigen.setBalance(proveedorOrigen.getBalance() + monto);
 			supplierRepository.save(proveedorOrigen);
 			pagoProveedor.setProveedorOrigen(proveedorOrigen);
+		}else if(clienteId!=null) {
+			Cliente cliente = clienteRepository.findById(clienteId).orElseThrow(()->new RuntimeException("Cliente no encontrado"));
+			cliente.setSaldo(cliente.getSaldo() + monto);
+			clienteRepository.save(cliente);
+			pagoProveedor.setPagoCliente(cliente);
 		}
 
 		// 5. Lógica común para ambos casos
@@ -236,5 +243,10 @@ public class MovimientoServiceImplement implements MovimientoService {
 	public List<Movimiento> listarPagosProveedorPorId(Integer proveedorId) {
 		return movimientoRepository.findByTipoAndPagoProveedor_Id("PAGO PROVEEDOR", proveedorId);
 	}
+	@Override
+	public List<Movimiento> listarMovimientosPorCliente(Integer clienteId) {
+	    return movimientoRepository.findByPagoCliente_Id(clienteId);
+	}
+
 
 }

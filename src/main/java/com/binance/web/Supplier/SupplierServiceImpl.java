@@ -104,19 +104,19 @@ public class SupplierServiceImpl implements SupplierService {
 	}
 
 	@Override
-public void transferFromClientToSupplier(Integer clientId, Integer supplierId, Double amount) {
-    Cliente cliente = clienteRepository.findById(clientId)
-            .orElseThrow(() -> new RuntimeException("Cliente no encontrado"));
-    Supplier supplier = supplierRepository.findById(supplierId)
-            .orElseThrow(() -> new RuntimeException("Proveedor no encontrado"));
+	public void transferFromClientToSupplier(Integer clientId, Integer supplierId, Double amount) {
+		Cliente cliente = clienteRepository.findById(clientId)
+				.orElseThrow(() -> new RuntimeException("Cliente no encontrado"));
+		Supplier supplier = supplierRepository.findById(supplierId)
+				.orElseThrow(() -> new RuntimeException("Proveedor no encontrado"));
 
-    // Restar saldo al cliente
-    cliente.setSaldo(cliente.getSaldo() - amount);
-    clienteRepository.save(cliente);
+		// Restar saldo al cliente
+		cliente.setSaldo(cliente.getSaldo() - amount);
+		clienteRepository.save(cliente);
 
-    // Sumar saldo al proveedor
-    supplier.setBalance(supplier.getBalance() + amount);
-    supplier.setLastPaymentDate(LocalDateTime.now());
-    supplierRepository.save(supplier);
-}
+		// Sumar saldo al proveedor
+		supplier.setBalance(supplier.getBalance() + amount);
+		supplier.setLastPaymentDate(LocalDateTime.now());
+		supplierRepository.save(supplier);
+	}
 }

@@ -138,6 +138,72 @@ public class PaymentController {
         }
         return ResponseEntity.ok(resultados);
     }
+	@GetMapping("/compras-binancepay/{fecha}")
+	public ResponseEntity<List<BuyDollarsDto>> getComprasPorFecha(
+	        @PathVariable String fecha) {
+
+	    LocalDate fechaFiltro = LocalDate.parse(fecha); // ejemplo "2025-10-15"
+	    List<BuyDollarsDto> resultados = new ArrayList<>();
+
+	    try {
+	        Set<String> userBinanceValidos = accountBinanceRepository.findAll().stream()
+	                .map(AccountBinance::getUserBinance)
+	                .filter(nombre -> nombre != null && !nombre.isBlank())
+	                .collect(Collectors.toSet());
+
+	        Set<String> idsRegistrados = buyDollarsRepository.findAll().stream()
+	                .map(BuyDollars::getIdDeposit)
+	                .collect(Collectors.toSet());
+
+	        for (String cuenta : binanceService.getAllAccountNames()) {
+	            String respuesta = binanceService.getPaymentHistory(cuenta);
+	            List<Transaction> transacciones = parseTransactions(respuesta);
+
+	            for (Transaction tx : transacciones) {
+	                double monto = tx.getAmount();
+	                LocalDateTime fechaTx = tx.getTransactionTime();
+
+	                if (monto > 0 && !idsRegistrados.contains(tx.getOrderId())
+	                        && fechaTx != null && fechaTx.toLocalDate().isEqual(fechaFiltro)) {
+
+	                    if (tx.getPayerInfo() != null && 
+	                        !userBinanceValidos.contains(tx.getPayerInfo().getName())) {
+
+	                        // DTO para devolver
+	                        BuyDollarsDto dto = new BuyDollarsDto();
+	                        dto.setIdDeposit(tx.getOrderId());
+	                        dto.setNameAccount(cuenta);
+	                        dto.setDate(fechaTx);
+	                        dto.setAmount(monto);
+	                        dto.setTasa(0.0);
+	                        dto.setPesos(0.0);
+	                        dto.setCryptoSymbol(tx.getCurrency());
+	                        resultados.add(dto);
+
+	                        // ENTIDAD para guardar
+	                        BuyDollars entidad = new BuyDollars();
+	                        entidad.setIdDeposit(tx.getOrderId());
+	                        entidad.setNameAccount(cuenta);
+	                        entidad.setDate(fechaTx);
+	                        entidad.setAmount(monto);
+	                        entidad.setTasa(0.0);
+	                        entidad.setPesos(0.0);
+	                        entidad.setCryptoSymbol(tx.getCurrency());
+
+	                        buyDollarsRepository.save(entidad);
+	                    }
+	                }
+	            }
+	        }
+	    } catch (Exception e) {
+	        e.printStackTrace();
+	        return ResponseEntity.status(500).body(new ArrayList<>());
+	    }
+
+	    return ResponseEntity.ok(resultados);
+	}
+
+
 
 	@GetMapping("/ventas-no-registradas-binancepay")
 	public ResponseEntity<List<SellDollarsDto>> getVentasNoRegistradasBinancePay() {

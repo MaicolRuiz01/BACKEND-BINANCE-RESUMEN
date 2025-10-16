@@ -50,11 +50,13 @@ public class MovimientoController {
         @RequestParam(required = false) Integer cuentaId,
         @RequestParam(required = false) Integer caja,
         @RequestParam(required = false) Integer proveedorOrigen,
+        @RequestParam(required = false) Integer clienteId,
         @RequestParam Integer proveedor,
         @RequestParam Double monto
     ) {
-        return movimientoService.registrarPagoProveedor(cuentaId, caja, proveedorOrigen, proveedor, monto);
+        return movimientoService.registrarPagoProveedor(cuentaId, caja, proveedorOrigen, proveedor, clienteId, monto);
     }
+
 
     @GetMapping("/listar")
     public List<Movimiento> listar() {
@@ -126,5 +128,13 @@ public class MovimientoController {
         public String test() {
     return "MovimientoController activo";
 }
+    @GetMapping("/cliente/{clienteId}")
+    public List<MovimientoDTO> listarMovimientosPorCliente(@PathVariable Integer clienteId) {
+        return movimientoService.listarMovimientosPorCliente(clienteId)
+                .stream()
+                .map(this::mapToDto)
+                .toList();
+    }
+
 
 }
