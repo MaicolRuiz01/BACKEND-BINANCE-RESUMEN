@@ -84,15 +84,18 @@ public class MovimientoController {
     }
 
     private MovimientoDTO mapToDto(Movimiento movimiento) {
-        return new MovimientoDTO(
-                movimiento.getTipo(),
-                movimiento.getFecha(),
-                movimiento.getMonto(),
-                movimiento.getCuentaOrigen() != null ? movimiento.getCuentaOrigen().getName() : null,
-                movimiento.getCuentaDestino() != null ? movimiento.getCuentaDestino().getName() : null,
-                movimiento.getCaja() != null ? movimiento.getCaja().getName() : null,
-                movimiento.getPagoCliente() != null ? movimiento.getPagoCliente().getNombre() : null,
-                movimiento.getPagoProveedor() != null ? movimiento.getPagoProveedor().getName() : null);
+         MovimientoDTO dto = new MovimientoDTO();
+    dto.setId(movimiento.getId());
+    dto.setTipo(movimiento.getTipo());
+    dto.setFecha(movimiento.getFecha());
+    dto.setMonto(movimiento.getMonto());
+    dto.setCuentaOrigen(movimiento.getCuentaOrigen() != null ? movimiento.getCuentaOrigen().getName() : null);
+    dto.setCuentaDestino(movimiento.getCuentaDestino() != null ? movimiento.getCuentaDestino().getName() : null);
+    dto.setCaja(movimiento.getCaja() != null ? movimiento.getCaja().getName() : null);
+    dto.setPagoCliente(movimiento.getPagoCliente() != null ? movimiento.getPagoCliente().getNombre() : null);
+    dto.setPagoProveedor(movimiento.getPagoProveedor() != null ? movimiento.getPagoProveedor().getName() : null);
+
+    return dto;
     }
 
     @PutMapping("/{id}")
@@ -115,6 +118,15 @@ public class MovimientoController {
                 .map(this::mapToDto)
                 .toList();
     }
+
+    @GetMapping("/pagos-cliente/{clienteId}")
+    public List<MovimientoDTO> listarPagosClientePorId(@PathVariable Integer clienteId) {
+        return movimientoService.listarMovimientosClienteId(clienteId).stream()
+                .map(this::mapToDto)
+                .toList();
+    }
+
+
 
     @GetMapping("/pagos-cliente/test")
         public String test() {

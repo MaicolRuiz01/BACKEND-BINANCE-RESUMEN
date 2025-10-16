@@ -44,8 +44,8 @@ public class MovimientoServiceImplement implements MovimientoService {
 		Double montoConComision = monto * 1.004;
 		Double comision = monto * 0.004;
 
-		Movimiento nuevoMoviento = new Movimiento(null, "TRANSFERENCIA", LocalDateTime.now(), monto, cuentaTo,
-				cuentaFrom, null, comision, null, null);
+		Movimiento nuevoMoviento = new Movimiento(null, "TRANSFERENCIA", LocalDateTime.now(), monto, cuentaFrom, cuentaTo, null,
+				comision, null, null, null);
 
 		cuentaFrom.setBalance(cuentaFrom.getBalance() - montoConComision);
 		cuentaTo.setBalance(cuentaTo.getBalance() + monto);
@@ -64,7 +64,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 		Double comision = monto * 0.004;
 		Double montoConComision = monto * 1.004;
 		Movimiento retiro = new Movimiento(null, "RETIRO", LocalDateTime.now(), monto, cuentaOrigen, null, caja,
-				montoConComision, null, null);
+				montoConComision, null, null, null);
 
 		cuentaOrigen.setBalance(cuentaOrigen.getBalance() - montoConComision);
 		caja.setSaldo(caja.getSaldo() + monto);
@@ -85,7 +85,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 		caja.setSaldo(caja.getSaldo() - monto);
 
 		Movimiento deposito = new Movimiento(null, "DEPOSITO", LocalDateTime.now(), monto, null, cuentaDestino, caja,
-				0.0, null, null);
+				0.0, null, null, null);
 
 		accountCopRepository.save(cuentaDestino);
 		efectivoRepository.save(caja);
@@ -102,7 +102,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 		cuentaDestino.setBalance(cuentaDestino.getBalance() + monto);
 
 		Movimiento pago = new Movimiento(null, "PAGO", LocalDateTime.now(), monto, null, cuentaDestino, null, 0.0,
-				cliente, null);
+				cliente, null, null);
 
 		accountCopRepository.save(cuentaDestino);
 		clienteRepository.save(cliente);
@@ -229,6 +229,11 @@ public class MovimientoServiceImplement implements MovimientoService {
 	@Override
 	public List<Movimiento> listarPagosProveedorPorId(Integer proveedorId) {
 		return movimientoRepository.findByTipoAndPagoProveedor_Id("PAGO PROVEEDOR", proveedorId);
+	}
+
+	@Override
+	public List<Movimiento> listarMovimientosClienteId(Integer clienteId) {
+		return movimientoRepository.findByTipoAndPagoCliente_Id("PAGO PROVEEDOR", clienteId);
 	}
 
 }

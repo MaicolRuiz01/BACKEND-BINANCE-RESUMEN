@@ -10,7 +10,8 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @NoArgsConstructor
 public class MovimientoDTO {
-	
+
+	private Integer id;
 	private String tipo;
 	private LocalDateTime fecha;
 	private Double monto;
