@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import com.binance.web.AccountBinance.AccountBinanceService;
 import com.binance.web.Entity.AccountCop;
 import com.binance.web.Entity.AverageRate;
+import com.binance.web.Entity.BalanceGeneral;
 import com.binance.web.Entity.Cliente;
 import com.binance.web.Entity.Efectivo;
 import com.binance.web.Entity.SaleP2P;
@@ -21,7 +22,7 @@ import com.binance.web.Repository.AverageRateRepository;
 import com.binance.web.Repository.BalanceGeneralRepository;
 import com.binance.web.Repository.ClienteRepository;
 import com.binance.web.Repository.EfectivoRepository;
-import com.binance.web.Repository.PurchaseRateRepository;
+
 import com.binance.web.Repository.SupplierRepository;
 import com.binance.web.SaleP2P.SaleP2PService;
 import com.binance.web.SellDollars.SellDollarsService;
@@ -39,8 +40,7 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
         private AccountCopRepository accountCopRepo;
         @Autowired
         private SupplierRepository accountProveedorRepo;
-        @Autowired
-        private PurchaseRateRepository rateRepo;
+
         @Autowired
         private SaleP2PService saleP2PService;
         @Autowired

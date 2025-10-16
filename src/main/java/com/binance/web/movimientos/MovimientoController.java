@@ -46,8 +46,14 @@ public class MovimientoController {
     }
 
     @PostMapping("/pago-proveedor")
-    public Movimiento pagoProveedor(@RequestParam Integer cuentaId, Integer caja, Integer proveedor, Double monto) {
-        return movimientoService.registrarPagoProveedor(cuentaId, caja, proveedor, monto);
+    public Movimiento pagoProveedor(
+        @RequestParam(required = false) Integer cuentaId,
+        @RequestParam(required = false) Integer caja,
+        @RequestParam(required = false) Integer proveedorOrigen,
+        @RequestParam Integer proveedor,
+        @RequestParam Double monto
+    ) {
+        return movimientoService.registrarPagoProveedor(cuentaId, caja, proveedorOrigen, proveedor, monto);
     }
 
     @GetMapping("/listar")

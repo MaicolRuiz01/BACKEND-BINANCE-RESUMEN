@@ -6,6 +6,7 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -28,13 +29,11 @@ import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.AccountCop;
 import com.binance.web.Entity.AverageRate;
 import com.binance.web.Entity.Cliente;
-import com.binance.web.Entity.PurchaseRate;
 import com.binance.web.Entity.SellDollars;
 import com.binance.web.Entity.SellDollarsAccountCop;
 import com.binance.web.Repository.AccountBinanceRepository;
 import com.binance.web.Repository.AverageRateRepository;
 import com.binance.web.Repository.ClienteRepository;
-import com.binance.web.Repository.PurchaseRateRepository;
 import com.binance.web.Repository.SellDollarsRepository;
 import com.binance.web.Repository.SupplierRepository;
 import com.binance.web.Entity.Supplier;
@@ -57,8 +56,6 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 	private AccountCopService accountCopService; // para obtener y actualizar balances
 	@Autowired
 	private PaymentController paymentController;
-	@Autowired
-	private PurchaseRateRepository purchaseRateRepository;
 	@Autowired
 	private ClienteRepository clienteRepository;
 	@Autowired
@@ -516,87 +513,111 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 	@Transactional
 	public void registrarVentasAutomaticamente() {
 
-		try {
-			List<SellDollarsDto> spot = spotOrdersController.getVentasNoRegistradas(50).getBody();
-			List<SellDollarsDto> binancePay = binancePayController.getVentasNoRegistradasBinancePay().getBody();
-			List<SellDollarsDto> trust = tronScanController.getUSDTOutgoingTransfers().getBody();
-			List<SellDollarsDto> sol = solanaController.getSolanaOutgoingTransfers().getBody();
+	    try {
+	        List<SellDollarsDto> spot       = spotOrdersController.getVentasNoRegistradas(50).getBody();
+	        List<SellDollarsDto> binancePay = binancePayController.getVentasNoRegistradasBinancePay().getBody();
+	        List<SellDollarsDto> trust      = tronScanController.getUSDTOutgoingTransfers().getBody();
+	        List<SellDollarsDto> sol        = solanaController.getSolanaOutgoingTransfers().getBody();
 
-			Set<String> existentes = sellDollarsRepository.findAll().stream().map(SellDollars::getIdWithdrawals)
-					.filter(Objects::nonNull).collect(Collectors.toSet());
+	        // IDs que YA existen en DB
+	        Set<String> existentes = sellDollarsRepository.findAll().stream()
+	                .map(SellDollars::getIdWithdrawals)
+	                .filter(Objects::nonNull)
+	                .collect(Collectors.toSet());
 
-			List<SellDollarsDto> todas = new ArrayList<>();
-			if (spot != null)
-				todas.addAll(spot);
-			if (binancePay != null)
-				todas.addAll(binancePay);
-			if (trust != null)
-				todas.addAll(trust);
-			if (sol != null)
-				todas.addAll(sol);
+	        // Set vivo para evitar duplicados dentro del mismo lote
+	        Set<String> vistos = new HashSet<>(existentes);
 
-			todas.sort(Comparator.comparing(SellDollarsDto::getDate));
+	        // Unifica y ordena
+	        List<SellDollarsDto> todas = new ArrayList<>();
+	        if (spot != null)       todas.addAll(spot);
+	        if (binancePay != null) todas.addAll(binancePay);
+	        if (trust != null)      todas.addAll(trust);
+	        if (sol != null)        todas.addAll(sol);
 
-			for (SellDollarsDto dto : todas) {
-			    if (dto.getIdWithdrawals() == null || existentes.contains(dto.getIdWithdrawals()))
-			        continue;
+	        todas.sort(Comparator.comparing(SellDollarsDto::getDate, Comparator.nullsLast(Comparator.naturalOrder())));
 
-			    AccountBinance account = accountBinanceRepository.findByName(dto.getNameAccount());
+	        for (SellDollarsDto dto : todas) {
 
-			    // 👇 calcula el símbolo una sola vez (con fallback a USDT)
-			    String symbol = (dto.getCryptoSymbol() != null && !dto.getCryptoSymbol().isBlank())
-			            ? dto.getCryptoSymbol().trim().toUpperCase()
-			            : "USDT";
+	            // 1) Valida ID y evita duplicados (DB y lote actual)
+	            String idw = dto.getIdWithdrawals();
+	            if (idw == null || idw.isBlank() || !vistos.add(idw)) {
+	                continue;
+	            }
 
-			    try {
-			        if (account != null) {
-			            // token vendido (permitimos negativo SOLO en import automático)
-			            accountCryptoBalanceService.updateCryptoBalance(account, symbol, -dto.getDollars(), true);
+	            // 2) Busca cuenta por nombre
+	            AccountBinance account = accountBinanceRepository.findByName(dto.getNameAccount());
 
-			            // fee Solana
-			            if (dto.getNetworkFeeInSOL() != null && dto.getNetworkFeeInSOL() > 0) {
-			                accountCryptoBalanceService.updateCryptoBalance(account, "SOL", -dto.getNetworkFeeInSOL(), true);
-			            }
-			            // fee TRON (TRX)
-			            if (dto.getComision() != null && dto.getComision() > 0) {
-			                accountCryptoBalanceService.updateCryptoBalance(account, "TRX", -dto.getComision(), true);
-			            }
-			        } else {
-			            System.out.println("⚠️ Cuenta no encontrada por name: " + dto.getNameAccount() + " (se registra venta igual)");
-			        }
-			    } catch (Exception ex) {
-			        System.out.println("⚠️ No se pudo ajustar balance cripto: " + ex.getMessage());
-			    }
-			    
-			    String tipoCuenta = (account != null && account.getTipo() != null && !account.getTipo().isBlank())
-			            ? account.getTipo()
-			            : dto.getTipoCuenta();
+	            // 3) Symbol con fallback
+	            String symbol = (dto.getCryptoSymbol() != null && !dto.getCryptoSymbol().isBlank())
+	                    ? dto.getCryptoSymbol().trim().toUpperCase()
+	                    : "USDT";
 
-			    SellDollars nueva = new SellDollars();
-			    nueva.setIdWithdrawals(dto.getIdWithdrawals());
-			    nueva.setNameAccount(dto.getNameAccount());
-			    nueva.setDate(dto.getDate());
-			    nueva.setDollars(dto.getDollars());
-			    nueva.setEquivalenteciaTRX(dto.getEquivalenteciaTRX());
-			    nueva.setTasa(0.0);
-			    nueva.setPesos(0.0);
-			    nueva.setAsignado(false);
-			    nueva.setAccountBinance(account);
-			    nueva.setComision(dto.getComision());
-			    nueva.setTipoCuenta(tipoCuenta);
-			    // 👈👈👈 AQUÍ EL FIX
-			    nueva.setCryptoSymbol(symbol);
+	            // 4) Montos seguros (por si vienen nulos)
+	            double dollars   = dto.getDollars() != null ? dto.getDollars() : 0.0;
+	            double feeSOL    = dto.getNetworkFeeInSOL() != null ? dto.getNetworkFeeInSOL() : 0.0;
+	            double feeTRX    = dto.getComision() != null ? dto.getComision() : 0.0;
+	            Double eqTRX     = dto.getEquivalenteciaTRX(); // si viene nulo, lo dejamos nulo (según tu entidad)
 
-			    sellDollarsRepository.save(nueva);
-			}
+	            // 5) Ajusta balances cripto (no debe tumbar la importación si falla)
+	            try {
+	                if (account != null) {
+	                    // saldo vendido (permitimos negativo SOLO en import automático)
+	                    accountCryptoBalanceService.updateCryptoBalance(account, symbol, -dollars, true);
 
+	                    if (feeSOL > 0) {
+	                        accountCryptoBalanceService.updateCryptoBalance(account, "SOL", -feeSOL, true);
+	                    }
+	                    if (feeTRX > 0) {
+	                        accountCryptoBalanceService.updateCryptoBalance(account, "TRX", -feeTRX, true);
+	                    }
+	                } else {
+	                    System.out.println("⚠️ Cuenta no encontrada por name: " + dto.getNameAccount() + " (se registra venta igual)");
+	                }
+	            } catch (Exception ex) {
+	                System.out.println("⚠️ No se pudo ajustar balance cripto: " + ex.getMessage());
+	                // NO relanzar aquí para no marcar rollback-only
+	            }
 
+	            // 6) tipoCuenta con fallback: primero de la cuenta, si no del dto
+	            String tipoCuenta = (account != null && account.getTipo() != null && !account.getTipo().isBlank())
+	                    ? account.getTipo()
+	                    : dto.getTipoCuenta();
 
-		} catch (Exception e) {
-			// TODO: handle exception
-			throw new RuntimeException("Error al registrar compras automáticamente", e);
-		}
+	            // 7) Construye entidad y setea campos obligatorios
+	            SellDollars nueva = new SellDollars();
+	            nueva.setIdWithdrawals(idw);
+	            nueva.setNameAccount(dto.getNameAccount());
+	            nueva.setDate(dto.getDate());
+	            nueva.setDollars(dollars);
+	            nueva.setEquivalenteciaTRX(eqTRX);
+	            nueva.setTasa(0.0);
+	            nueva.setPesos(0.0);
+	            nueva.setAsignado(false);
+	            nueva.setAccountBinance(account);
+	            nueva.setComision(feeTRX);
+	            nueva.setTipoCuenta(tipoCuenta);
+	            nueva.setCryptoSymbol(symbol);
+
+	            // Si tu columna UTILIDAD es NOT NULL en DB, inicialízala:
+	            try {
+	                nueva.setUtilidad(0.0); // <-- comenta esta línea si tu entidad no tiene 'utilidad'
+	            } catch (NoSuchMethodError | Exception ignore) {
+	                // por si la entidad no tiene el setter en tu versión
+	            }
+
+	            // 8) Guarda
+	            sellDollarsRepository.save(nueva);
+	            // (opcional) forzar flush para detectar problemas en este punto:
+	            // sellDollarsRepository.flush();
+	        }
+
+	    } catch (Exception e) {
+	        // Relanzar con contexto; si algo revienta aquí, que se vea la causa real.
+	        throw new RuntimeException("Error al registrar ventas automáticamente", e);
+	    }
 	}
+
 	private boolean isSolanaSale(SellDollars s) {
 	    AccountBinance src = s.getAccountBinance();
 	    if (src == null && s.getNameAccount() != null) {

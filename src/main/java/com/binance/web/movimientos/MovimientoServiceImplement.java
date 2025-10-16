@@ -112,13 +112,13 @@ public class MovimientoServiceImplement implements MovimientoService {
 
 	@Override
 	@Transactional
-	public Movimiento registrarPagoProveedor(Integer cuentaCopId, Integer cajaId, Integer proveedorId, Double monto) {
+	public Movimiento registrarPagoProveedor(Integer cuentaCopId, Integer cajaId, Integer proveedorOrigenId,Integer proveedorDestinoId, Double monto) {
 
-		if (cuentaCopId == null && cajaId == null) {
-			throw new IllegalArgumentException("Debe proporcionar una cuenta o una caja para el pago.");
+		if (cuentaCopId == null && cajaId == null && proveedorOrigenId == null) {
+			throw new IllegalArgumentException("Debe proporcionar una cuenta, una caja o un proveedor para el pago.");
 		}
 
-		Supplier supplier = supplierRepository.findById(proveedorId)
+		Supplier supplier = supplierRepository.findById(proveedorDestinoId)
 				.orElseThrow(() -> new RuntimeException("Proveedor no encontrado."));
 
 		Movimiento pagoProveedor = new Movimiento();
@@ -141,7 +141,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 
 		}
 		// 4. Lógica para el pago desde la caja (efectivo)
-		else {
+		else if (cajaId != null){
 			Efectivo caja = efectivoRepository.findById(cajaId)
 					.orElseThrow(() -> new RuntimeException("Caja no encontrada."));
 
@@ -152,6 +152,12 @@ public class MovimientoServiceImplement implements MovimientoService {
 			// Crear el objeto Movimiento
 			pagoProveedor.setCaja(caja);
 			pagoProveedor.setComision(0.0); // No hay comisión por pagos en efectivo
+		}
+		else if(proveedorOrigenId != null) {
+			Supplier proveedorOrigen = supplierRepository.findById(proveedorOrigenId).orElseThrow(()->new RuntimeException("Proveedor Origen no encontrado"));
+			proveedorOrigen.setBalance(proveedorOrigen.getBalance() + monto);
+			supplierRepository.save(proveedorOrigen);
+			pagoProveedor.setProveedorOrigen(proveedorOrigen);
 		}
 
 		// 5. Lógica común para ambos casos

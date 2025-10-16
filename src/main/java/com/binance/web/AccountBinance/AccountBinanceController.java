@@ -8,7 +8,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import com.binance.web.Entity.AccountBinance;
-import com.binance.web.Repository.PurchaseRateRepository;
+
 import com.binance.web.model.AccountBinanceDTO;
 
 @RestController
