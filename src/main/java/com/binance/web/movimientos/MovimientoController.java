@@ -56,6 +56,10 @@ public class MovimientoController {
     ) {
         return movimientoService.registrarPagoProveedor(cuentaId, caja, proveedorOrigen, proveedor, clienteId, monto);
     }
+    @PostMapping("/pago-caja")
+    public Movimiento pagoClienteCaja(@RequestParam Integer clienteId, @RequestParam Integer cajaId, @RequestParam Double monto) {
+    	return movimientoService.registrarPagoCaja(clienteId, cajaId, monto);
+    }
 
 
     @GetMapping("/listar")
@@ -135,6 +139,5 @@ public class MovimientoController {
                 .map(this::mapToDto)
                 .toList();
     }
-
 
 }
