@@ -89,20 +89,20 @@ public class MovimientoController {
                 .toList();
     }
 
-    private MovimientoDTO mapToDto(Movimiento movimiento) {
-         MovimientoDTO dto = new MovimientoDTO();
-    dto.setId(movimiento.getId());
-    dto.setTipo(movimiento.getTipo());
-    dto.setFecha(movimiento.getFecha());
-    dto.setMonto(movimiento.getMonto());
-    dto.setCuentaOrigen(movimiento.getCuentaOrigen() != null ? movimiento.getCuentaOrigen().getName() : null);
-    dto.setCuentaDestino(movimiento.getCuentaDestino() != null ? movimiento.getCuentaDestino().getName() : null);
-    dto.setCaja(movimiento.getCaja() != null ? movimiento.getCaja().getName() : null);
-    dto.setPagoCliente(movimiento.getPagoCliente() != null ? movimiento.getPagoCliente().getNombre() : null);
-    dto.setPagoProveedor(movimiento.getPagoProveedor() != null ? movimiento.getPagoProveedor().getName() : null);
+        private MovimientoDTO mapToDto(Movimiento movimiento) {
+            MovimientoDTO dto = new MovimientoDTO();
+        dto.setId(movimiento.getId());
+        dto.setTipo(movimiento.getTipo());
+        dto.setFecha(movimiento.getFecha());
+        dto.setMonto(movimiento.getMonto());
+        dto.setCuentaOrigen(movimiento.getCuentaOrigen() != null ? movimiento.getCuentaOrigen().getName() : null);
+        dto.setCuentaDestino(movimiento.getCuentaDestino() != null ? movimiento.getCuentaDestino().getName() : null);
+        dto.setCaja(movimiento.getCaja() != null ? movimiento.getCaja().getName() : null);
+        dto.setPagoCliente(movimiento.getPagoCliente() != null ? movimiento.getPagoCliente().getNombre() : null);
+        dto.setPagoProveedor(movimiento.getPagoProveedor() != null ? movimiento.getPagoProveedor().getName() : null);
 
-    return dto;
-    }
+        return dto;
+        }
 
     @PutMapping("/{id}")
     public ResponseEntity<Movimiento> actualizarMovimiento(
@@ -132,11 +132,18 @@ public class MovimientoController {
                 .toList();
     }
 
-
-
-    @GetMapping("/pagos-cliente/test")
-        public String test() {
-    return "MovimientoController activo";
+   @GetMapping("/pagos-cuenta/{cuentaId}")
+public List<MovimientoDTO> listarMovimientosPorCuentaId(@PathVariable Integer cuentaId) {
+    return movimientoService.listarMovimientosPorCuentaId(cuentaId).stream()
+            .map(this::mapToDto)
+            .toList();
 }
+
+    @GetMapping("/test")
+    public String getMethodName() {
+        return "hola ";
+    }
+
+
 
 }

@@ -157,7 +157,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 			Supplier proveedorOrigen = supplierRepository.findById(proveedorOrigenId).orElseThrow(()->new RuntimeException("Proveedor Origen no encontrado"));
 			proveedorOrigen.setBalance(proveedorOrigen.getBalance() + monto);
 			supplierRepository.save(proveedorOrigen);
-			pagoProveedor.setProveedorOrigen(proveedorOrigen);
+			//pagoProveedor.setProveedorOrigen(proveedorOrigen);
 		}
 
 		// 5. Lógica común para ambos casos
@@ -242,4 +242,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 		return movimientoRepository.findByTipoAndPagoCliente_Id("PAGO PROVEEDOR", clienteId);
 	}
 
+	public List<Movimiento> listarMovimientosPorCuentaId(Integer cuentaId) {
+    return movimientoRepository.findByCuentaOrigenIdOrCuentaDestinoId(cuentaId, cuentaId);
+}
 }

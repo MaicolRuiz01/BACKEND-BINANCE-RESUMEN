@@ -34,7 +34,6 @@ public class Movimiento {
 	private Efectivo caja;
 	private Double comision;
 	@ManyToOne(fetch = FetchType.EAGER)
-	@JoinColumn(name = "cuenta_origen_id")
 	private Cliente pagoCliente;
 	@ManyToOne(fetch = FetchType.EAGER)
 	@JoinColumn(name = "pago_proveedor_id")
