@@ -11,4 +11,5 @@ public interface ClienteService {
 
 	// === MÉTODO NUEVO: transferencia de saldo ===
 	void transferir(Integer origenId, Integer destinoId, Double monto, String nota);
+	Cliente reemplazar(Integer id, Cliente nuevo);
 }

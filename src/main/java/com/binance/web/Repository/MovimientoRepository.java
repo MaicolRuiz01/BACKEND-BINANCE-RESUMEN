@@ -13,6 +13,7 @@ public interface MovimientoRepository extends JpaRepository<Movimiento, Integer>
 	List<Movimiento> findByTipoAndPagoCliente_Id(String tipo, Integer clienteId);
     List<Movimiento> findByCuentaOrigenIdOrCuentaDestinoId(Integer cuentaOrigenId, Integer cuentaDestinoId);
 
+	List<Movimiento> findByPagoCliente_Id(Integer clienteId);
 
 
 }

@@ -73,4 +73,23 @@ public class ClienteServiceImpl implements ClienteService {
 
 		// (nota) Si luego necesitas auditar, aquí podrías registrar el movimiento.
 	}
+	 @Override
+	    @Transactional
+	    public Cliente reemplazar(Integer id, Cliente nuevo) {
+	        Cliente existente = clienteRepository.findById(id)
+	                .orElseThrow(() -> new IllegalArgumentException("Cliente no encontrado"));
+
+	        // Reemplazo total (no conservar valores viejos)
+	        existente.setNombre(nuevo.getNombre());
+	        existente.setNameUser(nuevo.getNameUser());
+	        existente.setCorreo(nuevo.getCorreo());
+	        existente.setSaldo(nuevo.getSaldo() != null ? nuevo.getSaldo() : 0.0);
+	        existente.setAccountId(nuevo.getAccountId());
+	        existente.setWallet(nuevo.getWallet());
+	        existente.setBinanceId(nuevo.getBinanceId());
+
+	        return clienteRepository.save(existente);
+	    }
+	 
+	 
 }
