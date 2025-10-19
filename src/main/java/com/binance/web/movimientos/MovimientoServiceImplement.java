@@ -243,9 +243,24 @@ public class MovimientoServiceImplement implements MovimientoService {
 	public List<Movimiento> listarPagosProveedorPorId(Integer proveedorId) {
 		return movimientoRepository.findByTipoAndPagoProveedor_Id("PAGO PROVEEDOR", proveedorId);
 	}
+
+	@Override
+	public List<Movimiento> listarPagosCuentaPorId(Integer cuentaId) {
+		if (cuentaId == null) {
+			throw new IllegalArgumentException("Cuenta id no puede ser nulo");
+		}
+		java.util.List<Movimiento> result = new java.util.ArrayList<>();
+		for (Movimiento m : movimientoRepository.findAll()) {
+			if (m.getCuentaOrigen() != null && cuentaId.equals(m.getCuentaOrigen().getId())) {
+				result.add(m);
+			}
+		}
+		return result;
+	}
+
 	@Override
 	public List<Movimiento> listarMovimientosPorCliente(Integer clienteId) {
-	    return movimientoRepository.findByPagoCliente_Id(clienteId);
+		return movimientoRepository.findByPagoCliente_Id(clienteId);
 	}
 	
 	@Override
@@ -268,10 +283,10 @@ public class MovimientoServiceImplement implements MovimientoService {
 	
 	
 	
+	
 	return movimientoRepository.save(pagoCaja);
 	}
 	
 	}
-
 
 

@@ -4,11 +4,9 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 import jakarta.persistence.Entity;
-import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
-import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -19,13 +17,13 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @NoArgsConstructor
 public class Movimiento {
-
+	
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Integer id;
 	private String tipo;
 	private LocalDateTime fecha;
-	private Double monto;
+	private Double Monto;
 	@ManyToOne
 	private AccountCop cuentaOrigen;
 	@ManyToOne
@@ -33,12 +31,13 @@ public class Movimiento {
 	@ManyToOne
 	private Efectivo caja;
 	private Double comision;
-	@ManyToOne(fetch = FetchType.EAGER)
+	@ManyToOne
 	private Cliente pagoCliente;
-	@ManyToOne(fetch = FetchType.EAGER)
-	@JoinColumn(name = "pago_proveedor_id")
+	@ManyToOne
+	private Cliente clienteOrigen;
+	@ManyToOne
+	private Supplier proveedorOrigen;
+	@ManyToOne
 	private Supplier pagoProveedor;
-	@JoinColumn(name = "proveedor")
-	private String proveedor;
 
 }

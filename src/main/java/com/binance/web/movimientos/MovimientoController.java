@@ -131,16 +131,9 @@ public class MovimientoController {
                 .toList();
     }
 
-    @GetMapping("/pagos-cliente/{clienteId}")
-    public List<MovimientoDTO> listarPagosClientePorId(@PathVariable Integer clienteId) {
-        return movimientoService.listarMovimientosClienteId(clienteId).stream()
-                .map(this::mapToDto)
-                .toList();
-    }
-
    @GetMapping("/pagos-cuenta/{cuentaId}")
 public List<MovimientoDTO> listarMovimientosPorCuentaId(@PathVariable Integer cuentaId) {
-    return movimientoService.listarMovimientosPorCuentaId(cuentaId).stream()
+    return movimientoService.listarPagosCuentaPorId(cuentaId).stream()
             .map(this::mapToDto)
             .toList();
 }
