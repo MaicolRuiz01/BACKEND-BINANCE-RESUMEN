@@ -138,6 +138,7 @@ public class PaymentController {
         }
         return ResponseEntity.ok(resultados);
     }
+	
 	@GetMapping("/compras-binancepay/{fecha}")
 	public ResponseEntity<List<BuyDollarsDto>> getComprasPorFecha(
 	        @PathVariable String fecha) {
@@ -220,6 +221,13 @@ public class PaymentController {
 	                .map(AccountBinance::getUserBinance)
 	                .filter(nombre -> nombre != null && !nombre.isBlank())
 	                .collect(Collectors.toSet());
+	        
+	        Set<String> addressesValidas = accountBinanceRepository.findAll().stream()
+	                .map(AccountBinance::getAddress)
+	                .filter(a -> a != null && !a.isBlank())
+	                .map(a -> a.trim().toLowerCase())
+	                .collect(Collectors.toSet());
+
 
 	     // 🔍 Mapa rápido para buscar clientes por binanceId
 	        Map<Long, Cliente> clientePorBinanceId = clienteRepository.findAll().stream()

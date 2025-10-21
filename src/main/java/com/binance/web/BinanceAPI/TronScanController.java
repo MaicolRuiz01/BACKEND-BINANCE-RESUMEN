@@ -82,7 +82,7 @@ public class TronScanController {
 	// Salidas nativas TRX (uso informativo)
 	@GetMapping("/trx-salidas")
 	public ResponseEntity<List<BuyDollarsDto>> getTrustOutgoingTransactions() {
-		String walletAddress = "TJjK97sE4anv35hBQGwGEZEo5FYxToxFQM";
+		String walletAddress = "TSWNB8wEhTgeypycsXC1omKEDL3yPV2Tde";
 
 		Set<String> assignedIds = buyDollarsRepository.findAll().stream().map(BuyDollars::getIdDeposit)
 				.collect(Collectors.toSet());

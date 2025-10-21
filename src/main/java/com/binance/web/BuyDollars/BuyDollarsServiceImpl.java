@@ -263,51 +263,72 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
     }
 
 	@Override
-    @Transactional
-    public BuyDollars asignarCompra(Integer id, BuyDollarsDto dto) {
-        // Obtener la compra no asignada existente
-        BuyDollars existing = buyDollarsRepository.findById(id)
-            .orElseThrow(() -> new RuntimeException("Compra no encontrada"));
-        
-        if (Boolean.TRUE.equals(existing.getAsignada())) {
-            throw new RuntimeException("Compra ya fue asignada");
-        }
+	@Transactional
+	public BuyDollars asignarCompra(Integer id, BuyDollarsDto dto) {
+	    // Obtener la compra no asignada existente
+	    BuyDollars existing = buyDollarsRepository.findById(id)
+	        .orElseThrow(() -> new RuntimeException("Compra no encontrada"));
+	    
+	    if (Boolean.TRUE.equals(existing.getAsignada())) {
+	        throw new RuntimeException("Compra ya fue asignada");
+	    }
 
-        // Insertar datos necesarios desde DTO:
-        existing.setTasa(dto.getTasa());
-        // ✅ Uso del nuevo campo 'amount' en lugar de 'dollars'
-        existing.setPesos(existing.getAmount() * dto.getTasa());
-       // existing.setCryptoSymbol(dto.getCryptoSymbol());
+	    // Actualizar datos básicos
+	    existing.setTasa(dto.getTasa());
+	    existing.setPesos(existing.getAmount() * dto.getTasa());
 
-        // Asignar proveedor
-        Supplier supplier = supplierRepository.findById(dto.getSupplierId())
-            .orElseThrow(() -> new RuntimeException("Proveedor no encontrado"));
-        existing.setSupplier(supplier);
+	    // Calcular monto en pesos
+	    Double montoPesos = existing.getAmount() * dto.getTasa();
 
-        // Actualizar balances del proveedor:
-        Double montoPesos = existing.getAmount() * dto.getTasa();
-        Double currentSupplierBalance = supplier.getBalance() != null ? supplier.getBalance() : 0.0;
-        supplier.setBalance(currentSupplierBalance + montoPesos);
-        
-        // Lógica de cálculo de la nueva tasa promedio (se basa en la nueva lógica)
-        // ✅ Uso del servicio para obtener el balance anterior de la cripto específica
-        Double saldoAnterior = accountBinanceService.getCryptoBalance(existing.getNameAccount(), existing.getCryptoSymbol());
-        Double tasaPromedio = averageRateService.getUltimaTasaPromedio().getAverageRate();
-        Double pesosAnterior = saldoAnterior * tasaPromedio;
-        // ✅ Se utiliza el nuevo campo 'amount'
-        Double totalUsdt = existing.getAmount() + saldoAnterior;
-        Double nuevaTasaPromedio = ( pesosAnterior + montoPesos ) / totalUsdt;
-        
-        // Guardar la nueva tasa promedio
-        averageRateService.guardarNuevaTasa(nuevaTasaPromedio, accountBinanceService.getTotalBalanceInterno().doubleValue(), existing.getDate());
-        
-        supplierRepository.save(supplier);
+	    // Variables comunes para el cálculo de tasa promedio
+	    Double saldoAnterior = accountBinanceService.getCryptoBalance(existing.getNameAccount(), existing.getCryptoSymbol());
+	    Double tasaPromedio = averageRateService.getUltimaTasaPromedio().getAverageRate();
+	    Double pesosAnterior = saldoAnterior * tasaPromedio;
+	    Double totalUsdt = existing.getAmount() + saldoAnterior;
+	    Double nuevaTasaPromedio = (pesosAnterior + montoPesos) / totalUsdt;
 
-        // Marcar como asignada
-        existing.setAsignada(true);
+	    // Guardar la nueva tasa promedio
+	    averageRateService.guardarNuevaTasa(
+	        nuevaTasaPromedio, 
+	        accountBinanceService.getTotalBalanceInterno().doubleValue(), 
+	        existing.getDate()
+	    );
 
-        return buyDollarsRepository.save(existing);
-    }
+	    // --- ASIGNACIÓN DINÁMICA ---
+	    if (dto.getSupplierId() != null) {
+	        // 🔹 Asignar a proveedor
+	        Supplier supplier = supplierRepository.findById(dto.getSupplierId())
+	            .orElseThrow(() -> new RuntimeException("Proveedor no encontrado"));
+	        existing.setSupplier(supplier);
+	        existing.setCliente(null); // Por si antes estaba asignado a un cliente
+
+	        // Actualizar balance del proveedor
+	        Double currentBalance = supplier.getBalance() != null ? supplier.getBalance() : 0.0;
+	        supplier.setBalance(currentBalance + montoPesos);
+	        supplierRepository.save(supplier);
+
+	    } else if (dto.getClienteId() != null) {
+	        // 🔹 Asignar a cliente
+	        Cliente cliente = clienteRepository.findById(dto.getClienteId())
+	            .orElseThrow(() -> new RuntimeException("Cliente no encontrado"));
+	        existing.setCliente(cliente);
+	        existing.setSupplier(null); // Por si antes estaba asignado a un proveedor
+
+	        // Actualizar saldo del cliente
+	        Double currentSaldo = cliente.getSaldo() != null ? cliente.getSaldo() : 0.0;
+	        cliente.setSaldo(currentSaldo + montoPesos);
+	        clienteRepository.save(cliente);
+
+	    } else {
+	        throw new RuntimeException("Debe especificar un proveedor o un cliente para la asignación");
+	    }
+
+	    // Marcar como asignada
+	    existing.setAsignada(true);
+
+	    return buyDollarsRepository.save(existing);
+	}
+
 
 	@Override
 	public BuyDollars createBuyDollars(BuyDollarsDto buyDollarsDto) {
