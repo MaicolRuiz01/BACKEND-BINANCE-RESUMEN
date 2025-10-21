@@ -8,36 +8,40 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.ManyToOne;
+import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
 @Entity
 @Data
-@AllArgsConstructor
 @NoArgsConstructor
+@AllArgsConstructor(access = AccessLevel.PRIVATE) // evita que lo llames por accidente
+@Builder(toBuilder = true)
 public class Movimiento {
-	
-	@Id
-	@GeneratedValue(strategy = GenerationType.IDENTITY)
-	private Integer id;
-	private String tipo;
-	private LocalDateTime fecha;
-	private Double Monto;
-	@ManyToOne
-	private AccountCop cuentaOrigen;
-	@ManyToOne
-	private AccountCop cuentaDestino;
-	@ManyToOne
-	private Efectivo caja;
-	private Double comision;
-	@ManyToOne
-	private Cliente pagoCliente;
-	@ManyToOne
-	private Cliente clienteOrigen;
-	@ManyToOne
-	private Supplier proveedorOrigen;
-	@ManyToOne
-	private Supplier pagoProveedor;
+    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Integer id;
 
+    private String  tipo;
+    private LocalDateTime fecha;
+    private Double  monto;
+
+    // nuevos campos C2C
+    private Double  usdt;
+    private Double  tasaOrigen;
+    private Double  tasaDestino;
+    private Double  pesosOrigen;
+    private Double  pesosDestino;
+
+    @ManyToOne private AccountCop cuentaOrigen;
+    @ManyToOne private AccountCop cuentaDestino;
+    @ManyToOne private Efectivo   caja;
+
+    private Double  comision;
+
+    @ManyToOne private Cliente    pagoCliente;
+    @ManyToOne private Cliente    clienteOrigen;
+    @ManyToOne private Supplier   proveedorOrigen;
+    @ManyToOne private Supplier   pagoProveedor;
 }

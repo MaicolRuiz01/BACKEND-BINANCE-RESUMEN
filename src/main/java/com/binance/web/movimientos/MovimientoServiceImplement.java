@@ -2,6 +2,7 @@ package com.binance.web.movimientos;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -14,6 +15,7 @@ import com.binance.web.Repository.ClienteRepository;
 import com.binance.web.Repository.EfectivoRepository;
 import com.binance.web.Repository.MovimientoRepository;
 import com.binance.web.Repository.SupplierRepository;
+import com.binance.web.model.PagoClienteAClienteDto;
 import com.binance.web.movimientos.MovimientoDTO;
 
 import jakarta.transaction.Transactional;
@@ -38,79 +40,102 @@ public class MovimientoServiceImplement implements MovimientoService {
 
 	@Override
 	public Movimiento RegistrarTransferencia(Integer idCuentoFrom, Integer idCuentaTo, Double monto) {
-		Optional<AccountCop> cuentaOrigen = accountCopRepository.findById(idCuentoFrom);
-		Optional<AccountCop> cuentaDestino = accountCopRepository.findById(idCuentaTo);
-		AccountCop cuentaFrom = cuentaOrigen.orElseThrow(() -> new RuntimeException("Cuenta de Origen no encontrada"));
-		AccountCop cuentaTo = cuentaDestino.orElseThrow(() -> new RuntimeException("Cuenta Destino no encontrada"));
+	    AccountCop cuentaFrom = accountCopRepository.findById(idCuentoFrom)
+	        .orElseThrow(() -> new RuntimeException("Cuenta de Origen no encontrada"));
+	    AccountCop cuentaTo = accountCopRepository.findById(idCuentaTo)
+	        .orElseThrow(() -> new RuntimeException("Cuenta Destino no encontrada"));
 
-		Double montoConComision = monto * 1.004;
-		Double comision = monto * 0.004;
+	    double comision = monto * 0.004;
+	    double montoConComision = monto + comision;
 
-		Movimiento nuevoMoviento = new Movimiento(null, "TRANSFERENCIA", LocalDateTime.now(), monto, cuentaTo,
-				cuentaFrom, null, comision, null,null,null, null);
+	    Movimiento mov = Movimiento.builder()
+	        .tipo("TRANSFERENCIA")
+	        .fecha(LocalDateTime.now())
+	        .monto(monto)
+	        .cuentaOrigen(cuentaFrom)   // ✅ origen correcto
+	        .cuentaDestino(cuentaTo)    // ✅ destino correcto
+	        .comision(comision)         // ✅ sólo la comisión, no “monto+comisión”
+	        .build();
 
-		cuentaFrom.setBalance(cuentaFrom.getBalance() - montoConComision);
-		cuentaTo.setBalance(cuentaTo.getBalance() + monto);
+	    cuentaFrom.setBalance(cuentaFrom.getBalance() - montoConComision);
+	    cuentaTo.setBalance(cuentaTo.getBalance() + monto);
+	    accountCopRepository.save(cuentaFrom);
+	    accountCopRepository.save(cuentaTo);
 
-		accountCopRepository.save(cuentaFrom);
-		accountCopRepository.save(cuentaTo);
-
-		return movimientoRepository.save(nuevoMoviento);
+	    return movimientoRepository.save(mov);
 	}
+
 
 	@Override
 	public Movimiento RegistrarRetiro(Integer cuentaId, Integer cajaId, Double monto) {
-		// TODO Auto-generated method stub
-		AccountCop cuentaOrigen = accountCopRepository.findById(cuentaId).get();
-		Efectivo caja = efectivoRepository.findById(cajaId).get();
-		Double comision = monto * 0.004;
-		Double montoConComision = monto * 1.004;
-		Movimiento retiro = new Movimiento(null, "RETIRO", LocalDateTime.now(), monto, cuentaOrigen, null, caja,
-				montoConComision, null,null,null, null);
+	    AccountCop cuentaOrigen = accountCopRepository.findById(cuentaId).orElseThrow();
+	    Efectivo   caja         = efectivoRepository.findById(cajaId).orElseThrow();
 
-		cuentaOrigen.setBalance(cuentaOrigen.getBalance() - montoConComision);
-		caja.setSaldo(caja.getSaldo() + monto);
+	    double comision = monto * 0.004;
+	    double montoConComision = monto + comision;
 
-		accountCopRepository.save(cuentaOrigen);
-		efectivoRepository.save(caja);
+	    Movimiento mov = Movimiento.builder()
+	        .tipo("RETIRO")
+	        .fecha(LocalDateTime.now())
+	        .monto(monto)
+	        .cuentaOrigen(cuentaOrigen)
+	        .caja(caja)
+	        .comision(comision) // ✅ era un bug: antes guardabas montoConComision
+	        .build();
 
-		return movimientoRepository.save(retiro);
+	    cuentaOrigen.setBalance(cuentaOrigen.getBalance() - montoConComision);
+	    caja.setSaldo(caja.getSaldo() + monto);
+	    accountCopRepository.save(cuentaOrigen);
+	    efectivoRepository.save(caja);
+
+	    return movimientoRepository.save(mov);
 	}
+
 
 	@Override
 	public Movimiento RegistrarDeposito(Integer cuentaId, Integer cajaId, Double monto) {
-		// TODO Auto-generated method stub
-		AccountCop cuentaDestino = accountCopRepository.findById(cuentaId).get();
-		Efectivo caja = efectivoRepository.findById(cajaId).get();
+	    AccountCop cuentaDestino = accountCopRepository.findById(cuentaId).orElseThrow();
+	    Efectivo   caja         = efectivoRepository.findById(cajaId).orElseThrow();
 
-		cuentaDestino.setBalance(cuentaDestino.getBalance() + monto);
-		caja.setSaldo(caja.getSaldo() - monto);
+	    Movimiento mov = Movimiento.builder()
+	        .tipo("DEPOSITO")
+	        .fecha(LocalDateTime.now())
+	        .monto(monto)
+	        .cuentaDestino(cuentaDestino)
+	        .caja(caja)
+	        .comision(0.0)
+	        .build();
 
-		Movimiento deposito = new Movimiento(null, "DEPOSITO", LocalDateTime.now(), monto, null, cuentaDestino, caja,
-				0.0,null, null,null, null);
+	    cuentaDestino.setBalance(cuentaDestino.getBalance() + monto);
+	    caja.setSaldo(caja.getSaldo() - monto);
+	    accountCopRepository.save(cuentaDestino);
+	    efectivoRepository.save(caja);
 
-		accountCopRepository.save(cuentaDestino);
-		efectivoRepository.save(caja);
-
-		return movimientoRepository.save(deposito);
+	    return movimientoRepository.save(mov);
 	}
+
 
 	public Movimiento registrarPagoCliente(Integer cuentaId, Integer clienteId, Double monto) {
+	    AccountCop cuentaDestino = accountCopRepository.findById(cuentaId).orElseThrow();
+	    Cliente    cliente       = clienteRepository.findById(clienteId).orElseThrow();
 
-		AccountCop cuentaDestino = accountCopRepository.findById(cuentaId).get();
-		Cliente cliente = clienteRepository.findById(clienteId).get();
+	    cliente.setSaldo((cliente.getSaldo()!=null?cliente.getSaldo():0) + monto);
+	    cuentaDestino.setBalance((cuentaDestino.getBalance()!=null?cuentaDestino.getBalance():0) + monto);
 
-		cliente.setSaldo(cliente.getSaldo() + monto);
-		cuentaDestino.setBalance(cuentaDestino.getBalance() + monto);
+	    Movimiento mov = Movimiento.builder()
+	        .tipo("PAGO")
+	        .fecha(LocalDateTime.now())
+	        .monto(monto)
+	        .cuentaDestino(cuentaDestino)
+	        .pagoCliente(cliente)
+	        .comision(0.0)
+	        .build();
 
-		Movimiento pago = new Movimiento(null, "PAGO", LocalDateTime.now(), monto, null, cuentaDestino, null, 0.0,
-				cliente,null,null, null);
-
-		accountCopRepository.save(cuentaDestino);
-		clienteRepository.save(cliente);
-		return movimientoRepository.save(pago);
-
+	    accountCopRepository.save(cuentaDestino);
+	    clienteRepository.save(cliente);
+	    return movimientoRepository.save(mov);
 	}
+
 
 	@Override
 	@Transactional
@@ -279,13 +304,71 @@ public class MovimientoServiceImplement implements MovimientoService {
 	pagoCaja.setCaja(cajaDestino);
 	pagoCaja.setClienteOrigen(clienteOrigen);
 	pagoCaja.setMonto(monto);
-	
-	
-	
-	
-	
 	return movimientoRepository.save(pagoCaja);
 	}
+	@Override
+	@Transactional
+	public Movimiento registrarPagoClienteACliente(PagoClienteAClienteDto dto) {
+	    if (dto.getClienteOrigenId() == null || dto.getClienteDestinoId() == null)
+	        throw new IllegalArgumentException("Debe indicar cliente origen y destino");
+	    if (Objects.equals(dto.getClienteOrigenId(), dto.getClienteDestinoId()))
+	        throw new IllegalArgumentException("Origen y destino no pueden ser el mismo cliente");
+	    if (dto.getUsdt() == null || dto.getUsdt() <= 0)
+	        throw new IllegalArgumentException("El monto USDT debe ser > 0");
+	    if (dto.getTasaOrigen() == null || dto.getTasaOrigen() <= 0 ||
+	        dto.getTasaDestino() == null || dto.getTasaDestino() <= 0)
+	        throw new IllegalArgumentException("Las tasas deben ser > 0");
+
+	    Cliente origen  = clienteRepository.findById(dto.getClienteOrigenId())
+	                        .orElseThrow(() -> new RuntimeException("Cliente origen no encontrado"));
+	    Cliente destino = clienteRepository.findById(dto.getClienteDestinoId())
+	                        .orElseThrow(() -> new RuntimeException("Cliente destino no encontrado"));
+
+	    // Mapeo a COP según tus tasas
+	    double pesosOrigen  = dto.getUsdt() * dto.getTasaOrigen();
+	    double pesosDestino = dto.getUsdt() * dto.getTasaDestino();
+
+	    // Saldos actuales (deuda positiva a favor del cliente)
+	    double so = origen.getSaldo()  != null ? origen.getSaldo()  : 0.0;
+	    double sd = destino.getSaldo() != null ? destino.getSaldo() : 0.0;
+
+	    // ❗ Según tu regla:
+	    // - Al ORIGEN se le SUMA (ustedes le deben más)
+	    // - Al DESTINO se le RESTA (les debe menos / ustedes le deben menos)
+	    so = round2(so + pesosOrigen);
+	    sd = round2(sd - pesosDestino);
+
+	    origen.setSaldo(so);
+	    destino.setSaldo(sd);
+
+	    clienteRepository.save(origen);
+	    clienteRepository.save(destino);
+
+	    Movimiento m = new Movimiento();
+	    m.setTipo("PAGO C2C");                 // o "PAGO CLIENTE A CLIENTE"
+	    m.setFecha(LocalDateTime.now());
+
+	    // Campos C2C
+	    m.setUsdt(dto.getUsdt());
+	    m.setTasaOrigen(dto.getTasaOrigen());
+	    m.setTasaDestino(dto.getTasaDestino());
+	    m.setPesosOrigen(pesosOrigen);
+	    m.setPesosDestino(pesosDestino);
+
+	    // Participantes
+	    m.setClienteOrigen(origen);            // el que “paga” (aumenta su saldo)
+	    m.setPagoCliente(destino);             // usamos este como “cliente destino” (disminuye su saldo)
+
+	    // Si agregaste 'nota/descripcion' en el DTO y la entidad, guarda aquí
+	    // m.setDescripcion(dto.getNota());
+
+	    return movimientoRepository.save(m);
+	}
+
+	private static double round2(double v) {
+	    return Math.round(v * 100.0) / 100.0;
+	}
+
 	
 	}
 
