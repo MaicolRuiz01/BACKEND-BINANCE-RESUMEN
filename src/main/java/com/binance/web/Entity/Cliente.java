@@ -3,6 +3,7 @@ package com.binance.web.Entity;
 import java.util.List;
 
 import jakarta.persistence.CascadeType;
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -27,6 +28,7 @@ public class Cliente {
 	//saldo a favor o en contra
 	private Double saldo;
 	private Integer accountId;
+	@Column(unique = true)
 	private String wallet;
 	private Long binanceId;
 

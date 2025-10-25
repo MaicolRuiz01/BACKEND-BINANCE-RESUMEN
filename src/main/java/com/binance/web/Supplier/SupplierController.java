@@ -16,6 +16,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.binance.web.BuyDollars.BuyDollarsDto;
+import com.binance.web.BuyDollars.BuyDollarsService;
 import com.binance.web.Entity.BuyDollars;
 import com.binance.web.Entity.Supplier;
 
@@ -25,6 +27,8 @@ public class SupplierController {
 
 	@Autowired
 	private SupplierService supplierService;
+	
+	@Autowired private BuyDollarsService buyDollarsService;
 
 	@GetMapping(produces = "application/json")
 	public ResponseEntity<List<Supplier>> getAllSuppliers() {
@@ -77,5 +81,11 @@ public class SupplierController {
             return ResponseEntity.badRequest().body("Error: " + e.getMessage());
         }
 	}
+    
+    @GetMapping("/{proveedorId}/compras")
+    public ResponseEntity<List<BuyDollarsDto>> listarComprasPorProveedor(@PathVariable Integer proveedorId) {
+        return ResponseEntity.ok(buyDollarsService.listarComprasPorProveedor(proveedorId));
+    }
+
 
 }

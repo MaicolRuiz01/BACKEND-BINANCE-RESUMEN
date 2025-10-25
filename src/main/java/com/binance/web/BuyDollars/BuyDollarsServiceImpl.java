@@ -336,4 +336,48 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 		return null;
 	}
 
+	@Override
+	public List<BuyDollarsDto> listarComprasPorCliente(Integer clienteId) {
+	    if (clienteId == null) throw new IllegalArgumentException("clienteId no puede ser nulo");
+
+	    // Usa el ordenado si lo agregaste; si no, usa findByCliente_Id
+	    List<BuyDollars> compras = buyDollarsRepository.findByCliente_IdOrderByDateDesc(clienteId);
+
+	    return compras.stream()
+	        .map(this::toDto)
+	        .collect(Collectors.toList());
+	}
+	@Override
+	public List<BuyDollarsDto> listarComprasPorProveedor(Integer proveedorId) {
+		if(proveedorId == null) throw new IllegalArgumentException("proveedorId no puede ser nulo");
+		
+		List<BuyDollars> compras = buyDollarsRepository.findBySupplier_IdOrderByDateDesc(proveedorId);
+		
+		return compras.stream().map(this::toDto).collect(Collectors.toList());
+	}
+	
+	
+	
+	private BuyDollarsDto toDto(BuyDollars b) {
+	    BuyDollarsDto dto = new BuyDollarsDto();
+	    dto.setId(b.getId());
+	    dto.setTasa(b.getTasa());
+	    dto.setAmount(b.getAmount());
+	    dto.setCryptoSymbol(b.getCryptoSymbol());
+	    dto.setPesos(b.getPesos());
+	    dto.setDate(b.getDate());
+	    dto.setNameAccount(b.getNameAccount());
+	    dto.setIdDeposit(b.getIdDeposit());
+	    dto.setAsignada(b.getAsignada());
+
+	    // Campos relacionales (con null-safety)
+	    if (b.getCliente() != null) dto.setClienteId(b.getCliente().getId());
+	    if (b.getSupplier() != null) dto.setSupplierId(b.getSupplier().getId());
+	    if (b.getAccountBinance() != null) dto.setAccountBinanceId(b.getAccountBinance().getId());
+
+	    return dto;
+	}
+
+	
+
 }

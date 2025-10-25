@@ -23,4 +23,8 @@ public interface BuyDollarsService {
 	List<BuyDollarsDto> getComprasNoAsignadasHoy();
 
 	BuyDollars asignarCompra(Integer id, BuyDollarsDto dto);
+	
+	List<BuyDollarsDto> listarComprasPorCliente(Integer clienteId);
+	
+	List<BuyDollarsDto> listarComprasPorProveedor(Integer proveedorId);
 }

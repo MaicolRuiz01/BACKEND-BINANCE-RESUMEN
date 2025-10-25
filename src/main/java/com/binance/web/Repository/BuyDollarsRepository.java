@@ -18,4 +18,6 @@ public interface BuyDollarsRepository extends JpaRepository<BuyDollars, Integer>
 	BuyDollars findTopByOrderByDateDesc();
 	@Query("SELECT b FROM BuyDollars b WHERE b.asignada = false AND b.date BETWEEN :start AND :end")
 	List<BuyDollars> findNoAsignadasHoy(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+	List<BuyDollars> findByCliente_IdOrderByDateDesc(Integer clienteId);
+	List<BuyDollars> findBySupplier_IdOrderByDateDesc(Integer supplierId);
 }
