@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.binance.web.Entity.Movimiento;
 import com.binance.web.model.PagoClienteAClienteDto;
+import com.binance.web.model.PagoClienteAProveedorDto;
 
 @RestController
 @RequestMapping("/movimiento")
@@ -138,5 +139,12 @@ public class MovimientoController {
 	public List<MovimientoDTO> listarMovimientosPorCaja(@PathVariable Integer cajaId) {
 		return movimientoService.listarMovimientosPorCaja(cajaId).stream().map(this::mapToDto).toList();
 	}
+	
+	// MovimientoController.java
+	@PostMapping("/pago-cliente-a-proveedor")
+	public Movimiento pagoClienteAProveedor(@RequestBody PagoClienteAProveedorDto dto) {
+	    return movimientoService.registrarPagoClienteAProveedor(dto);
+	}
+
 
 }

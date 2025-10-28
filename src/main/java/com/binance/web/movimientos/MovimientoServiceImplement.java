@@ -16,6 +16,7 @@ import com.binance.web.Repository.EfectivoRepository;
 import com.binance.web.Repository.MovimientoRepository;
 import com.binance.web.Repository.SupplierRepository;
 import com.binance.web.model.PagoClienteAClienteDto;
+import com.binance.web.model.PagoClienteAProveedorDto;
 import com.binance.web.movimientos.MovimientoDTO;
 
 import jakarta.transaction.Transactional;
@@ -356,6 +357,54 @@ public class MovimientoServiceImplement implements MovimientoService {
 		if (cajaId == null)
 			throw new IllegalArgumentException("cajaId no puede ser nulo");
 		return movimientoRepository.findByCaja_IdOrderByFechaDesc(cajaId);
+	}
+	
+	@Override
+	@Transactional
+	public Movimiento registrarPagoClienteAProveedor(PagoClienteAProveedorDto dto) {
+	    if (dto.getClienteOrigenId() == null || dto.getProveedorDestinoId() == null)
+	        throw new IllegalArgumentException("Debe indicar cliente origen y proveedor destino");
+	    if (dto.getUsdt() == null || dto.getUsdt() <= 0)
+	        throw new IllegalArgumentException("El monto USDT debe ser > 0");
+	    if (dto.getTasaCliente() == null || dto.getTasaCliente() <= 0 ||
+	        dto.getTasaProveedor() == null || dto.getTasaProveedor() <= 0)
+	        throw new IllegalArgumentException("Las tasas deben ser > 0");
+
+	    Cliente cliente = clienteRepository.findById(dto.getClienteOrigenId())
+	            .orElseThrow(() -> new RuntimeException("Cliente origen no encontrado"));
+	    Supplier proveedor = supplierRepository.findById(dto.getProveedorDestinoId())
+	            .orElseThrow(() -> new RuntimeException("Proveedor destino no encontrado"));
+
+	    double pesosCliente   = dto.getUsdt() * dto.getTasaCliente();
+	    double pesosProveedor = dto.getUsdt() * dto.getTasaProveedor();
+
+
+	    double sc = cliente.getSaldo()   != null ? cliente.getSaldo()   : 0.0;
+	    double sp = proveedor.getBalance()!= null ? proveedor.getBalance(): 0.0;
+
+	    sc = round2(sc + pesosCliente);
+	    sp = round2(sp - pesosProveedor);
+
+	    cliente.setSaldo(sc);
+	    proveedor.setBalance(sp);
+
+	    clienteRepository.save(cliente);
+	    supplierRepository.save(proveedor);
+
+	    Movimiento m = new Movimiento();
+	    m.setTipo("PAGO EN USDT CLIENTE PROVEEDOR");
+	    m.setFecha(LocalDateTime.now());
+
+	    m.setUsdt(dto.getUsdt());
+	    m.setTasaOrigen(dto.getTasaCliente());
+	    m.setTasaDestino(dto.getTasaProveedor());
+	    m.setPesosOrigen(pesosCliente);
+	    m.setPesosDestino(pesosProveedor);
+
+	    m.setClienteOrigen(cliente);
+	    m.setPagoProveedor(proveedor);
+
+	    return movimientoRepository.save(m);
 	}
 
 }
