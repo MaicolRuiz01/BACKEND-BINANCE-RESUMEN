@@ -3,6 +3,7 @@ package com.binance.web.Repository;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -20,4 +21,5 @@ public interface BuyDollarsRepository extends JpaRepository<BuyDollars, Integer>
 	List<BuyDollars> findNoAsignadasHoy(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
 	List<BuyDollars> findByCliente_IdOrderByDateDesc(Integer clienteId);
 	List<BuyDollars> findBySupplier_IdOrderByDateDesc(Integer supplierId);
+	Optional<BuyDollars> findByDedupeKey(String dedupeKey);
 }

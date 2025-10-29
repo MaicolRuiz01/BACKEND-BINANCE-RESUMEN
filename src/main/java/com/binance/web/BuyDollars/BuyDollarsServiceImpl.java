@@ -14,6 +14,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.apache.commons.codec.digest.DigestUtils;
 
 import com.binance.web.AccountBinance.AccountBinanceService;
 import com.binance.web.BinanceAPI.PaymentController;
@@ -33,6 +34,10 @@ import com.binance.web.Repository.SupplierRepository;
 import com.binance.web.averageRate.AverageRateService;
 
 import com.binance.web.model.TransaccionesDTO;
+import org.springframework.dao.DataIntegrityViolationException;
+import java.time.temporal.ChronoUnit;
+import java.util.Optional;
+
 
 @Service
 public class BuyDollarsServiceImpl implements BuyDollarsService {
@@ -212,6 +217,10 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
                 if (account == null) {
                     continue;
                 }
+                String dedupeKey = buildDedupeKey(dto);
+                if (buyDollarsRepository.findByDedupeKey(dedupeKey).isPresent()) {
+                    continue;
+                  }
 
                 // ✅ Modificación 2: Lógica genérica para actualizar/crear balances de criptos
                 // Se usa el nuevo campo 'amount' y 'cryptoSymbol' del DTO
@@ -378,6 +387,21 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 	    return dto;
 	}
 
-	
+	private String buildDedupeKey(BuyDollarsDto dto) {
+		  if (dto.getIdDeposit() != null && !dto.getIdDeposit().isBlank()) {
+		    return dto.getIdDeposit().trim().toUpperCase();
+		  }
+		  // Fallback determinístico
+		  String base = String.join("|",
+		      // Si tienes dto.getFuente() úsalo, si no “GEN”
+		      "GEN",
+		      String.valueOf(dto.getNameAccount()).trim().toUpperCase(),
+		      String.valueOf(dto.getCryptoSymbol()).trim().toUpperCase(),
+		      String.valueOf(dto.getAmount()),
+		      // Trunca a minutos para reducir jitter de timestamps
+		      String.valueOf(dto.getDate().truncatedTo(ChronoUnit.MINUTES))
+		  );
+		  return DigestUtils.sha256Hex(base);
+		}
 
 }

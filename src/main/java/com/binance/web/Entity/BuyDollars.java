@@ -7,9 +7,11 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -18,7 +20,15 @@ import lombok.NoArgsConstructor;
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
-@Table(name="buy_dollars")
+@Table(
+		  name = "buy_dollars",
+		  uniqueConstraints = {
+		    @UniqueConstraint(name = "uk_buy_dollars_dedupe_key", columnNames = "dedupe_key")
+		  },
+		  indexes = {
+		    @Index(name = "idx_buy_dollars_date", columnList = "date")
+		  }
+		)
 public class BuyDollars {
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -41,5 +51,9 @@ public class BuyDollars {
 	private AccountBinance accountBinance;
 	private Boolean asignada;
 	private Double saldoAnterior;
+	
+	  // 🔒 Clave de desduplicación SIEMPRE no-nula
+	  @Column(name = "dedupe_key", nullable = false, length = 128)
+	  private String dedupeKey;
 	
 }
