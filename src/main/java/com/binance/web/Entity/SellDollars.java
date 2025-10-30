@@ -15,6 +15,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -23,14 +24,19 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @Data
 @NoArgsConstructor
-@Table(name="sell_dollars")
+@Table(
+		  name = "sell_dollars",
+		  uniqueConstraints = {
+		    @UniqueConstraint(name = "uk_sell_dedupe", columnNames = "dedupe_key") // opcional pero recomendado
+		  }
+		)
 public class SellDollars {
-	
+
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Integer id;
 
-	@Column(name="id_withdrawals")
+	@Column(name = "id_withdrawals")
 	private String idWithdrawals;
 
 	private Double tasa;
@@ -52,7 +58,7 @@ public class SellDollars {
 
 	@OneToMany(mappedBy = "sellDollars", cascade = CascadeType.ALL, orphanRemoval = true)
 	@JsonIgnore
-    private List<SellDollarsAccountCop> sellDollarsAccounts;
+	private List<SellDollarsAccountCop> sellDollarsAccounts;
 
 	private Double utilidad;
 	private Boolean asignado;
@@ -64,6 +70,9 @@ public class SellDollars {
 	private Double comision;
 	private Double equivalenteciaTRX;
 	@Column(name = "tipo_cuenta", length = 32)
-    private String tipoCuenta;
+	private String tipoCuenta;
+	
+	@Column(name = "dedupe_key", nullable = false, length = 64)
+	  private String dedupeKey;
 
 }

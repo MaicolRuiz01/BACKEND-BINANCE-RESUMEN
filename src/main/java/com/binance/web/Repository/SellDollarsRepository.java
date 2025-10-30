@@ -3,6 +3,7 @@ package com.binance.web.Repository;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -22,5 +23,6 @@ public interface SellDollarsRepository extends JpaRepository<SellDollars, Intege
 	List<SellDollars> findByDateBetween(LocalDateTime start, LocalDateTime end);
 	List<SellDollars> findByClienteId(Integer clienteId);
 	List<SellDollars> findByCliente_IdOrderByDateDesc(Integer clienteId);
+	Optional<SellDollars> findByDedupeKey(String dedupeKey);
 
 }

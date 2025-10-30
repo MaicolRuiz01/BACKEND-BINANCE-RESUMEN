@@ -1,8 +1,11 @@
 package com.binance.web.SellDollars;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -513,111 +516,96 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 	@Override
 	@Transactional
 	public void registrarVentasAutomaticamente() {
+	  try {
+	    List<SellDollarsDto> spot       = spotOrdersController.getVentasNoRegistradas(50).getBody();
+	    List<SellDollarsDto> binancePay = binancePayController.getVentasNoRegistradasBinancePay().getBody();
+	    List<SellDollarsDto> trust      = tronScanController.getUSDTOutgoingTransfers().getBody();
+	    List<SellDollarsDto> sol        = solanaController.getSolanaOutgoingTransfers().getBody();
 
-	    try {
-	        List<SellDollarsDto> spot       = spotOrdersController.getVentasNoRegistradas(50).getBody();
-	        List<SellDollarsDto> binancePay = binancePayController.getVentasNoRegistradasBinancePay().getBody();
-	        List<SellDollarsDto> trust      = tronScanController.getUSDTOutgoingTransfers().getBody();
-	        List<SellDollarsDto> sol        = solanaController.getSolanaOutgoingTransfers().getBody();
+	    // Unifica
+	    List<SellDollarsDto> todas = new ArrayList<>();
+	    if (spot != null)       todas.addAll(spot);
+	    if (binancePay != null) todas.addAll(binancePay);
+	    if (trust != null)      todas.addAll(trust);
+	    if (sol != null)        todas.addAll(sol);
 
-	        // IDs que YA existen en DB
-	        Set<String> existentes = sellDollarsRepository.findAll().stream()
-	                .map(SellDollars::getIdWithdrawals)
-	                .filter(Objects::nonNull)
-	                .collect(Collectors.toSet());
+	    // Orden por fecha (nulls al final)
+	    todas.sort(Comparator.comparing(SellDollarsDto::getDate, Comparator.nullsLast(Comparator.naturalOrder())));
 
-	        // Set vivo para evitar duplicados dentro del mismo lote
-	        Set<String> vistos = new HashSet<>(existentes);
+	    // Set para evitar duplicados dentro del mismo lote (por dedupeKey)
+	    Set<String> vistos = new HashSet<>();
 
-	        // Unifica y ordena
-	        List<SellDollarsDto> todas = new ArrayList<>();
-	        if (spot != null)       todas.addAll(spot);
-	        if (binancePay != null) todas.addAll(binancePay);
-	        if (trust != null)      todas.addAll(trust);
-	        if (sol != null)        todas.addAll(sol);
+	    for (SellDollarsDto dto : todas) {
+	      // === 1) Clave de deduplicación estable (usa idWithdrawals normalizado o fallback con hash) ===
+	      String dedupeKey = buildDedupeKey(dto);
 
-	        todas.sort(Comparator.comparing(SellDollarsDto::getDate, Comparator.nullsLast(Comparator.naturalOrder())));
+	      // Evitar duplicados: primero DB, luego lote actual
+	      if (sellDollarsRepository.findByDedupeKey(dedupeKey).isPresent()) {
+	        continue; // ya existe en BD
+	      }
+	      if (!vistos.add(dedupeKey)) {
+	        continue; // repetido en el mismo batch
+	      }
 
-	        for (SellDollarsDto dto : todas) {
+	      // === 2) Buscar cuenta y normalizar datos ===
+	      AccountBinance account = accountBinanceRepository.findByName(dto.getNameAccount());
 
-	            // 1) Valida ID y evita duplicados (DB y lote actual)
-	            String idw = dto.getIdWithdrawals();
-	            if (idw == null || idw.isBlank() || !vistos.add(idw)) {
-	                continue;
-	            }
+	      String symbol = (dto.getCryptoSymbol() != null && !dto.getCryptoSymbol().isBlank())
+	          ? dto.getCryptoSymbol().trim().toUpperCase()
+	          : "USDT";
 
-	            // 2) Busca cuenta por nombre
-	            AccountBinance account = accountBinanceRepository.findByName(dto.getNameAccount());
+	      double dollars = dto.getDollars() != null ? dto.getDollars() : 0.0;
+	      double feeSOL  = dto.getNetworkFeeInSOL() != null ? dto.getNetworkFeeInSOL() : 0.0;
+	      double feeTRX  = dto.getComision() != null ? dto.getComision() : 0.0;
+	      Double eqTRX   = dto.getEquivalenteciaTRX(); // puede ser null
 
-	            // 3) Symbol con fallback
-	            String symbol = (dto.getCryptoSymbol() != null && !dto.getCryptoSymbol().isBlank())
-	                    ? dto.getCryptoSymbol().trim().toUpperCase()
-	                    : "USDT";
-
-	            // 4) Montos seguros (por si vienen nulos)
-	            double dollars   = dto.getDollars() != null ? dto.getDollars() : 0.0;
-	            double feeSOL    = dto.getNetworkFeeInSOL() != null ? dto.getNetworkFeeInSOL() : 0.0;
-	            double feeTRX    = dto.getComision() != null ? dto.getComision() : 0.0;
-	            Double eqTRX     = dto.getEquivalenteciaTRX(); // si viene nulo, lo dejamos nulo (según tu entidad)
-
-	            // 5) Ajusta balances cripto (no debe tumbar la importación si falla)
-	            try {
-	                if (account != null) {
-	                    // saldo vendido (permitimos negativo SOLO en import automático)
-	                    accountCryptoBalanceService.updateCryptoBalance(account, symbol, -dollars, true);
-
-	                    if (feeSOL > 0) {
-	                        accountCryptoBalanceService.updateCryptoBalance(account, "SOL", -feeSOL, true);
-	                    }
-	                    if (feeTRX > 0) {
-	                        accountCryptoBalanceService.updateCryptoBalance(account, "TRX", -feeTRX, true);
-	                    }
-	                } else {
-	                    System.out.println("⚠️ Cuenta no encontrada por name: " + dto.getNameAccount() + " (se registra venta igual)");
-	                }
-	            } catch (Exception ex) {
-	                System.out.println("⚠️ No se pudo ajustar balance cripto: " + ex.getMessage());
-	                // NO relanzar aquí para no marcar rollback-only
-	            }
-
-	            // 6) tipoCuenta con fallback: primero de la cuenta, si no del dto
-	            String tipoCuenta = (account != null && account.getTipo() != null && !account.getTipo().isBlank())
-	                    ? account.getTipo()
-	                    : dto.getTipoCuenta();
-
-	            // 7) Construye entidad y setea campos obligatorios
-	            SellDollars nueva = new SellDollars();
-	            nueva.setIdWithdrawals(idw);
-	            nueva.setNameAccount(dto.getNameAccount());
-	            nueva.setDate(dto.getDate());
-	            nueva.setDollars(dollars);
-	            nueva.setEquivalenteciaTRX(eqTRX);
-	            nueva.setTasa(0.0);
-	            nueva.setPesos(0.0);
-	            nueva.setAsignado(false);
-	            nueva.setAccountBinance(account);
-	            nueva.setComision(feeTRX);
-	            nueva.setTipoCuenta(tipoCuenta);
-	            nueva.setCryptoSymbol(symbol);
-
-	            // Si tu columna UTILIDAD es NOT NULL en DB, inicialízala:
-	            try {
-	                nueva.setUtilidad(0.0); // <-- comenta esta línea si tu entidad no tiene 'utilidad'
-	            } catch (NoSuchMethodError | Exception ignore) {
-	                // por si la entidad no tiene el setter en tu versión
-	            }
-
-	            // 8) Guarda
-	            sellDollarsRepository.save(nueva);
-	            // (opcional) forzar flush para detectar problemas en este punto:
-	            // sellDollarsRepository.flush();
+	      // Ajuste de balances cripto (no rompe import si falla)
+	      try {
+	        if (account != null) {
+	          accountCryptoBalanceService.updateCryptoBalance(account, symbol, -dollars, true);
+	          if (feeSOL > 0) accountCryptoBalanceService.updateCryptoBalance(account, "SOL", -feeSOL, true);
+	          if (feeTRX > 0) accountCryptoBalanceService.updateCryptoBalance(account, "TRX", -feeTRX, true);
+	        } else {
+	          System.out.println("⚠️ Cuenta no encontrada: " + dto.getNameAccount() + " (se registra venta igual)");
 	        }
+	      } catch (Exception ex) {
+	        System.out.println("⚠️ No se pudo ajustar balance cripto: " + ex.getMessage());
+	      }
 
-	    } catch (Exception e) {
-	        // Relanzar con contexto; si algo revienta aquí, que se vea la causa real.
-	        throw new RuntimeException("Error al registrar ventas automáticamente", e);
+	      String tipoCuenta = (account != null && account.getTipo() != null && !account.getTipo().isBlank())
+	          ? account.getTipo()
+	          : dto.getTipoCuenta();
+
+	      // === 3) Construir entidad y ASIGNAR dedupeKey ANTES DE GUARDAR ===
+	      SellDollars nueva = new SellDollars();
+	      nueva.setIdWithdrawals(dto.getIdWithdrawals()); // puede venir null
+	      nueva.setNameAccount(dto.getNameAccount());
+	      nueva.setDate(dto.getDate());
+	      nueva.setDollars(dollars);
+	      nueva.setEquivalenteciaTRX(eqTRX);
+	      nueva.setTasa(0.0);
+	      nueva.setPesos(0.0);
+	      nueva.setAsignado(false);
+	      nueva.setAccountBinance(account);
+	      nueva.setComision(feeTRX);
+	      nueva.setTipoCuenta(tipoCuenta);
+	      nueva.setCryptoSymbol(symbol);
+
+	      // ✅ clave anti-duplicados obligatoria (NOT NULL)
+	      nueva.setDedupeKey(dedupeKey);
+
+	      // si tu columna utilidad es NOT NULL:
+	      nueva.setUtilidad(0.0);
+
+	      sellDollarsRepository.save(nueva);
+	      // opcional: sellDollarsRepository.flush();
 	    }
+
+	  } catch (Exception e) {
+	    throw new RuntimeException("Error al registrar ventas automáticamente", e);
+	  }
 	}
+
 
 	private boolean isSolanaSale(SellDollars s) {
 	    AccountBinance src = s.getAccountBinance();
@@ -636,6 +624,29 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 		return ventas.stream().map(this::convertToDto).collect(Collectors.toList());
 	}
 	
-	
+	private static String sha256(String s) {
+		  try {
+		    MessageDigest md = MessageDigest.getInstance("SHA-256");
+		    byte[] d = md.digest(s.getBytes(StandardCharsets.UTF_8));
+		    StringBuilder sb = new StringBuilder(d.length * 2);
+		    for (byte b : d) sb.append(String.format("%02x", b));
+		    return sb.toString();
+		  } catch (Exception e) { throw new RuntimeException(e); }
+		}
 
+		private String buildDedupeKey(SellDollarsDto dto) {
+		  // 1) Si viene un ID consistente, úsalo normalizado (lo hace inmune a may/minus y espacios)
+		  if (dto.getIdWithdrawals() != null && !dto.getIdWithdrawals().isBlank()) {
+		    return dto.getIdWithdrawals().trim().toUpperCase();
+		  }
+		  // 2) Fallback determinístico (para fuentes que no traen ID estable)
+		  String base = String.join("|",
+		    "GEN",  // o usa dto.getTipoFuente() si lo tienes
+		    String.valueOf(dto.getNameAccount()).trim().toUpperCase(),
+		    String.valueOf(dto.getCryptoSymbol()).trim().toUpperCase(),
+		    String.valueOf(dto.getDollars()),
+		    String.valueOf((dto.getDate() != null) ? dto.getDate().truncatedTo(ChronoUnit.MINUTES) : null)
+		  );
+		  return sha256(base); // 64 chars hex -> cabe en length=64
+		}
 }
