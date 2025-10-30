@@ -19,6 +19,9 @@ import org.springframework.web.bind.annotation.RestController;
 import com.binance.web.BuyDollars.BuyDollarsDto;
 import com.binance.web.BuyDollars.BuyDollarsService;
 import com.binance.web.Entity.Cliente;
+import com.binance.web.Entity.SellDollars;
+import com.binance.web.SellDollars.SellDollarsDto;
+import com.binance.web.SellDollars.SellDollarsService;
 
 @RestController
 @RequestMapping("/cliente")
@@ -28,6 +31,7 @@ public class ClienteController {
 	@Autowired
 	private ClienteService clienteService;
 	@Autowired private BuyDollarsService buyDollarsService;
+	@Autowired private SellDollarsService sellDollarsService;
 
 	// === Payload mínimo para transferir (sin crear archivos extra) ===
 	public static class TransferReq {
@@ -69,5 +73,10 @@ public class ClienteController {
     @GetMapping("/{clienteId}/compras")
     public List<BuyDollarsDto> listarComprasCliente(@PathVariable Integer clienteId) {
         return buyDollarsService.listarComprasPorCliente(clienteId);
+    }
+    
+    @GetMapping("/{clienteId}/ventas")
+    public List<SellDollarsDto> listarVentasClientes(@PathVariable Integer clienteId){
+    	return sellDollarsService.ventasPorCliente(clienteId);
     }
 }

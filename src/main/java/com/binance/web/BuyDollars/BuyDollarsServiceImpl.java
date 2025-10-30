@@ -236,7 +236,7 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
                 nueva.setPesos(0.0);
                 nueva.setAsignada(false);
                 nueva.setAccountBinance(account);
-                
+                nueva.setDedupeKey(dedupeKey);
                 buyDollarsRepository.save(nueva);
                 existentes.add(dto.getIdDeposit());
             }
@@ -356,6 +356,8 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 	        .map(this::toDto)
 	        .collect(Collectors.toList());
 	}
+	
+	
 	@Override
 	public List<BuyDollarsDto> listarComprasPorProveedor(Integer proveedorId) {
 		if(proveedorId == null) throw new IllegalArgumentException("proveedorId no puede ser nulo");

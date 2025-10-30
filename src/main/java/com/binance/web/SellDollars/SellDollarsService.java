@@ -17,5 +17,6 @@ public interface SellDollarsService {
 	SellDollars updateSellDollars(Integer id, SellDollarsDto dto);
 	void registrarVentasAutomaticamente();
 	SellDollars asignarVenta(Integer id, SellDollarsDto dto);
+	List<SellDollarsDto> ventasPorCliente(Integer clienteId);
 
 }

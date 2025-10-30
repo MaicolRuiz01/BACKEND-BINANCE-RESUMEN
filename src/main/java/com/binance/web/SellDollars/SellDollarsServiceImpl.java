@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collector;
 import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -625,6 +626,14 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 	    }
 	    String tipo = (src != null && src.getTipo() != null) ? src.getTipo() : "";
 	    return tipo.equalsIgnoreCase("SOLANA") || tipo.equalsIgnoreCase("PHANTOM");
+	}
+	
+	@Override
+	public List<SellDollarsDto> ventasPorCliente(Integer clienteId){
+		if(clienteId==null) throw new IllegalArgumentException("cliente no puede ser nulo");
+		List<SellDollars> ventas = sellDollarsRepository.findByCliente_IdOrderByDateDesc(clienteId);
+		
+		return ventas.stream().map(this::convertToDto).collect(Collectors.toList());
 	}
 	
 	
