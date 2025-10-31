@@ -404,5 +404,46 @@ public class MovimientoServiceImplement implements MovimientoService {
 
 	    return movimientoRepository.save(m);
 	}
+	
+	@Override
+	@Transactional
+	public Movimiento registrarPagoClienteAClienteCop(Integer clienteOrigenId, Integer clienteDestinoId, Double montoCop) {
+	    if (clienteOrigenId == null || clienteDestinoId == null)
+	        throw new IllegalArgumentException("Debe indicar cliente origen y cliente destino");
+	    if (Objects.equals(clienteOrigenId, clienteDestinoId))
+	        throw new IllegalArgumentException("Origen y destino no pueden ser el mismo cliente");
+	    if (montoCop == null || montoCop <= 0)
+	        throw new IllegalArgumentException("El monto COP debe ser > 0");
+
+	    Cliente origen  = clienteRepository.findById(clienteOrigenId)
+	            .orElseThrow(() -> new RuntimeException("Cliente origen no encontrado"));
+	    Cliente destino = clienteRepository.findById(clienteDestinoId)
+	            .orElseThrow(() -> new RuntimeException("Cliente destino no encontrado"));
+
+	    double so = origen.getSaldo()  != null ? origen.getSaldo()  : 0.0;
+	    double sd = destino.getSaldo() != null ? destino.getSaldo() : 0.0;
+
+	    // Regla: a ORIGEN se le suma (ustedes le deben más), a DESTINO se le resta
+	    so = round2(so + montoCop);
+	    sd = round2(sd - montoCop);
+
+	    origen.setSaldo(so);
+	    destino.setSaldo(sd);
+
+	    clienteRepository.save(origen);
+	    clienteRepository.save(destino);
+
+	    Movimiento m = new Movimiento();
+	    m.setTipo("PAGO C2C COP");        // ← nuevo tipo
+	    m.setFecha(LocalDateTime.now());
+	    m.setMonto(montoCop);
+	    m.setClienteOrigen(origen);       // quién “paga” (aumenta su saldo)
+	    m.setPagoCliente(destino);        // quién “recibe” (disminuye su saldo)
+	    m.setComision(0.0);               // no hay comisión
+
+	    // Campos USDT/tasas NO se tocan (quedan null)
+	    return movimientoRepository.save(m);
+	}
+
 
 }

@@ -145,6 +145,13 @@ public class MovimientoController {
 	public Movimiento pagoClienteAProveedor(@RequestBody PagoClienteAProveedorDto dto) {
 	    return movimientoService.registrarPagoClienteAProveedor(dto);
 	}
-
+	
+	@PostMapping("/pago-cliente-a-cliente-cop")
+	public Movimiento pagoClienteAClienteCop(
+	        @RequestParam Integer clienteOrigenId,
+	        @RequestParam Integer clienteDestinoId,
+	        @RequestParam Double montoCop) {
+	    return movimientoService.registrarPagoClienteAClienteCop(clienteOrigenId, clienteDestinoId, montoCop);
+	}
 
 }
