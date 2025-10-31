@@ -248,18 +248,16 @@ public class MovimientoServiceImplement implements MovimientoService {
 	}
 
 	@Override
-	public List<Movimiento> listarPagosCuentaPorId(Integer cuentaId) {
-		if (cuentaId == null) {
-			throw new IllegalArgumentException("Cuenta id no puede ser nulo");
-		}
-		java.util.List<Movimiento> result = new java.util.ArrayList<>();
-		for (Movimiento m : movimientoRepository.findAll()) {
-			if (m.getCuentaOrigen() != null && cuentaId.equals(m.getCuentaOrigen().getId())) {
-				result.add(m);
-			}
-		}
-		return result;
-	}
+    public List<Movimiento> listarPagosCuentaPorId(Integer cuentaId) {
+        // Ahora retorna TODOS los movimientos relacionados a la cuenta (origen o destino)
+        if (cuentaId == null) throw new IllegalArgumentException("Cuenta id no puede ser nulo");
+        // Valida existencia (opcional pero útil para errores 404 tempranos)
+        accountCopRepository.findById(cuentaId)
+            .orElseThrow(() -> new RuntimeException("Cuenta no encontrada: " + cuentaId));
+
+        return movimientoRepository
+            .findByCuentaOrigen_IdOrCuentaDestino_IdOrderByFechaDesc(cuentaId, cuentaId);
+    }
 
 	@Override
 	public List<Movimiento> listarMovimientosPorCliente(Integer clienteId) {

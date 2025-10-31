@@ -3,9 +3,11 @@ package com.binance.web.Repository;
 import java.util.List;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
 
 import com.binance.web.Entity.Movimiento;
 
+@Repository
 public interface MovimientoRepository extends JpaRepository<Movimiento, Integer> {
 	
 	List<Movimiento> findByTipo(String tipo);
@@ -16,5 +18,5 @@ public interface MovimientoRepository extends JpaRepository<Movimiento, Integer>
 	List<Movimiento> findByPagoCliente_Id(Integer clienteId);
 	List<Movimiento> findByPagoCliente_IdOrClienteOrigen_IdOrderByFechaDesc(Integer clienteId1, Integer clienteId2);
 	List<Movimiento> findByCaja_IdOrderByFechaDesc(Integer cajaId);
-
+	List<Movimiento> findByCuentaOrigen_IdOrCuentaDestino_IdOrderByFechaDesc(Integer cuentaId1, Integer cuentaId2);
 }
