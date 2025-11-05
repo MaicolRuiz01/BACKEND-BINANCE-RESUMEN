@@ -58,6 +58,7 @@ public class SpotOrdersController {
     private final BuyDollarsRepository buyDollarsRepository;
     private final AccountBinanceRepository accountBinanceRepository;
     private final TransaccionesRepository transaccionesRepository;
+    private final TronScanService tronScanService;
 
     private static final DateTimeFormatter FORMATO_FECHA = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -83,13 +84,35 @@ public class SpotOrdersController {
             Set<String> blockedAddresses = getRegisteredAddresses();
 
             ArrayNode filtered = mapper.createArrayNode();
-            for (JsonNode deposit : sourceArray) {
-                String id = deposit.path("id").asText();
-                String address = deposit.path("address").asText(null);
-                if (!assignedIds.contains(id) && (address == null || !blockedAddresses.contains(address))) {
-                    filtered.add(deposit);
-                }
-            }
+
+         // 🔥 NUEVO: obtengo mis direcciones internas normalizadas
+         Set<String> ownAddrs = getRegisteredAddresses().stream()
+                 .map(a -> a.trim().toLowerCase())
+                 .collect(Collectors.toSet());
+
+         for (JsonNode deposit : sourceArray) {
+
+             String id       = deposit.path("id").asText();
+             String address  = deposit.path("address").asText(null);
+             String txId     = deposit.path("txId").asText(null);
+             String network  = deposit.path("network").asText(null);
+             String coin     = deposit.path("coin").asText("");
+
+             // 🔥 Detectar si es traspaso interno por blockchain (txId)
+             boolean internal = isInternalDeposit(txId, coin, network, ownAddrs);
+
+             // ❌ Ya registrada como compra
+             if (assignedIds.contains(id)) continue;
+
+             // ❌ Es dirección interna explícita
+             if (address != null && ownAddrs.contains(address.trim().toLowerCase())) continue;
+
+             // ❌ Detectado interno por txId
+             if (internal) continue;
+
+             filtered.add(deposit);
+         }
+
             ((ObjectNode) root).set("data", filtered);
             return ResponseEntity.ok(mapper.writeValueAsString(root));
         } catch (Exception e) {
@@ -251,16 +274,16 @@ public class SpotOrdersController {
      */
     @GetMapping("/traspasos-no-registrados")
     public ResponseEntity<List<TransaccionesDTO>> getTraspasosNoRegistrados(
-            @RequestParam(defaultValue = "100") int limit) {
+            @RequestParam(defaultValue = "20") int limit) {
         List<TransaccionesDTO> result = new ArrayList<>();
         ObjectMapper mapper = new ObjectMapper();
         LocalDate hoy = LocalDate.now(ZoneId.of("America/Bogota"));
         
         try {
-            Set<String> transIds = transaccionesRepository.findAll().stream()
-                .map(Transacciones::getTxId)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toSet());
+        	Set<String> txIdsRegistrados = transaccionesRepository.findAll().stream()
+        		    .map(Transacciones::getTxId)
+        		    .filter(Objects::nonNull)
+        		    .collect(Collectors.toSet());
             Set<String> internalAddrs = getRegisteredAddresses();
             
             for (String account : binanceService.getAllAccountNames()) {
@@ -284,9 +307,10 @@ public class SpotOrdersController {
                     String txId = wd.path("txId").asText(null);
 
                     // Si ya registrado o no es interno → se omite
-                    if (transIds.contains(id) || (addr == null || !internalAddrs.contains(addr))) {
-                        continue;
-                    }
+                    if ((txId != null && txIdsRegistrados.contains(txId)) ||
+                    	    (addr == null || !internalAddrs.contains(addr))) {
+                    	    continue;
+                    	}
                     
                     LocalDateTime fecha = parseFecha(tsStr);
                     if (fecha != null && fecha.toLocalDate().isEqual(hoy)) {
@@ -345,15 +369,31 @@ public class SpotOrdersController {
         return ResponseEntity.ok(response);
     }
 
-	/*
-	 * @GetMapping("/order-history") public ResponseEntity<String>
-	 * getOrderHistory(@RequestParam String account,
-	 * 
-	 * @RequestParam(defaultValue = "TRXUSDT") String
-	 * symbol, @RequestParam(defaultValue = "100") int limit) { try { String
-	 * response = binanceService.getOrderHistory(account, symbol, limit); return
-	 * ResponseEntity.ok(response); } catch (Exception e) { return
-	 * ResponseEntity.status(500).body("{\"error\": \"Error interno: " +
-	 * e.getMessage() + "\"}"); } }
-	 */
+    private boolean isInternalDeposit(String txId, String coin, String network, Set<String> ownAddrs) {
+        try {
+            if (txId == null) return false;
+
+            if ("TRC20".equalsIgnoreCase(network) || "TRX".equalsIgnoreCase(network)) {
+                JsonNode tx = tronScanService.getTxByHash(txId);
+                String fromAddr = tx.path("from").asText(null);
+                if (fromAddr != null && ownAddrs.contains(fromAddr.trim().toLowerCase())) {
+                    return true; // ✅ Vino de wallet tuya → interno
+                }
+            }
+
+            // TODO: BSC, ETH, SOL si los usas
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+    
+    private Set<String> getOwnAddressesLower() {
+    	  return accountBinanceRepository.findAll().stream()
+    	    .map(AccountBinance::getAddress)
+    	    .filter(Objects::nonNull)
+    	    .map(a -> a.trim().toLowerCase())
+    	    .collect(Collectors.toSet());
+    	}
+
 }

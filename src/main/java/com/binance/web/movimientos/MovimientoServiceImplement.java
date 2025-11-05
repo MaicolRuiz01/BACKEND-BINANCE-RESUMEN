@@ -7,6 +7,7 @@ import java.util.Optional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import com.binance.web.Entity.AccountCop;
+import com.binance.web.Entity.Cliente;
 import com.binance.web.Entity.Efectivo;
 import com.binance.web.Entity.Movimiento;
 import com.binance.web.Entity.Supplier;
@@ -17,11 +18,11 @@ import com.binance.web.Repository.MovimientoRepository;
 import com.binance.web.Repository.SupplierRepository;
 import com.binance.web.model.PagoClienteAClienteDto;
 import com.binance.web.model.PagoClienteAProveedorDto;
+import com.binance.web.model.PagoProveedorAClienteDto;
 import com.binance.web.movimientos.MovimientoDTO;
 
 import jakarta.transaction.Transactional;
 
-import com.binance.web.Entity.Cliente;
 
 @Service
 public class MovimientoServiceImplement implements MovimientoService {
@@ -404,6 +405,62 @@ public class MovimientoServiceImplement implements MovimientoService {
 
 	    return movimientoRepository.save(m);
 	}
+	@Override
+	@Transactional
+	public Movimiento registrarPagoProveedorACliente(PagoProveedorAClienteDto dto) {
+	    if (dto.getProveedorOrigenId() == null || dto.getClienteDestinoId() == null)
+	        throw new IllegalArgumentException("Debe indicar proveedor origen y cliente destino");
+	    if (dto.getUsdt() == null || dto.getUsdt() <= 0)
+	        throw new IllegalArgumentException("El monto USDT debe ser > 0");
+	    if (dto.getTasaProveedor() == null || dto.getTasaProveedor() <= 0 ||
+	        dto.getTasaCliente() == null   || dto.getTasaCliente()   <= 0)
+	        throw new IllegalArgumentException("Las tasas deben ser > 0");
+
+	    Supplier proveedor = supplierRepository.findById(dto.getProveedorOrigenId())
+	            .orElseThrow(() -> new RuntimeException("Proveedor origen no encontrado"));
+	    Cliente  cliente   = clienteRepository.findById(dto.getClienteDestinoId())
+	            .orElseThrow(() -> new RuntimeException("Cliente destino no encontrado"));
+
+	    // COP equivalentes según cada tasa
+	    double pesosProveedor = dto.getUsdt() * dto.getTasaProveedor(); // origen (proveedor)
+	    double pesosCliente   = dto.getUsdt() * dto.getTasaCliente();   // destino (cliente)
+
+	    double sp = proveedor.getBalance() != null ? proveedor.getBalance() : 0.0;
+	    double sc = cliente.getSaldo()     != null ? cliente.getSaldo()   : 0.0;
+
+	    // Regla inversa a Cliente→Proveedor:
+	    // Proveedor paga -> nos debe más (sube su balance)
+	    // Cliente recibe -> le debemos menos (baja su saldo)
+	    sp = round2(sp + pesosProveedor);
+	    sc = round2(sc - pesosCliente);
+
+	    proveedor.setBalance(sp);
+	    cliente.setSaldo(sc);
+
+	    supplierRepository.save(proveedor);
+	    clienteRepository.save(cliente);
+
+	    Movimiento m = new Movimiento();
+	    m.setTipo("PAGO EN USDT PROVEEDOR CLIENTE");
+	    m.setFecha(LocalDateTime.now());
+
+	    // Monto y tasas
+	    m.setUsdt(dto.getUsdt());
+	    m.setTasaOrigen(dto.getTasaProveedor()); // origen = proveedor
+	    m.setTasaDestino(dto.getTasaCliente());  // destino = cliente
+	    m.setPesosOrigen(pesosProveedor);
+	    m.setPesosDestino(pesosCliente);
+
+	    // Participantes
+	    m.setProveedorOrigen(proveedor);
+	    m.setPagoCliente(cliente);
+
+	    // Si agregaste nota/descripción en la entidad:
+	    // m.setDescripcion(dto.getNota());
+
+	    return movimientoRepository.save(m);
+	}
+
 	
 	@Override
 	@Transactional
@@ -444,6 +501,4 @@ public class MovimientoServiceImplement implements MovimientoService {
 	    // Campos USDT/tasas NO se tocan (quedan null)
 	    return movimientoRepository.save(m);
 	}
-
-
 }

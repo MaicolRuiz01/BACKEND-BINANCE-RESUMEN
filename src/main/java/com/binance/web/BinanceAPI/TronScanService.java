@@ -361,18 +361,6 @@ public class TronScanService {
         }
     }
     
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
  // == helpers Trongrid (sin tocar lo demás) ==
     public String getTrongridTrc20(String address, int limit) {
         String url = "https://api.trongrid.io/v1/accounts/" + address
@@ -472,5 +460,82 @@ public class TronScanService {
         } catch (Exception e) {
             return out.toString();
         }
+    }
+    public JsonNode getTxByHash(String txId) {
+        // 1) TRC20: eventos del tx
+        try {
+            String urlEv = "https://api.trongrid.io/v1/transactions/" + txId + "/events";
+            String body  = restTemplate.exchange(urlEv, HttpMethod.GET, tronGridEntity(), String.class).getBody();
+            JsonNode root = objectMapper.readTree(body);
+            JsonNode data = root.path("data");
+            if (data.isArray() && data.size() > 0) {
+                for (JsonNode ev : data) {
+                    String evName = ev.path("event_name").asText("");
+                    if ("Transfer".equalsIgnoreCase(evName)) {
+                        ObjectNode out = objectMapper.createObjectNode();
+                        JsonNode res = ev.path("result");
+                        out.put("from", res.path("from").asText((String) null));
+                        out.put("to",   res.path("to").asText((String) null));
+                        // si viene info del token, la agrego
+                        String symbol = ev.path("token_info").path("symbol").asText((String) null);
+                        if (symbol != null) out.put("symbol", symbol);
+                        return out;
+                    }
+                }
+            }
+        } catch (Exception ignore) {}
+
+        // 2) TRX nativo o contratos sin eventos Transfer
+        try {
+            String urlTx = "https://api.trongrid.io/v1/transactions/" + txId;
+            String body  = restTemplate.exchange(urlTx, HttpMethod.GET, tronGridEntity(), String.class).getBody();
+            JsonNode data = objectMapper.readTree(body).path("data");
+            if (data.isArray() && data.size() > 0) {
+                JsonNode tx = data.get(0);
+                JsonNode contracts = tx.path("raw_data").path("contract");
+                if (contracts.isArray() && contracts.size() > 0) {
+                    JsonNode c0  = contracts.get(0);
+                    JsonNode val = c0.path("parameter").path("value");
+                    String from = val.path("owner_address").asText((String) null);
+                    String to   = val.path("to_address").asText((String) null);
+
+                    ObjectNode out = objectMapper.createObjectNode();
+                    if (from != null) out.put("from", from);
+                    if (to   != null) out.put("to",   to);
+                    out.put("symbol", "TRX");
+                    return out;
+                }
+            }
+        } catch (Exception ignore) {}
+
+        // 3) Fallback: TronScan (tu método ya existente)
+        try {
+            JsonNode scan = getTransactionDetailsFromTronScan(txId);
+            // TronScan puede exponer varios alias para las direcciones
+            String from = firstNonNull(
+                    scan.path("transferFromAddress").asText(null),
+                    scan.path("ownerAddress").asText(null),
+                    scan.path("fromAddress").asText(null)
+            );
+            String to = firstNonNull(
+                    scan.path("transferToAddress").asText(null),
+                    scan.path("toAddress").asText(null)
+            );
+
+            ObjectNode out = objectMapper.createObjectNode();
+            if (from != null) out.put("from", from);
+            if (to   != null) out.put("to",   to);
+            // symbol no siempre viene; lo omito si no está
+            return out;
+        } catch (Exception ignore) {}
+
+        // Si nada funcionó, devuelvo objeto vacío
+        return objectMapper.createObjectNode();
+    }
+
+    // helper pequeño para elegir el primer no-nulo
+    private static String firstNonNull(String... values) {
+        for (String v : values) if (v != null && !v.isBlank()) return v;
+        return null;
     }
 }

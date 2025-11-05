@@ -6,6 +6,7 @@ import java.util.List;
 import com.binance.web.Entity.Movimiento;
 import com.binance.web.model.PagoClienteAClienteDto;
 import com.binance.web.model.PagoClienteAProveedorDto;
+import com.binance.web.model.PagoProveedorAClienteDto;
 
 public interface MovimientoService {
 	
@@ -28,5 +29,6 @@ public interface MovimientoService {
 	List<Movimiento> listarMovimientosPorCaja(Integer cajaId);
 	Movimiento registrarPagoClienteAProveedor(PagoClienteAProveedorDto dto);
 	Movimiento registrarPagoClienteAClienteCop(Integer clienteOrigenId, Integer clienteDestinoId, Double montoCop);
+	Movimiento registrarPagoProveedorACliente(PagoProveedorAClienteDto dto);
 
 }
