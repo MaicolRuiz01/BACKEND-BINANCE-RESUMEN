@@ -22,5 +22,6 @@ public class Supplier {
 	private Integer id;
 	private String name;
 	private Double balance;
+	private Double saldoInicialDelDia;
 	private LocalDateTime lastPaymentDate;
 }

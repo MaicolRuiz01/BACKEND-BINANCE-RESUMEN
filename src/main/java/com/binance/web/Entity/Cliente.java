@@ -27,6 +27,7 @@ public class Cliente {
 	private String correo;
 	//saldo a favor o en contra
 	private Double saldo;
+	private Double saldoInicialDelDia; 
 	private Integer accountId;
 	@Column(unique = true)
 	private String wallet;
