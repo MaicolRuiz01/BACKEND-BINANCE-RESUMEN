@@ -44,4 +44,19 @@ public class Movimiento {
     @ManyToOne private Cliente    clienteOrigen;
     @ManyToOne private Supplier   proveedorOrigen;
     @ManyToOne private Supplier   pagoProveedor;
+    
+    // ====== NUEVO: Auditoría de Ajustes ======
+    private String  motivo;            // por qué se ajusta
+    private String  actor;             // usuario que lo hizo (username/email)
+    private Double  saldoAnterior;
+    private Double  saldoNuevo;
+    private Double  diferencia;
+
+    // Polimorfismo “suave” del destino del ajuste (uno de estos tres se completa)
+    @ManyToOne private Cliente    ajusteCliente;
+    @ManyToOne private Supplier   ajusteProveedor;
+    @ManyToOne private AccountCop ajusteCuentaCop;
+
+    // Si quieres permitir reversas:
+    private Integer reversaDeMovimientoId; // null si no es reversa
 }

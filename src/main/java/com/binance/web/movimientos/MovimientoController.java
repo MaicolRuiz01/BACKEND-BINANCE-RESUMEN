@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.binance.web.Entity.Movimiento;
+import com.binance.web.model.AjusteSaldoDto;
 import com.binance.web.model.PagoClienteAClienteDto;
 import com.binance.web.model.PagoClienteAProveedorDto;
 import com.binance.web.model.PagoProveedorAClienteDto;
@@ -159,6 +160,11 @@ public class MovimientoController {
 	public Movimiento pagoProveedorACliente(@RequestBody PagoProveedorAClienteDto dto) {
 	    return movimientoService.registrarPagoProveedorACliente(dto);
 	}
-
+	
+	// MovimientoController.java
+	@PostMapping("/ajuste-saldo")
+	public Movimiento ajustarSaldo(@RequestBody AjusteSaldoDto dto) {
+	    return movimientoService.registrarAjusteSaldo(dto);
+	}
 
 }
