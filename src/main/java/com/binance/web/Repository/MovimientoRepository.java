@@ -23,4 +23,5 @@ public interface MovimientoRepository extends JpaRepository<Movimiento, Integer>
 	List<Movimiento> findByAjusteCliente_IdOrderByFechaDesc(Integer clienteId);
     List<Movimiento> findByAjusteProveedor_IdOrderByFechaDesc(Integer proveedorId);
     List<Movimiento> findByAjusteCuentaCop_IdOrderByFechaDesc(Integer cuentaId);
+    List<Movimiento> findByPagoProveedor_IdOrProveedorOrigen_IdOrderByFechaDesc(Integer pagoProveedorId, Integer proveedorOrigenId);
 }

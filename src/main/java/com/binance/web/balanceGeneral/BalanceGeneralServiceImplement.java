@@ -74,7 +74,7 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
 
             // 2) total de TODAS las cuentas en USDT (interno) → a pesos
             Double totalBinanceUSDT = accountBinanceService.getTotalBalanceInterno().doubleValue();
-            Double saldoCuentasBinance = totalBinanceUSDT * tasaPromedioDelDia;  // COP
+            Double saldoCuentasBinance = totalBinanceUSDT * tasaPromedioDelDia;
 
             // 3) demás componentes del balance
             List<SellDollars> ventasGenerales = sellDollarsService.obtenerVentasPorFecha(fecha);

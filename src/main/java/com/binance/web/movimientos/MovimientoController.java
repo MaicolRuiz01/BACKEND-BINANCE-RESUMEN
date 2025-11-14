@@ -14,7 +14,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.binance.web.Entity.Movimiento;
+import com.binance.web.Repository.MovimientoRepository;
 import com.binance.web.model.AjusteSaldoDto;
+import com.binance.web.model.MovimientoVistaDTO;
 import com.binance.web.model.PagoClienteAClienteDto;
 import com.binance.web.model.PagoClienteAProveedorDto;
 import com.binance.web.model.PagoProveedorAClienteDto;
@@ -25,6 +27,9 @@ public class MovimientoController {
 
 	@Autowired
 	private MovimientoService movimientoService;
+	@Autowired private MovimientoRepository movimientoRepo;
+	@Autowired
+	private MovimientoVistaService vistaService;
 
 	@PostMapping("/deposito")
 	public Movimiento deposito(@RequestParam Integer cuentaId, @RequestParam Integer cajaId,
@@ -166,5 +171,24 @@ public class MovimientoController {
 	public Movimiento ajustarSaldo(@RequestBody AjusteSaldoDto dto) {
 	    return movimientoService.registrarAjusteSaldo(dto);
 	}
+	@GetMapping("/vista/cliente/{clienteId}")
+	public List<MovimientoVistaDTO> vistaCliente(@PathVariable Integer clienteId) {
+	    return vistaService.vistaPorCliente(clienteId);
+	}
 
+	@GetMapping("/vista/proveedor/{proveedorId}")
+	public List<MovimientoVistaDTO> vistaProveedor(@PathVariable Integer proveedorId) {
+	    return vistaService.vistaPorProveedor(proveedorId);
+	}
+
+	@GetMapping("/vista/cuenta-cop/{cuentaId}")
+	public List<MovimientoVistaDTO> vistaCuenta(@PathVariable Integer cuentaId) {
+	    return vistaService.vistaPorCuentaCop(cuentaId);
+	}
+
+	@GetMapping("/vista/caja/{cajaId}")
+	public List<MovimientoVistaDTO> vistaCaja(@PathVariable Integer cajaId) {
+	    return vistaService.vistaPorCaja(cajaId);
+	}
+	
 }
