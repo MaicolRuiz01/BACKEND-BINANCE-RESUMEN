@@ -17,39 +17,61 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 @Entity
-@Table(name = "spot_order",
-  uniqueConstraints = @UniqueConstraint(columnNames = {"account_binance_id","orderId"}))
-@Data 
-@NoArgsConstructor 
+@Table(name = "spot_order", uniqueConstraints = @UniqueConstraint(columnNames = { "account_binance_id",
+		"id_orden_binance" }))
+@Data
+@NoArgsConstructor
 @AllArgsConstructor
 public class SpotOrder {
-  @Id 
-  @GeneratedValue(strategy = GenerationType.IDENTITY)
-  private Long id;
 
-  @ManyToOne(fetch = FetchType.LAZY) 
-  @JoinColumn(name="account_binance_id", nullable=false)
-  private AccountBinance account;       // BINANCE
+	@Id
+	@GeneratedValue(strategy = GenerationType.IDENTITY)
+	private Long id;
 
-  private Long   orderId;               // de Binance
-  private String clientOrderId;
+	// -------- RELACIÓN CON LA CUENTA BINANCE --------
 
-  private String symbol;                // p.ej. TRXUSDT
-  private String baseAsset;             // TRX
-  private String quoteAsset;            // USDT
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "account_binance_id", nullable = false)
+	private AccountBinance cuentaBinance;
 
-  private String side;                  // BUY / SELL
-  private String type;                  // MARKET / LIMIT
-  private String status;                // FILLED, etc.
+	// -------- IDENTIFICADORES --------
 
-  private Double executedBaseQty;       // suma ejecutada en BASE
-  private Double executedQuoteQty;      // suma ejecutada en QUOTE (cummulativeQuoteQty)
-  private Double avgPrice;              // tasa promedio (quote/base)
+	@Column(name = "id_orden_binance", nullable = false)
+	private Long idOrdenBinance; // orderId oficial de Binance
 
-  private Double feeTotalUsdt;          // comisión total convertida a USDT
-  private LocalDateTime filledAt;       // fecha/hora de ejecución (Bogotá)
+	@Column(name = "id_orden_cliente")
+	private String idOrdenCliente; // clientOrderId (si existe)
 
-  // JSON con el detalle por asset (opcional pero útil para auditoría)
-  @Column(columnDefinition="TEXT")
-  private String feeBreakdownJson;      // [{"asset":"BNB","qty":0.00123}, ...]
+	// -------- INFO GENERAL --------
+
+	@Column(nullable = false)
+	private String simbolo; // Ej: BTCUSDT, TRXUSDT
+
+	@Column(nullable = false)
+	private String tipoOperacion; // COMPRA o VENTA
+
+	// -------- DATOS DE LA CRIPTO Y MONTOS --------
+
+	@Column(nullable = false)
+	private String cripto; // Ej: BTC, TRX, SOL
+
+	@Column(nullable = false)
+	private Double cantidadCripto; // Cuánta cripto se compró/vendió
+
+	@Column(nullable = false)
+	private Double totalUsdt; // Total recibido/pagado en USDT
+
+	@Column(nullable = false)
+	private Double tasaUsdt; // Precio unitario en USDT
+
+	// -------- COMISIÓN Y FECHA --------
+
+	@Column(nullable = false)
+	private Double comisionUsdt; // Comisión total en USDT
+
+	@Column(nullable = false)
+	private LocalDateTime fechaOperacion; // Fecha y hora de ejecución
+
+	@Column(columnDefinition = "TEXT")
+	private String detalleBinanceJson; // JSON original por si se necesita
 }

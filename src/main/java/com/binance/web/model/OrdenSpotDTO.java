@@ -6,33 +6,43 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 import com.binance.web.Entity.SpotOrder;
-@Data @Builder @NoArgsConstructor @AllArgsConstructor
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class OrdenSpotDTO {
+
     private Long idInterno;
-    private Long idOrden;              // orderId Binance
-    private String cuenta;             // nombre cuenta
-    private String simbolo;            // TRXUSDT...
-    private String lado;               // BUY/SELL
-    private String estado;             // FILLED, CANCELED...
-    private BigDecimal precioPromedio; // avgPrice (quote/base)
-    private BigDecimal cantidadBase;   // executedBaseQty
-    private BigDecimal cantidadCot;    // executedQuoteQty
-    private BigDecimal comisionUsdt;   // feeTotalUsdt (aplanado a USDT)
-    private LocalDateTime fechaEjec;   // filledAt (fecha real de ejecución)
+    private Long idOrden;
+    private String cuenta;
+    private String simbolo;
+
+    private String tipoOperacion;  // COMPRA / VENTA
+
+    private String cripto;
+    private Double cantidadCripto;
+    private Double totalUsdt;
+    private Double tasaUsdt;
+
+    private Double comisionUsdt;
+    private LocalDateTime fechaOperacion;
+
+    private String detalleBinanceJson;
 
     public static OrdenSpotDTO fromEntity(SpotOrder o) {
         return OrdenSpotDTO.builder()
             .idInterno(o.getId())
-            .idOrden(o.getOrderId())
-            .cuenta(o.getAccount()!=null? o.getAccount().getName(): null)
-            .simbolo(o.getSymbol())
-            .lado(o.getSide())
-            .estado(o.getStatus())
-            .precioPromedio(BigDecimal.valueOf(o.getAvgPrice()!=null? o.getAvgPrice(): 0.0))
-            .cantidadBase(BigDecimal.valueOf(o.getExecutedBaseQty()!=null? o.getExecutedBaseQty(): 0.0))
-            .cantidadCot(BigDecimal.valueOf(o.getExecutedQuoteQty()!=null? o.getExecutedQuoteQty(): 0.0))
-            .comisionUsdt(BigDecimal.valueOf(o.getFeeTotalUsdt()!=null? o.getFeeTotalUsdt(): 0.0))
-            .fechaEjec(o.getFilledAt())
+            .idOrden(o.getIdOrdenBinance())
+            .cuenta(o.getCuentaBinance() != null ? o.getCuentaBinance().getName() : null)
+            .simbolo(o.getSimbolo())
+            .tipoOperacion(o.getTipoOperacion())
+            .cripto(o.getCripto())
+            .cantidadCripto(o.getCantidadCripto())
+            .totalUsdt(o.getTotalUsdt())
+            .tasaUsdt(o.getTasaUsdt())
+            .comisionUsdt(o.getComisionUsdt())
+            .fechaOperacion(o.getFechaOperacion())
+            .detalleBinanceJson(o.getDetalleBinanceJson())
             .build();
     }
 }

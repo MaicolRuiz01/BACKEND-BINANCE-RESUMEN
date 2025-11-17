@@ -34,10 +34,14 @@ public interface AccountBinanceService {
 	
 	Double getInternalUsdBalance(String accountName);        // ← nuevo
     Double getTotalInternalUsdBalance();                     // ← opcional (todas las cuentas a USD)
+    Double getTotalCryptoBalanceInterno(String cripto);
+
 
 
     void syncInternalBalancesFromExchange(String accountName);
-    void syncAllInternalBalancesFromExchange(); 
+    void syncAllInternalBalancesFromExchange();
+    Double getTotalCryptoBalanceExterno(String cripto);
+
     
  // 👉 nuevo: para obtener el snapshot externo (Spot+Funding) por símbolo
     Map<String, Double> getExternalBalancesSnapshot(String accountName);

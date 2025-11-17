@@ -139,7 +139,8 @@ public class SpotOrderIngestService {
                 if (!"FILLED".equalsIgnoreCase(o.get("status").getAsString())) continue;
 
                 long orderId = o.get("orderId").getAsLong();
-                if (spotOrderRepo.existsByAccountAndOrderId(acc, orderId)) continue;
+                if (spotOrderRepo.existsByCuentaBinanceAndIdOrdenBinance(acc, orderId)) continue;
+
 
                 String side     = o.get("side").getAsString();
                 double execBase = o.get("executedQty").getAsDouble();
@@ -180,22 +181,40 @@ public class SpotOrderIngestService {
                         : (o.has("updateTime") ? o.get("updateTime").getAsLong() : o.get("time").getAsLong()));
 
                 SpotOrder so = new SpotOrder();
-                so.setAccount(acc);
-                so.setOrderId(orderId);
-                so.setClientOrderId(o.get("clientOrderId").getAsString());
-                so.setSymbol(symbol);
-                so.setBaseAsset(base);
-                so.setQuoteAsset(quote);
-                so.setSide(side);
-                so.setType(o.get("type").getAsString());
-                so.setStatus("FILLED");
-                so.setExecutedBaseQty(execBase);
-                so.setExecutedQuoteQty(execQ);
-                so.setAvgPrice(avgPrice);
-                so.setFeeTotalUsdt(feeUsdt);
-                so.setFeeBreakdownJson(new Gson().toJson(feeByAsset));
-                so.setFilledAt(LocalDateTime.ofInstant(Instant.ofEpochMilli(ts), ZoneId.of("America/Bogota")));
+                so.setCuentaBinance(acc);
+                so.setIdOrdenBinance(orderId);
+                so.setIdOrdenCliente(o.get("clientOrderId").getAsString());
+                so.setSimbolo(symbol);
+
+                // BUY → COMPRA,  SELL → VENTA 
+                String tipoOperacion = side.equalsIgnoreCase("BUY") ? "COMPRA" : "VENTA";
+                so.setTipoOperacion(tipoOperacion);
+
+                // base = TRX (o BTC o lo que sea)
+                so.setCripto(base);
+
+                // executedQty → cantidad de cripto comprada/vendida
+                so.setCantidadCripto(execBase);
+
+                // cummulativeQuoteQty → total en USDT
+                so.setTotalUsdt(execQ);
+
+                // avgPrice calculado arriba
+                so.setTasaUsdt(avgPrice);
+
+                // comisión final convertida a USDT
+                so.setComisionUsdt(feeUsdt);
+
+                // fecha real de ejecución
+                so.setFechaOperacion(
+                    LocalDateTime.ofInstant(Instant.ofEpochMilli(ts), ZoneId.of("America/Bogota"))
+                );
+
+                // JSON auditoría
+                so.setDetalleBinanceJson(new Gson().toJson(feeByAsset));
+
                 spotOrderRepo.save(so);
+
 
                 applyDeltas(acc, base, quote, side, execBase, execQ, feeByAsset);
                 count++;

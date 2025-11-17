@@ -504,5 +504,53 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
 			}
 		});
 	}
+	
+	@Override
+	public Double getTotalCryptoBalanceInterno(String cripto) {
+	    if (cripto == null) return 0.0;
+
+	    String sym = cripto.trim().toUpperCase();
+	    if (sym.isEmpty()) return 0.0;
+
+	    // Usamos el agregado que ya tienes: sumBySymbol()
+	    List<AccountCryptoBalanceRepository.SymbolQty> rows =
+	            accountCryptoBalanceRepository.sumBySymbol();
+
+	    return rows.stream()
+	            .filter(r -> sym.equalsIgnoreCase(r.getSymbol()))
+	            .map(r -> r.getQty() != null ? r.getQty() : 0.0)
+	            .findFirst()
+	            .orElse(0.0);
+	}
+	
+	@Override
+	@Transactional(readOnly = true)
+	public Double getTotalCryptoBalanceExterno(String cripto) {
+	    if (cripto == null) return 0.0;
+	    String sym = cripto.trim().toUpperCase();
+	    if (sym.isEmpty()) return 0.0;
+
+	    double total = 0.0;
+
+	    // Recorremos todas las cuentas
+	    for (AccountBinance acc : accountBinanceRepository.findAll()) {
+	        try {
+	            Map<String, Double> snap = getExternalBalancesSnapshot(acc.getName());
+	            if (snap == null) continue;
+
+	            Double qty = snap.entrySet().stream()
+	                    .filter(e -> sym.equalsIgnoreCase(e.getKey()))
+	                    .map(Map.Entry::getValue)
+	                    .findFirst()
+	                    .orElse(0.0);
+
+	            total += (qty != null ? qty : 0.0);
+	        } catch (Exception e) {
+	            System.out.println("⚠️ No se pudo leer snapshot externo de " + acc.getName() + ": " + e.getMessage());
+	        }
+	    }
+
+	    return total;
+	}
 
 }

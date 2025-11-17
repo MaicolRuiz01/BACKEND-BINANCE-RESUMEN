@@ -17,8 +17,6 @@ import com.binance.web.model.OrdenSpotDTO;
 
 import lombok.RequiredArgsConstructor;
 
-//SpotOrdersImportController.java
-//SpotOrdersImportController.java
 @RestController
 @RequestMapping("/ordenes-spot")
 @RequiredArgsConstructor
@@ -50,12 +48,21 @@ public class SpotOrdersImportController {
 	/** Listado para el front ya en DTO español (filtrable por cuenta, opcional). */
 	@GetMapping("/listar")
 	public ResponseEntity<List<OrdenSpotDTO>> listar(@RequestParam(required = false) String cuenta) {
-		var stream = (cuenta == null || cuenta.isBlank()) ? spotOrderRepo.findAll().stream()
-				: spotOrderRepo.findByAccount_NameOrderByFilledAtDesc(cuenta).stream();
 
-		var out = stream.sorted(Comparator.comparing(SpotOrder::getFilledAt).reversed()).map(OrdenSpotDTO::fromEntity)
-				.toList();
+	    List<SpotOrder> lista;
 
-		return ResponseEntity.ok(out);
+	    if (cuenta == null || cuenta.isBlank()) {
+	        lista = spotOrderRepo.findAll();
+	    } else {
+	        lista = spotOrderRepo.findByCuentaBinance_NameOrderByFechaOperacionDesc(cuenta);
+	    }
+
+	    List<OrdenSpotDTO> out = lista.stream()
+	            .sorted(Comparator.comparing(SpotOrder::getFechaOperacion).reversed())
+	            .map(OrdenSpotDTO::fromEntity)
+	            .toList();
+
+	    return ResponseEntity.ok(out);
 	}
+
 }
