@@ -1,5 +1,7 @@
 package com.binance.web.movimientos;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -8,6 +10,7 @@ import org.springframework.stereotype.Service;
 import com.binance.web.Entity.Movimiento;
 import com.binance.web.Repository.MovimientoRepository;
 import com.binance.web.model.MovimientoVistaDTO;
+import com.binance.web.model.ResumenDiarioDTO;
 
 @Service
 public class MovimientoVistaService {
@@ -197,5 +200,93 @@ public class MovimientoVistaService {
             dto.setDetalle("Caja");
             return dto;
         }).toList();
+    }
+    
+ // ============================
+    // RESUMEN DIARIO CLIENTE
+    // ============================
+    public ResumenDiarioDTO resumenClienteHoy(Integer clienteId) {
+        LocalDate hoy = LocalDate.now();
+
+        // 1) Usamos la vista (ya calcula montoSigned / entrada / salida)
+        List<MovimientoVistaDTO> vista = vistaPorCliente(clienteId);
+
+        double compras = 0.0;
+        double ventas  = 0.0;
+
+        for (MovimientoVistaDTO v : vista) {
+            if (!v.getFecha().toLocalDate().equals(hoy)) continue;
+
+            // ignorar ajustes
+            if (v.getTipo() != null && v.getTipo().toUpperCase().startsWith("AJUSTE_SALDO")) {
+                continue;
+            }
+
+            if (v.isEntrada()) {
+                compras += v.getMontoSigned() != null ? v.getMontoSigned() : 0.0;
+            } else if (v.isSalida()) {
+                ventas += Math.abs(v.getMontoSigned() != null ? v.getMontoSigned() : 0.0);
+            }
+        }
+
+        // 2) Ajustes de saldo del día de este cliente
+        LocalDateTime inicio = hoy.atStartOfDay();
+        LocalDateTime fin    = hoy.plusDays(1).atStartOfDay();
+
+        List<Movimiento> ajustes = movimientoRepo
+                .findByAjusteCliente_IdAndFechaBetween(clienteId, inicio, fin);
+
+        double ajustesTotal = ajustes.stream()
+                .mapToDouble(m -> {
+                    // si quieres usar diferencia como valor del ajuste:
+                    if (m.getDiferencia() != null) return Math.abs(m.getDiferencia());
+                    if (m.getMonto() != null)      return Math.abs(m.getMonto());
+                    return 0.0;
+                })
+                .sum();
+
+        return new ResumenDiarioDTO(compras, ventas, ajustesTotal);
+    }
+
+    // ============================
+    // RESUMEN DIARIO PROVEEDOR
+    // ============================
+    public ResumenDiarioDTO resumenProveedorHoy(Integer proveedorId) {
+        LocalDate hoy = LocalDate.now();
+
+        List<MovimientoVistaDTO> vista = vistaPorProveedor(proveedorId);
+
+        double compras = 0.0;
+        double ventas  = 0.0;
+
+        for (MovimientoVistaDTO v : vista) {
+            if (!v.getFecha().toLocalDate().equals(hoy)) continue;
+
+            if (v.getTipo() != null && v.getTipo().toUpperCase().startsWith("AJUSTE_SALDO")) {
+                continue;
+            }
+
+            if (v.isEntrada()) {
+                compras += v.getMontoSigned() != null ? v.getMontoSigned() : 0.0;
+            } else if (v.isSalida()) {
+                ventas += Math.abs(v.getMontoSigned() != null ? v.getMontoSigned() : 0.0);
+            }
+        }
+
+        LocalDateTime inicio = hoy.atStartOfDay();
+        LocalDateTime fin    = hoy.plusDays(1).atStartOfDay();
+
+        List<Movimiento> ajustes = movimientoRepo
+                .findByAjusteProveedor_IdAndFechaBetween(proveedorId, inicio, fin);
+
+        double ajustesTotal = ajustes.stream()
+                .mapToDouble(m -> {
+                    if (m.getDiferencia() != null) return Math.abs(m.getDiferencia());
+                    if (m.getMonto() != null)      return Math.abs(m.getMonto());
+                    return 0.0;
+                })
+                .sum();
+
+        return new ResumenDiarioDTO(compras, ventas, ajustesTotal);
     }
 }

@@ -1,5 +1,6 @@
 package com.binance.web.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -24,4 +25,15 @@ public interface MovimientoRepository extends JpaRepository<Movimiento, Integer>
     List<Movimiento> findByAjusteProveedor_IdOrderByFechaDesc(Integer proveedorId);
     List<Movimiento> findByAjusteCuentaCop_IdOrderByFechaDesc(Integer cuentaId);
     List<Movimiento> findByPagoProveedor_IdOrProveedorOrigen_IdOrderByFechaDesc(Integer pagoProveedorId, Integer proveedorOrigenId);
+    List<Movimiento> findByAjusteCliente_IdAndFechaBetween(
+            Integer clienteId,
+            LocalDateTime desde,
+            LocalDateTime hasta
+    );
+
+    List<Movimiento> findByAjusteProveedor_IdAndFechaBetween(
+            Integer proveedorId,
+            LocalDateTime desde,
+            LocalDateTime hasta
+    );
 }

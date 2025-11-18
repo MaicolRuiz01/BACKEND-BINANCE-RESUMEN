@@ -20,6 +20,7 @@ import com.binance.web.model.MovimientoVistaDTO;
 import com.binance.web.model.PagoClienteAClienteDto;
 import com.binance.web.model.PagoClienteAProveedorDto;
 import com.binance.web.model.PagoProveedorAClienteDto;
+import com.binance.web.model.ResumenDiarioDTO;
 
 @RestController
 @RequestMapping("/movimiento")
@@ -191,4 +192,13 @@ public class MovimientoController {
 	    return vistaService.vistaPorCaja(cajaId);
 	}
 	
+	@GetMapping("/resumen/cliente/{clienteId}")
+    public ResumenDiarioDTO resumenCliente(@PathVariable Integer clienteId) {
+        return vistaService.resumenClienteHoy(clienteId);
+    }
+
+    @GetMapping("/resumen/proveedor/{proveedorId}")
+    public ResumenDiarioDTO resumenProveedor(@PathVariable Integer proveedorId) {
+        return vistaService.resumenProveedorHoy(proveedorId);
+    }
 }
