@@ -46,7 +46,6 @@ public class AverageRateController {
         );
         return ResponseEntity.ok(creada);
     }
-
     // DTO simple para el body del POST
     public static class InitialRateRequest {
         private Double tasaInicial;

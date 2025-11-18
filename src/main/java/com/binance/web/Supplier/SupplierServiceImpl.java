@@ -34,7 +34,10 @@ public class SupplierServiceImpl implements SupplierService {
 
 	@Override
 	public void saveSupplier(Supplier supplier) {
+		
+		supplier.setSaldoInicialDelDia(supplier.getBalance());
 		supplierRepository.save(supplier);
+		
 	}
 
 	public void createSupplier(String name, Double balance, LocalDateTime lastPaymentDate) {
@@ -43,6 +46,7 @@ public class SupplierServiceImpl implements SupplierService {
 		supplier.setBalance(balance);
 		supplier.setLastPaymentDate(lastPaymentDate);
 		supplierRepository.save(supplier);
+		supplier.setSaldoInicialDelDia(balance);
 	}
 
 	@Override

@@ -26,6 +26,7 @@ public class ClienteServiceImpl implements ClienteService {
         if (cliente.getSaldo() == null) {
             cliente.setSaldo(0.0);
         }
+        cliente.setSaldoInicialDelDia(cliente.getSaldo());
         return clienteRepository.save(cliente);
     }
 
