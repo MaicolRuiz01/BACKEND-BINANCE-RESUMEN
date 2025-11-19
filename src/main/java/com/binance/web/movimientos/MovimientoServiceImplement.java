@@ -591,6 +591,48 @@ public class MovimientoServiceImplement implements MovimientoService {
 	            throw new IllegalArgumentException("Entidad no soportada: " + dto.getEntidad());
 	    }
 	}
+	@Override
+	@Transactional
+	public Movimiento registrarPagoCuentaCopACliente(Integer cuentaCopId, Integer clienteId, Double monto) {
+
+	    if (cuentaCopId == null || clienteId == null)
+	        throw new IllegalArgumentException("Debe indicar cuenta COP y cliente destino");
+
+	    if (monto == null || monto <= 0)
+	        throw new IllegalArgumentException("El monto debe ser > 0");
+
+	    AccountCop cuenta = accountCopRepository.findById(cuentaCopId)
+	            .orElseThrow(() -> new RuntimeException("Cuenta COP no encontrada"));
+
+	    Cliente cliente = clienteRepository.findById(clienteId)
+	            .orElseThrow(() -> new RuntimeException("Cliente no encontrado"));
+
+	    // 👉 comisión 4x1000
+	    double comision = monto * 0.004;
+	    double montoTotal = monto + comision;
+
+	    // 👉 ACTUALIZAR SALDOS
+	    double saldoCuenta = cuenta.getBalance() != null ? cuenta.getBalance() : 0.0;
+	    double saldoCliente = cliente.getSaldo() != null ? cliente.getSaldo() : 0.0;
+
+	    cuenta.setBalance(saldoCuenta - montoTotal);  // la cuenta paga + comisión
+	    cliente.setSaldo(saldoCliente + monto);       // el cliente recibe solo el monto
+
+	    accountCopRepository.save(cuenta);
+	    clienteRepository.save(cliente);
+
+	    // 👉 REGISTRAR MOVIMIENTO
+	    Movimiento mov = new Movimiento();
+	    mov.setTipo("PAGO COP A CLIENTE");
+	    mov.setFecha(LocalDateTime.now());
+	    mov.setMonto(monto);
+	    mov.setComision(comision);
+
+	    mov.setCuentaOrigen(cuenta);      // quien paga
+	    mov.setPagoCliente(cliente);      // quien recibe
+
+	    return movimientoRepository.save(mov);
+	}
 
 	
 }

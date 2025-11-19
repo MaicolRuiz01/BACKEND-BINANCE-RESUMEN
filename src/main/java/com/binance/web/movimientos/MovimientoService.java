@@ -33,5 +33,6 @@ public interface MovimientoService {
 	Movimiento registrarPagoProveedorACliente(PagoProveedorAClienteDto dto);
 	
 	Movimiento registrarAjusteSaldo(AjusteSaldoDto dto);
+	Movimiento registrarPagoCuentaCopACliente(Integer cuentaCopId, Integer clienteId, Double monto);
 
 }
