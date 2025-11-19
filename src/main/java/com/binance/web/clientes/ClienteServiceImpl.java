@@ -8,12 +8,19 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.binance.web.Entity.Cliente;
 import com.binance.web.Repository.ClienteRepository;
+import com.binance.web.Repository.MovimientoRepository;
+
+import com.binance.web.movimientos.MovimientoService;
+import com.binance.web.Entity.Movimiento;
 
 @Service
 public class ClienteServiceImpl implements ClienteService {
 	
 	@Autowired
 	private ClienteRepository clienteRepository;
+	
+	@Autowired
+	private MovimientoRepository movimientoRepository;
 
 	@Override
 	public List<Cliente> allClientes() {
@@ -73,7 +80,9 @@ public class ClienteServiceImpl implements ClienteService {
 
 		// (nota) Si luego necesitas auditar, aquí podrías registrar el movimiento.
 	}
-	 @Override
+	
+	
+	@Override
 	    @Transactional
 	    public Cliente reemplazar(Integer id, Cliente nuevo) {
 	        Cliente existente = clienteRepository.findById(id)
@@ -91,5 +100,17 @@ public class ClienteServiceImpl implements ClienteService {
 	        return clienteRepository.save(existente);
 	    }
 	 
+	
+	public void editarMovimiento (Movimiento movimiento, double nuevo) {
+	    Movimiento existente = movimientoRepository.findById(movimiento.getId())
+	            .orElseThrow(() -> new IllegalArgumentException("Movimiento no encontrado"));
+			
+	    // Reemplazo total (no conservar valores viejos)
+	    existente.setMonto(nuevo);
+		
+	    
+
+	    movimientoRepository.save(existente);
+	}
 	 
 }
