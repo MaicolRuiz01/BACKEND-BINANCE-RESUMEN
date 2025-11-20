@@ -507,22 +507,33 @@ public class MovimientoServiceImplement implements MovimientoService {
 	@Override
 	@Transactional
 	public Movimiento registrarAjusteSaldo(AjusteSaldoDto dto) {
-	    if (dto.getEntidad() == null || dto.getEntidadId() == null)
+	    if (dto.getEntidad() == null || dto.getEntidadId() == null) {
 	        throw new IllegalArgumentException("Entidad y entidadId son obligatorios");
-	    if (dto.getNuevoSaldo() == null)
-	        throw new IllegalArgumentException("nuevoSaldo es obligatorio");
-	    if (dto.getMotivo() == null || dto.getMotivo().isBlank())
+	    }
+	    if (dto.getMonto() == null || dto.getMonto() <= 0) {
+	        throw new IllegalArgumentException("monto es obligatorio y debe ser > 0");
+	    }
+	    if (dto.getEntrada() == null) {
+	        throw new IllegalArgumentException("Debe indicar si es entrada (true) o salida (false)");
+	    }
+	    if (dto.getMotivo() == null || dto.getMotivo().isBlank()) {
 	        throw new IllegalArgumentException("motivo es obligatorio");
+	    }
 
 	    LocalDateTime ahora = LocalDateTime.now();
+	    double monto = dto.getMonto();
+	    // entrada = +monto, salida = -monto
+	    double factor = Boolean.TRUE.equals(dto.getEntrada()) ? 1.0 : -1.0;
+	    double dif = round2(monto * factor);   // diferencia firmada (+/-)
 
 	    switch (dto.getEntidad().toUpperCase()) {
+
 	        case "CLIENTE": {
 	            Cliente cli = clienteRepository.findById(dto.getEntidadId())
 	                    .orElseThrow(() -> new RuntimeException("Cliente no encontrado"));
+
 	            double anterior = cli.getSaldo() != null ? cli.getSaldo() : 0.0;
-	            double nuevo    = dto.getNuevoSaldo();
-	            double dif      = round2(nuevo - anterior);
+	            double nuevo    = round2(anterior + dif);
 
 	            // Actualiza materializado
 	            cli.setSaldo(nuevo);
@@ -531,22 +542,24 @@ public class MovimientoServiceImplement implements MovimientoService {
 	            Movimiento m = Movimiento.builder()
 	                    .tipo("AJUSTE_SALDO_CLIENTE")
 	                    .fecha(ahora)
-	                    .monto(Math.abs(dif)) // referencia, no afecta saldo
+	                    .monto(monto)                // monto absoluto del ajuste
 	                    .motivo(dto.getMotivo())
 	                    .actor(dto.getActor())
 	                    .saldoAnterior(anterior)
 	                    .saldoNuevo(nuevo)
-	                    .diferencia(dif)
+	                    .diferencia(dif)             // firmado (+/-)
 	                    .ajusteCliente(cli)
 	                    .build();
+
 	            return movimientoRepository.save(m);
 	        }
+
 	        case "PROVEEDOR": {
 	            Supplier prov = supplierRepository.findById(dto.getEntidadId())
 	                    .orElseThrow(() -> new RuntimeException("Proveedor no encontrado"));
+
 	            double anterior = prov.getBalance() != null ? prov.getBalance() : 0.0;
-	            double nuevo    = dto.getNuevoSaldo();
-	            double dif      = round2(nuevo - anterior);
+	            double nuevo    = round2(anterior + dif);
 
 	            prov.setBalance(nuevo);
 	            supplierRepository.save(prov);
@@ -554,7 +567,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 	            Movimiento m = Movimiento.builder()
 	                    .tipo("AJUSTE_SALDO_PROVEEDOR")
 	                    .fecha(ahora)
-	                    .monto(Math.abs(dif))
+	                    .monto(monto)
 	                    .motivo(dto.getMotivo())
 	                    .actor(dto.getActor())
 	                    .saldoAnterior(anterior)
@@ -562,14 +575,16 @@ public class MovimientoServiceImplement implements MovimientoService {
 	                    .diferencia(dif)
 	                    .ajusteProveedor(prov)
 	                    .build();
+
 	            return movimientoRepository.save(m);
 	        }
+
 	        case "CUENTACOP": {
 	            AccountCop acc = accountCopRepository.findById(dto.getEntidadId())
 	                    .orElseThrow(() -> new RuntimeException("Cuenta COP no encontrada"));
+
 	            double anterior = acc.getBalance() != null ? acc.getBalance() : 0.0;
-	            double nuevo    = dto.getNuevoSaldo();
-	            double dif      = round2(nuevo - anterior);
+	            double nuevo    = round2(anterior + dif);
 
 	            acc.setBalance(nuevo);
 	            accountCopRepository.save(acc);
@@ -577,7 +592,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 	            Movimiento m = Movimiento.builder()
 	                    .tipo("AJUSTE_SALDO_COP")
 	                    .fecha(ahora)
-	                    .monto(Math.abs(dif))
+	                    .monto(monto)
 	                    .motivo(dto.getMotivo())
 	                    .actor(dto.getActor())
 	                    .saldoAnterior(anterior)
@@ -585,12 +600,41 @@ public class MovimientoServiceImplement implements MovimientoService {
 	                    .diferencia(dif)
 	                    .ajusteCuentaCop(acc)
 	                    .build();
+
 	            return movimientoRepository.save(m);
 	        }
+
+	        case "CAJA": {
+	            Efectivo caja = efectivoRepository.findById(dto.getEntidadId())
+	                    .orElseThrow(() -> new RuntimeException("Caja no encontrada"));
+
+	            double anterior = caja.getSaldo() != null ? caja.getSaldo() : 0.0;
+	            double nuevo    = round2(anterior + dif);
+
+	            caja.setSaldo(nuevo);
+	            efectivoRepository.save(caja);
+
+	            Movimiento m = Movimiento.builder()
+	                    .tipo("AJUSTE_SALDO_CAJA")
+	                    .fecha(ahora)
+	                    .monto(monto)
+	                    .motivo(dto.getMotivo())
+	                    .actor(dto.getActor())
+	                    .saldoAnterior(anterior)
+	                    .saldoNuevo(nuevo)
+	                    .diferencia(dif)
+	                    .caja(caja)                 // usamos el campo caja del movimiento
+	                    .build();
+
+	            return movimientoRepository.save(m);
+	        }
+
 	        default:
-	            throw new IllegalArgumentException("Entidad no soportada: " + dto.getEntidad());
+	            throw new IllegalArgumentException("Entidad no soportada para ajuste: " + dto.getEntidad());
 	    }
 	}
+
+	
 	@Override
 	@Transactional
 	public Movimiento registrarPagoCuentaCopACliente(Integer cuentaCopId, Integer clienteId, Double monto) {

@@ -4,11 +4,18 @@ import lombok.Data;
 
 @Data
 public class AjusteSaldoDto {
-	
-	private String   entidad;
+
+    // "CLIENTE", "PROVEEDOR", "CAJA", "CUENTACOP"
+    private String   entidad;
     private Integer  entidadId;
-    private Double   nuevoSaldo;
+
+    // 🔹 monto del ajuste (siempre positivo)
+    private Double   monto;
+
+    // 🔹 true = ENTRADA (suma), false = SALIDA (resta)
+    private Boolean  entrada;
+
     private String   motivo;
     private String   actor;
-
 }
+
