@@ -11,7 +11,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.Efectivo;
 import com.binance.web.Repository.EfectivoRepository;
 
@@ -21,6 +20,8 @@ public class EfectivoController {
 	
 	@Autowired
 	private EfectivoRepository efectivoRepository;
+	@Autowired
+	private EfectivoService efectivoService;
 	
 	@GetMapping
 	public List<Efectivo> obtenerEfectivo(){
@@ -28,9 +29,9 @@ public class EfectivoController {
 	}
 	
 	@PostMapping
-	public ResponseEntity<Efectivo> guardarCaja(@RequestBody Efectivo caja) {
-		efectivoRepository.save(caja);
-		return ResponseEntity.status(HttpStatus.CREATED).body(caja);
-	}
+    public ResponseEntity<Efectivo> guardarCaja(@RequestBody Efectivo caja) {
+        Efectivo nueva = efectivoService.crearCaja(caja);
+        return ResponseEntity.status(HttpStatus.CREATED).body(nueva);
+    }
 
 }

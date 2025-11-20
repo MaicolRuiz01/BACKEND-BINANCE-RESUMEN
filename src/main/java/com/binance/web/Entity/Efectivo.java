@@ -1,6 +1,8 @@
 package com.binance.web.Entity;
 
 import java.time.LocalDate;
+
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -20,5 +22,7 @@ public class Efectivo {
 	private Integer id;
 	private Double saldo;
 	private String name;
+	@Column(name = "saldo_inicial_del_dia")
+    private Double saldoInicialDelDia;
 
 }

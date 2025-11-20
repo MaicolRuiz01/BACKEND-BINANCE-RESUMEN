@@ -1,8 +1,10 @@
 package com.binance.web.efectivo;
 
+import com.binance.web.Entity.Efectivo;
+
 public interface EfectivoService {
 	
-	void realizarDeposito();
-	void guardarCaja();
+
+	Efectivo crearCaja(Efectivo caja);
 
 }

@@ -94,21 +94,6 @@ public class MovimientoController {
 		return movimientoService.listarPagos().stream().map(this::mapToDto).toList();
 	}
 
-	private MovimientoDTO mapToDto(Movimiento movimiento) {
-		MovimientoDTO dto = new MovimientoDTO();
-		dto.setId(movimiento.getId());
-		dto.setTipo(movimiento.getTipo());
-		dto.setFecha(movimiento.getFecha());
-		dto.setMonto(movimiento.getMonto());
-		dto.setCuentaOrigen(movimiento.getCuentaOrigen() != null ? movimiento.getCuentaOrigen().getName() : null);
-		dto.setCuentaDestino(movimiento.getCuentaDestino() != null ? movimiento.getCuentaDestino().getName() : null);
-		dto.setCaja(movimiento.getCaja() != null ? movimiento.getCaja().getName() : null);
-		dto.setPagoCliente(movimiento.getPagoCliente() != null ? movimiento.getPagoCliente().getNombre() : null);
-		dto.setPagoProveedor(movimiento.getPagoProveedor() != null ? movimiento.getPagoProveedor().getName() : null);
-
-		return dto;
-	}
-
 	@PutMapping("/{id}")
 	public ResponseEntity<Movimiento> actualizarMovimiento(@PathVariable Integer id,
 			@RequestBody MovimientoUpdateDTO dto) {
@@ -210,4 +195,86 @@ public class MovimientoController {
         return movimientoService.registrarPagoCuentaCopACliente(cuentaId, clienteId, monto);
     }
 
+    @GetMapping("/ajustes/cliente/{clienteId}")
+    public List<MovimientoDTO> ajustesCliente(@PathVariable Integer clienteId) {
+        return movimientoService.listarAjustesCliente(clienteId)
+                .stream()
+                .map(this::mapToDto)
+                .toList();
+    }
+
+    // 🔹 Ajustes de saldo de un PROVEEDOR
+    @GetMapping("/ajustes/proveedor/{proveedorId}")
+    public List<MovimientoDTO> ajustesProveedor(@PathVariable Integer proveedorId) {
+        return movimientoService.listarAjustesProveedor(proveedorId)
+                .stream()
+                .map(this::mapToDto)
+                .toList();
+    }
+
+    // 🔹 Ajustes de saldo de una CUENTA COP
+    @GetMapping("/ajustes/cuenta-cop/{cuentaId}")
+    public List<MovimientoDTO> ajustesCuentaCop(@PathVariable Integer cuentaId) {
+        return movimientoService.listarAjustesCuentaCop(cuentaId)
+                .stream()
+                .map(this::mapToDto)
+                .toList();
+    }
+
+    // 🔹 Ajustes de saldo de una CAJA
+    @GetMapping("/ajustes/caja/{cajaId}")
+    public List<MovimientoDTO> ajustesCaja(@PathVariable Integer cajaId) {
+        return movimientoService.listarAjustesCaja(cajaId)
+                .stream()
+                .map(this::mapToDto)
+                .toList();
+    }
+
+    // =========================
+    //   MAPEO A MovimientoDTO
+    // =========================
+
+    private MovimientoDTO mapToDto(Movimiento movimiento) {
+        MovimientoDTO dto = new MovimientoDTO();
+        dto.setId(movimiento.getId());
+        dto.setTipo(movimiento.getTipo());
+        dto.setFecha(movimiento.getFecha());
+        dto.setMonto(movimiento.getMonto());
+
+        // Campos “normales”
+        dto.setCuentaOrigen(
+                movimiento.getCuentaOrigen() != null
+                        ? movimiento.getCuentaOrigen().getName()
+                        : null
+        );
+        dto.setCuentaDestino(
+                movimiento.getCuentaDestino() != null
+                        ? movimiento.getCuentaDestino().getName()
+                        : null
+        );
+        dto.setCaja(
+                movimiento.getCaja() != null
+                        ? movimiento.getCaja().getName()
+                        : null
+        );
+        dto.setPagoCliente(
+                movimiento.getPagoCliente() != null
+                        ? movimiento.getPagoCliente().getNombre()
+                        : null
+        );
+        dto.setPagoProveedor(
+                movimiento.getPagoProveedor() != null
+                        ? movimiento.getPagoProveedor().getName()
+                        : null
+        );
+
+        // 🔹 Campos específicos de AJUSTE
+        dto.setMotivo(movimiento.getMotivo());
+        dto.setActor(movimiento.getActor());
+        dto.setSaldoAnterior(movimiento.getSaldoAnterior());
+        dto.setSaldoNuevo(movimiento.getSaldoNuevo());
+        dto.setDiferencia(movimiento.getDiferencia());
+
+        return dto;
+    }
 }

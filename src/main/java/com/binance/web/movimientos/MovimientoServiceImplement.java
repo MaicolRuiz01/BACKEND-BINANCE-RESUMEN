@@ -677,6 +677,29 @@ public class MovimientoServiceImplement implements MovimientoService {
 
 	    return movimientoRepository.save(mov);
 	}
-
 	
+	@Override
+	public List<Movimiento> listarAjustesCliente(Integer clienteId) {
+	    if (clienteId == null) throw new IllegalArgumentException("clienteId no puede ser nulo");
+	    return movimientoRepository.findByAjusteCliente_IdOrderByFechaDesc(clienteId);
+	}
+
+	@Override
+	public List<Movimiento> listarAjustesProveedor(Integer proveedorId) {
+	    if (proveedorId == null) throw new IllegalArgumentException("proveedorId no puede ser nulo");
+	    return movimientoRepository.findByAjusteProveedor_IdOrderByFechaDesc(proveedorId);
+	}
+
+	@Override
+	public List<Movimiento> listarAjustesCuentaCop(Integer cuentaId) {
+	    if (cuentaId == null) throw new IllegalArgumentException("cuentaId no puede ser nulo");
+	    return movimientoRepository.findByAjusteCuentaCop_IdOrderByFechaDesc(cuentaId);
+	}
+
+	@Override
+	public List<Movimiento> listarAjustesCaja(Integer cajaId) {
+	    if (cajaId == null) throw new IllegalArgumentException("cajaId no puede ser nulo");
+	    return movimientoRepository.findByCaja_IdAndTipoOrderByFechaDesc(cajaId, "AJUSTE_SALDO_CAJA");
+	}
+
 }

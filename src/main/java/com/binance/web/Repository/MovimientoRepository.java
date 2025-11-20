@@ -36,4 +36,6 @@ public interface MovimientoRepository extends JpaRepository<Movimiento, Integer>
             LocalDateTime desde,
             LocalDateTime hasta
     );
+
+    List<Movimiento> findByCaja_IdAndTipoOrderByFechaDesc(Integer cajaId, String tipo);
 }

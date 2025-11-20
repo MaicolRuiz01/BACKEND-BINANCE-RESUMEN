@@ -20,5 +20,11 @@ public class MovimientoDTO {
 	private String caja;
 	private String pagoCliente;
 	private String pagoProveedor;
+	
+	private String motivo;
+    private String actor;
+    private Double saldoAnterior;
+    private Double saldoNuevo;
+    private Double diferencia;
 
 }

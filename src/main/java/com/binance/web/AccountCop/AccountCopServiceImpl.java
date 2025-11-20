@@ -42,6 +42,7 @@ public class AccountCopServiceImpl implements AccountCopService {
 	    if (accountCop.getName() == null || accountCop.getBalance() == null) {
 	        throw new IllegalArgumentException("El nombre de la cuenta y el saldo no pueden ser nulos.");
 	    }
+	    accountCop.setSaldoInicialDelDia(accountCop.getBalance());
 	    // Guardar la cuenta en el repositorio
 	    AccountCopRepository.save(accountCop);
 	}

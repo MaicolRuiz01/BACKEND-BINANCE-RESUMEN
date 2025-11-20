@@ -34,5 +34,9 @@ public interface MovimientoService {
 	
 	Movimiento registrarAjusteSaldo(AjusteSaldoDto dto);
 	Movimiento registrarPagoCuentaCopACliente(Integer cuentaCopId, Integer clienteId, Double monto);
+	List<Movimiento> listarAjustesCliente(Integer clienteId);
+	List<Movimiento> listarAjustesProveedor(Integer proveedorId);
+	List<Movimiento> listarAjustesCuentaCop(Integer cuentaId);
+	List<Movimiento> listarAjustesCaja(Integer cajaId);
 
 }
