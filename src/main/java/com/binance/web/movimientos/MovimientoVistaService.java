@@ -80,31 +80,64 @@ public class MovimientoVistaService {
     }
 
     private double signoYMontoParaCuentaCop(Integer cuentaId, Movimiento m) {
-        if ("TRANSFERENCIA".equalsIgnoreCase(m.getTipo())) {
-            if (m.getCuentaOrigen()!=null && m.getCuentaOrigen().getId().equals(cuentaId)) {
-                double base = (m.getMonto()!=null? m.getMonto():0.0) + (m.getComision()!=null? m.getComision():0.0);
-                return -base;
-            }
-            if (m.getCuentaDestino()!=null && m.getCuentaDestino().getId().equals(cuentaId)) {
-                return +(m.getMonto()!=null? m.getMonto():0.0);
-            }
+        Double monto    = m.getMonto()    != null ? m.getMonto()    : 0.0;
+        Double comision = m.getComision() != null ? m.getComision() : 0.0;
+
+        boolean esOrigen  = m.getCuentaOrigen()  != null && m.getCuentaOrigen().getId().equals(cuentaId);
+        boolean esDestino = m.getCuentaDestino() != null && m.getCuentaDestino().getId().equals(cuentaId);
+
+        // Si no participa la cuenta, no debería llegar aquí, pero por si acaso:
+        if (!esOrigen && !esDestino) {
+            return 0.0;
         }
-        if ("RETIRO".equalsIgnoreCase(m.getTipo())
-            && m.getCuentaOrigen()!=null && m.getCuentaOrigen().getId().equals(cuentaId)) {
-            double base = (m.getMonto()!=null? m.getMonto():0.0) + (m.getComision()!=null? m.getComision():0.0);
-            return -base;
+
+        String tipo = m.getTipo() != null ? m.getTipo().toUpperCase() : "";
+
+        // 👉 Si NO quieres que los ajustes aparezcan en esta vista:
+        if (tipo.startsWith("AJUSTE_SALDO")) {
+            return 0.0;
         }
-        if ("DEPOSITO".equalsIgnoreCase(m.getTipo())
-            && m.getCuentaDestino()!=null && m.getCuentaDestino().getId().equals(cuentaId)) {
-            return +(m.getMonto()!=null? m.getMonto():0.0);
+
+        // ===== TRANSFERENCIA =====
+        if ("TRANSFERENCIA".equals(tipo)) {
+            if (esOrigen)  return -(monto + comision); // paga monto + comisión
+            if (esDestino) return +(monto);            // recibe solo el monto
         }
-        if ("PAGO PROVEEDOR".equalsIgnoreCase(m.getTipo())
-            && m.getCuentaOrigen()!=null && m.getCuentaOrigen().getId().equals(cuentaId)) {
-            double base = (m.getMonto()!=null? m.getMonto():0.0) + (m.getComision()!=null? m.getComision():0.0);
-            return -base;
+
+        // ===== RETIRO (desde cuenta hacia caja) =====
+        if ("RETIRO".equals(tipo) && esOrigen) {
+            return -(monto + comision);
         }
+
+        // ===== DEPOSITO (desde caja hacia cuenta) =====
+        if ("DEPOSITO".equals(tipo) && esDestino) {
+            return +(monto);
+        }
+
+        // ===== PAGO PROVEEDOR (cuenta COP paga a proveedor) =====
+        if ("PAGO PROVEEDOR".equals(tipo) && esOrigen) {
+            return -(monto + comision);
+        }
+
+        // ===== PAGO (cliente → cuenta COP) =====
+        // Este es el que te estaba saliendo con 0.0
+        if ("PAGO".equals(tipo) && esDestino) {
+            // la cuenta recibe dinero del cliente
+            return +(monto);
+        }
+
+        // ===== PAGO COP A CLIENTE (cuenta COP paga a cliente) =====
+        if ("PAGO COP A CLIENTE".equals(tipo) && esOrigen) {
+            return -(monto + comision);
+        }
+
+        // Fallback genérico: si no cae en ningún caso, al menos respetar origen/destino
+        if (esOrigen)  return -monto;
+        if (esDestino) return +monto;
+
         return 0.0;
     }
+
 
     private double signoYMontoParaCaja(Integer cajaId, Movimiento m) {
         if (m.getCaja()==null || !m.getCaja().getId().equals(cajaId)) return 0.0;
