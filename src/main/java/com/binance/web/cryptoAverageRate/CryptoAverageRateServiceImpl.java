@@ -3,12 +3,16 @@ package com.binance.web.cryptoAverageRate;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.springframework.stereotype.Service;
 
 import com.binance.web.AccountBinance.AccountBinanceService;
 import com.binance.web.Entity.CryptoAverageRate;
+import com.binance.web.Repository.AccountCryptoBalanceRepository;
 import com.binance.web.Repository.CryptoAverageRateRepository;
+import com.binance.web.model.CryptoPendienteDto;
 
 import lombok.RequiredArgsConstructor;
 
@@ -18,6 +22,7 @@ public class CryptoAverageRateServiceImpl implements CryptoAverageRateService {
 
     private final CryptoAverageRateRepository repo;
     private final AccountBinanceService accountBinanceService;
+    private final AccountCryptoBalanceRepository accountCryptoBalanceRepository;
 
     private static final ZoneId ZONE_BOGOTA = ZoneId.of("America/Bogota");
 
@@ -35,8 +40,8 @@ public class CryptoAverageRateServiceImpl implements CryptoAverageRateService {
             throw new IllegalStateException("La cripto " + c + " ya tiene tasa inicial configurada.");
         }
 
-        Double saldoInicialCripto = accountBinanceService
-                .getTotalCryptoBalanceExterno(c);
+        // 🔹 Saldo inicial REAL (externo) de esa cripto
+        Double saldoInicialCripto = accountBinanceService.getTotalCryptoBalanceExterno(c);
 
         LocalDate dia = fecha.atZone(ZONE_BOGOTA).toLocalDate();
 
@@ -44,16 +49,20 @@ public class CryptoAverageRateServiceImpl implements CryptoAverageRateService {
         rate.setCripto(c);
         rate.setDia(dia);
         rate.setFechaCalculo(fecha);
+
         rate.setSaldoInicialCripto(saldoInicialCripto);
         rate.setTasaBaseUsdt(tasaInicialUsdt);
+
+        // Aún no hay compras
         rate.setTotalCriptoCompradaDia(0.0);
         rate.setTotalUsdtComprasDia(0.0);
+
+        // La tasa promedio del día 0 es la tasa inicial
         rate.setTasaPromedioDia(tasaInicialUsdt);
         rate.setSaldoFinalCripto(saldoInicialCripto);
 
         return repo.save(rate);
     }
-
     @Override
     public CryptoAverageRate actualizarPorCompra(
             String cripto,
@@ -64,24 +73,27 @@ public class CryptoAverageRateServiceImpl implements CryptoAverageRateService {
         String c = cripto.toUpperCase();
         LocalDate dia = fechaOperacion.atZone(ZONE_BOGOTA).toLocalDate();
 
+        // Debe existir una tasa inicial para esa cripto
         CryptoAverageRate ultima = repo.findTopByCriptoOrderByFechaCalculoDesc(c)
                 .orElseThrow(() -> new IllegalStateException(
                         "Primero debes configurar la tasa inicial para la cripto " + c));
 
-        // saldo interno actual de esa cripto (incluyendo esta compra)
+        // 🔹 Saldo EXTERNO actual de esa cripto (incluyendo esta compra)
         Double saldoTotalActualCripto = accountBinanceService
-                .getTotalCryptoBalanceInterno(c);
+                .getTotalCryptoBalanceExterno(c);
 
         CryptoAverageRate snapshotDia = repo.findByCriptoAndDia(c, dia).orElse(null);
 
         if (snapshotDia == null) {
-            // 🔹 Primera compra del día para esa cripto
+            // ===== Primera compra del día =====
 
-            // saldo inicial del día = saldo actual - compra actual
+            // Saldo inicial del día = saldo actual - compra actual
             Double saldoInicialDia = saldoTotalActualCripto - cantidadCriptoComprada;
 
+            // Valuación del saldo inicial con la tasa promedio anterior
             Double usdtInicial = saldoInicialDia * ultima.getTasaPromedioDia();
 
+            // Totales del día (saldo inicial + compras del día)
             Double totalCriptoDia = saldoInicialDia + cantidadCriptoComprada;
             Double totalUsdtDia   = usdtInicial + totalUsdtCompra;
 
@@ -91,18 +103,21 @@ public class CryptoAverageRateServiceImpl implements CryptoAverageRateService {
             snapshotDia.setCripto(c);
             snapshotDia.setDia(dia);
             snapshotDia.setFechaCalculo(fechaOperacion);
+
             snapshotDia.setSaldoInicialCripto(saldoInicialDia);
             snapshotDia.setTasaBaseUsdt(ultima.getTasaPromedioDia());
+
             snapshotDia.setTotalCriptoCompradaDia(cantidadCriptoComprada);
             snapshotDia.setTotalUsdtComprasDia(totalUsdtCompra);
+
             snapshotDia.setTasaPromedioDia(nuevaTasa);
             snapshotDia.setSaldoFinalCripto(saldoTotalActualCripto);
 
         } else {
-            // 🔹 Segunda, tercera, ... compra del mismo día
+            // ===== Siguientes compras del mismo día =====
 
             Double saldoInicialDia = snapshotDia.getSaldoInicialCripto();
-            Double tasaBase = snapshotDia.getTasaBaseUsdt();
+            Double tasaBase        = snapshotDia.getTasaBaseUsdt();
 
             Double usdtInicial = saldoInicialDia * tasaBase;
 
@@ -123,5 +138,37 @@ public class CryptoAverageRateServiceImpl implements CryptoAverageRateService {
 
         return repo.save(snapshotDia);
     }
+    
+    @Override
+    public List<CryptoPendienteDto> listarCriptosPendientesInicializacion() {
+        List<String> symbols = accountCryptoBalanceRepository.findDistinctSymbols();
+        List<CryptoPendienteDto> out = new ArrayList<>();
+
+        for (String raw : symbols) {
+            if (raw == null) continue;
+            String sym = raw.trim().toUpperCase();
+            if (sym.isBlank()) continue;
+
+            // Ignorar stables si quieres
+            if ("USDT".equals(sym) || "USDC".equals(sym)) continue;
+
+            // Si ya tiene tasa, se salta
+            boolean yaTiene = repo.findTopByCriptoOrderByFechaCalculoDesc(sym).isPresent();
+            if (yaTiene) continue;
+
+            // 🔹 Saldo EXTERNO total de esa cripto
+            Double saldoTotal = accountBinanceService.getTotalCryptoBalanceExterno(sym);
+            if (saldoTotal == null || Math.abs(saldoTotal) < 1e-8) continue;
+
+            out.add(new CryptoPendienteDto(sym, saldoTotal));
+        }
+        return out;
+    }
+    
+    @Override
+    public List<CryptoAverageRate> listarPorDia(LocalDate dia) {
+        return repo.findByDia(dia);
+    }
+
 }
 

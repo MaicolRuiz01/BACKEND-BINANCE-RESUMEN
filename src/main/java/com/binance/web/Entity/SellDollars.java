@@ -1,10 +1,7 @@
 package com.binance.web.Entity;
-
 import java.time.LocalDateTime;
 import java.util.List;
-
 import com.fasterxml.jackson.annotation.JsonIgnore;
-
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
@@ -72,7 +69,7 @@ public class SellDollars {
 	@Column(name = "tipo_cuenta", length = 32)
 	private String tipoCuenta;
 	
-	@Column(name = "dedupe_key", nullable = false, length = 64)
+	@Column(name = "dedupe_key", nullable = false, length = 255)
 	  private String dedupeKey;
 
 }

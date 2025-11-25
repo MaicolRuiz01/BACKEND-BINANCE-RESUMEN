@@ -12,6 +12,7 @@ import com.binance.web.Entity.AccountCop;
 import com.binance.web.Entity.AverageRate;
 import com.binance.web.Entity.BalanceGeneral;
 import com.binance.web.Entity.Cliente;
+import com.binance.web.Entity.CryptoAverageRate;
 import com.binance.web.Entity.Efectivo;
 import com.binance.web.Entity.SaleP2P;
 import com.binance.web.Entity.SellDollars;
@@ -26,6 +27,9 @@ import com.binance.web.Repository.EfectivoRepository;
 import com.binance.web.Repository.SupplierRepository;
 import com.binance.web.SaleP2P.SaleP2PService;
 import com.binance.web.SellDollars.SellDollarsService;
+import com.binance.web.cryptoAverageRate.CryptoAverageRateService;
+import com.binance.web.model.CryptoResumenDiaDto;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import jakarta.transaction.Transactional;
 
@@ -57,6 +61,8 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
         private SupplierRepository supplierRepository;
         @Autowired
         private AccountCopRepository accountCopRepository;
+        @Autowired
+        private CryptoAverageRateService cryptoAverageRateService;
 
         @Override
         @Transactional
@@ -135,6 +141,32 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
 
             Double utilidadVentasGenerales = (totalUSDTVentasGenerales * tasaVentaGenerales)
                 - (totalUSDTVentasGenerales * tasaPromedioDelDia);
+            
+            List<CryptoAverageRate> ratesHoy = cryptoAverageRateService.listarPorDia(fecha);
+
+            List<CryptoResumenDiaDto> resumenCriptos = ratesHoy.stream()
+                .filter(r -> r.getSaldoFinalCripto() != null && r.getSaldoFinalCripto() > 0.000001)
+                .map(r -> {
+                    Double saldo = r.getSaldoFinalCripto();
+                    Double tasa  = r.getTasaPromedioDia();
+                    Double usdt  = (saldo != null && tasa != null) ? saldo * tasa : 0.0;
+                    return new CryptoResumenDiaDto(
+                            r.getCripto(),
+                            saldo,
+                            tasa,
+                            usdt
+                    );
+                })
+                .toList();
+
+            try {
+                ObjectMapper mapper = new ObjectMapper();
+                String json = mapper.writeValueAsString(resumenCriptos);
+                balance.setDetalleCriptosJson(json);
+            } catch (Exception ex) {
+                // si falla el JSON, al menos no rompemos el cálculo del balance
+                balance.setDetalleCriptosJson("[]");
+            }
 
             // persistir
             balance.setDate(fecha);
@@ -188,5 +220,4 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
                                 .mapToDouble(c -> c.getSaldo())
                                 .sum();
         }
-
 }

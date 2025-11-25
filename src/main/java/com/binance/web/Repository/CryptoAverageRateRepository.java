@@ -1,6 +1,7 @@
 package com.binance.web.Repository;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -16,4 +17,6 @@ public interface CryptoAverageRateRepository extends JpaRepository<CryptoAverage
 
     // Snapshot por día (por si quieres ver histórico)
     Optional<CryptoAverageRate> findByCriptoAndDia(String cripto, LocalDate dia);
+    List<CryptoAverageRate> findByDia(LocalDate dia);
+
 }

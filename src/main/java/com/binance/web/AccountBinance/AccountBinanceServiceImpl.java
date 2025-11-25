@@ -524,33 +524,18 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
 	}
 	
 	@Override
-	@Transactional(readOnly = true)
 	public Double getTotalCryptoBalanceExterno(String cripto) {
-	    if (cripto == null) return 0.0;
-	    String sym = cripto.trim().toUpperCase();
-	    if (sym.isEmpty()) return 0.0;
-
+	    String c = cripto.toUpperCase();
 	    double total = 0.0;
 
-	    // Recorremos todas las cuentas
-	    for (AccountBinance acc : accountBinanceRepository.findAll()) {
+	    for (AccountBinance acc : accountBinanceRepository.findByTipo("BINANCE")) {
 	        try {
 	            Map<String, Double> snap = getExternalBalancesSnapshot(acc.getName());
-	            if (snap == null) continue;
-
-	            Double qty = snap.entrySet().stream()
-	                    .filter(e -> sym.equalsIgnoreCase(e.getKey()))
-	                    .map(Map.Entry::getValue)
-	                    .findFirst()
-	                    .orElse(0.0);
-
-	            total += (qty != null ? qty : 0.0);
+	            total += snap.getOrDefault(c, 0.0);
 	        } catch (Exception e) {
-	            System.out.println("⚠️ No se pudo leer snapshot externo de " + acc.getName() + ": " + e.getMessage());
+	            System.err.println("⚠ No pude leer " + c + " para " + acc.getName() + ": " + e.getMessage());
 	        }
 	    }
-
 	    return total;
 	}
-
 }

@@ -1,6 +1,12 @@
 package com.binance.web.cryptoAverageRate;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -11,7 +17,12 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.binance.web.AccountBinance.AccountBinanceService;
+import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.CryptoAverageRate;
+import com.binance.web.Repository.AccountBinanceRepository;
+import com.binance.web.Repository.AccountCopRepository;
+import com.binance.web.model.CryptoPendienteDto;
 
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +35,9 @@ import lombok.RequiredArgsConstructor;
 public class CryptoAverageRateController {
 
 	private final CryptoAverageRateService cryptoAverageRateService;
+	private final AccountBinanceRepository accountBinanceRepository;
+	private final AccountBinanceService accountBinanceService;
+	private final CryptoAverageRateService service;
 
 	// DTO simple para request de inicialización
 	@Data
@@ -57,4 +71,31 @@ public class CryptoAverageRateController {
 
 		return ResponseEntity.status(HttpStatus.CREATED).body(rate);
 	}
+	@GetMapping("/crypto-con-balance")
+	public ResponseEntity<List<String>> listarCriptosConBalanceExterno() {
+	    Set<String> out = new HashSet<>();
+
+	    for (AccountBinance acc : accountBinanceRepository.findAll()) {
+	        try {
+	            Map<String, Double> snap = accountBinanceService.getExternalBalancesSnapshot(acc.getName());
+	            snap.forEach((sym, qty) -> {
+	                if (qty != null && qty > 0.00001) out.add(sym.toUpperCase());
+	            });
+	        } catch (Exception ignored) {}
+	    }
+
+	    return ResponseEntity.ok(out.stream().sorted().toList());
+	}
+	
+	@GetMapping("/pendientes")
+    public ResponseEntity<List<CryptoPendienteDto>> listarPendientes() {
+        return ResponseEntity.ok(service.listarCriptosPendientesInicializacion());
+    }
+	
+	@GetMapping("/del-dia")
+	public ResponseEntity<List<CryptoAverageRate>> listarDelDia() {
+	    LocalDate hoy = LocalDate.now(ZoneId.of("America/Bogota"));
+	    return ResponseEntity.ok(service.listarPorDia(hoy));
+	}
+
 }
