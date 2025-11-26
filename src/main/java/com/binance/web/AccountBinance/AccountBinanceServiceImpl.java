@@ -1,7 +1,9 @@
 package com.binance.web.AccountBinance;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -25,8 +27,7 @@ import com.binance.web.Entity.AverageRate;
 import com.binance.web.Repository.AccountBinanceRepository;
 import com.binance.web.Repository.AccountCryptoBalanceRepository;
 import com.binance.web.Repository.AverageRateRepository;
-
-
+import com.binance.web.model.CryptoBalanceDto;
 
 import org.springframework.transaction.annotation.Transactional;
 
@@ -538,4 +539,33 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
 	    }
 	    return total;
 	}
+	
+	@Override
+	@Transactional(readOnly = true)
+	public List<CryptoBalanceDto> getInternalBalancesDetail(String accountName) {
+	    AccountBinance acc = accountBinanceRepository.findByName(accountName);
+	    if (acc == null) {
+	        throw new RuntimeException("Cuenta no encontrada: " + accountName);
+	    }
+
+	    Map<String, Double> priceCache = new HashMap<>();
+	    List<CryptoBalanceDto> out = new ArrayList<>();
+
+	    for (AccountCryptoBalance b : acc.getCryptoBalances()) {
+	        double qty = b.getBalance() != null ? b.getBalance() : 0.0;
+	        if (qty <= 0) continue;
+
+	        String sym = b.getCryptoSymbol();
+	        double px = usdtPrice(sym, priceCache); // ya respeta stables
+	        double usdtVal = qty * px;
+
+	        out.add(new CryptoBalanceDto(sym, qty, usdtVal));
+	    }
+
+	    // opcional: ordenar por valor en USDT desc
+	    out.sort(Comparator.comparing(CryptoBalanceDto::getUsdtValue).reversed());
+
+	    return out;
+	}
+
 }

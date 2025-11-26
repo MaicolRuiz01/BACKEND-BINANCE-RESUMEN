@@ -187,6 +187,12 @@ public class MovimientoController {
         return vistaService.resumenProveedorHoy(proveedorId);
     }
     
+    @GetMapping("/resumen/cuenta-cop/{cuentaId}")
+    public ResumenDiarioDTO resumenCuentaCop(@PathVariable Integer cuentaId) {
+        return vistaService.resumenCuentaCopHoy(cuentaId);
+    }
+
+    
     @PostMapping("/pago-cuenta-cop-a-cliente")
     public Movimiento pagoCuentaCopACliente(
             @RequestParam Integer cuentaId,

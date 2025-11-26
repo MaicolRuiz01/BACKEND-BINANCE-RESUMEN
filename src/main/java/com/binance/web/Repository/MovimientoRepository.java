@@ -38,4 +38,10 @@ public interface MovimientoRepository extends JpaRepository<Movimiento, Integer>
     );
 
     List<Movimiento> findByCaja_IdAndTipoOrderByFechaDesc(Integer cajaId, String tipo);
+    List<Movimiento> findByAjusteCuentaCop_IdAndFechaBetween(
+            Integer cuentaId,
+            LocalDateTime desde,
+            LocalDateTime hasta
+    );
+
 }

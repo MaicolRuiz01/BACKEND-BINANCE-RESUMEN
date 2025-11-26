@@ -9,6 +9,7 @@ import java.util.List;
 import org.springframework.stereotype.Service;
 
 import com.binance.web.AccountBinance.AccountBinanceService;
+import com.binance.web.BinanceAPI.BinanceService;
 import com.binance.web.Entity.CryptoAverageRate;
 import com.binance.web.Repository.AccountCryptoBalanceRepository;
 import com.binance.web.Repository.CryptoAverageRateRepository;
@@ -23,6 +24,7 @@ public class CryptoAverageRateServiceImpl implements CryptoAverageRateService {
     private final CryptoAverageRateRepository repo;
     private final AccountBinanceService accountBinanceService;
     private final AccountCryptoBalanceRepository accountCryptoBalanceRepository;
+    private final BinanceService binanceService; 
 
     private static final ZoneId ZONE_BOGOTA = ZoneId.of("America/Bogota");
 
@@ -45,24 +47,36 @@ public class CryptoAverageRateServiceImpl implements CryptoAverageRateService {
 
         LocalDate dia = fecha.atZone(ZONE_BOGOTA).toLocalDate();
 
+        // 🔹 Si no me mandan tasa o es <= 0, tomo la del mercado
+        Double tasaBase = tasaInicialUsdt;
+        if (tasaBase == null || tasaBase <= 0) {
+            tasaBase = getPrecioMercadoUsdt(c);
+            if (tasaBase == null || tasaBase <= 0) {
+                throw new IllegalStateException(
+                    "No se pudo obtener precio de mercado para " + c + " al inicializar la tasa promedio."
+                );
+            }
+        }
+
         CryptoAverageRate rate = new CryptoAverageRate();
         rate.setCripto(c);
         rate.setDia(dia);
         rate.setFechaCalculo(fecha);
 
         rate.setSaldoInicialCripto(saldoInicialCripto);
-        rate.setTasaBaseUsdt(tasaInicialUsdt);
+        rate.setTasaBaseUsdt(tasaBase);
 
         // Aún no hay compras
         rate.setTotalCriptoCompradaDia(0.0);
         rate.setTotalUsdtComprasDia(0.0);
 
-        // La tasa promedio del día 0 es la tasa inicial
-        rate.setTasaPromedioDia(tasaInicialUsdt);
+        // La tasa promedio del día 0 es la tasa base
+        rate.setTasaPromedioDia(tasaBase);
         rate.setSaldoFinalCripto(saldoInicialCripto);
 
         return repo.save(rate);
     }
+
     @Override
     public CryptoAverageRate actualizarPorCompra(
             String cripto,
@@ -169,6 +183,29 @@ public class CryptoAverageRateServiceImpl implements CryptoAverageRateService {
     public List<CryptoAverageRate> listarPorDia(LocalDate dia) {
         return repo.findByDia(dia);
     }
+    
+    private Double getPrecioMercadoUsdt(String cripto) {
+        if (cripto == null) return 0.0;
+        String sym = cripto.trim().toUpperCase();
+        if (sym.isEmpty()) return 0.0;
+
+        // Stables
+        if ("USDT".equals(sym) || "USDC".equals(sym)) {
+            return 1.0;
+        }
+
+        try {
+            Double px = binanceService.getPriceInUSDT(sym);
+            if (px != null && px > 0) {
+                return px;
+            }
+        } catch (Exception e) {
+            System.out.println("⚠️ No pude obtener precio de mercado para " + sym + ": " + e.getMessage());
+        }
+        // Fallback (puedes lanzar excepción si prefieres)
+        return 0.0;
+    }
+
 
 }
 

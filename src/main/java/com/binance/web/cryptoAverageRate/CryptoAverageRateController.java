@@ -62,15 +62,19 @@ public class CryptoAverageRateController {
 	/** Inicializa la tasa promedio de una cripto (usa saldo externo real) */
 	@PostMapping("/inicializar")
 	public ResponseEntity<CryptoAverageRate> inicializar(@RequestBody InicializarCriptoRequest req) {
-		if (req.getCripto() == null || req.getTasaInicialUsdt() == null) {
-			return ResponseEntity.badRequest().build();
-		}
+	    if (req.getCripto() == null) {
+	        return ResponseEntity.badRequest().build();
+	    }
 
-		CryptoAverageRate rate = cryptoAverageRateService.inicializarCripto(req.getCripto(), req.getTasaInicialUsdt(),
-				LocalDateTime.now());
+	    CryptoAverageRate rate = cryptoAverageRateService.inicializarCripto(
+	            req.getCripto(),
+	            req.getTasaInicialUsdt(), // 👈 puede venir null
+	            LocalDateTime.now()
+	    );
 
-		return ResponseEntity.status(HttpStatus.CREATED).body(rate);
+	    return ResponseEntity.status(HttpStatus.CREATED).body(rate);
 	}
+
 	@GetMapping("/crypto-con-balance")
 	public ResponseEntity<List<String>> listarCriptosConBalanceExterno() {
 	    Set<String> out = new HashSet<>();

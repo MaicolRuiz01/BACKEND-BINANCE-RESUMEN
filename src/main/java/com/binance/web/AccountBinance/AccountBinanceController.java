@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.*;
 import com.binance.web.Entity.AccountBinance;
 
 import com.binance.web.model.AccountBinanceDTO;
+import com.binance.web.model.CryptoBalanceDto;
 
 @RestController
 @RequestMapping("/cuenta-binance")
@@ -122,5 +123,12 @@ public class AccountBinanceController {
 				.correo(a.getCorreo()).userBinance(a.getUserBinance()).address(a.getAddress()).tipo(a.getTipo())
 				.balance(balanceUsd != null ? balanceUsd : 0.0).build();
 	}
+	
+	@GetMapping("/balances-internos")
+	public ResponseEntity<List<CryptoBalanceDto>> getInternalBalances(@RequestParam String name) {
+	    List<CryptoBalanceDto> list = accountBinanceService.getInternalBalancesDetail(name);
+	    return ResponseEntity.ok(list);
+	}
+
 
 }
