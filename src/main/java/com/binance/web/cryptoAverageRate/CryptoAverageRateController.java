@@ -101,5 +101,16 @@ public class CryptoAverageRateController {
 	    LocalDate hoy = LocalDate.now(ZoneId.of("America/Bogota"));
 	    return ResponseEntity.ok(service.listarPorDia(hoy));
 	}
+	
+	@PostMapping("/init-dia")
+    public ResponseEntity<Void> inicializarDia() {
+        // 1) sincroniza interno desde externo (todas las cuentas)
+        accountBinanceService.syncAllInternalBalancesFromExternal();
+
+        // 2) inicializa snapshots de tasas para hoy
+        cryptoAverageRateService.inicializarCriptosDelDia(LocalDateTime.now());
+
+        return ResponseEntity.ok().build();
+    }
 
 }

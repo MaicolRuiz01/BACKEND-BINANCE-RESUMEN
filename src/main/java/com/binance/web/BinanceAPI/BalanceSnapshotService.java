@@ -1,11 +1,13 @@
 package com.binance.web.BinanceAPI;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import com.binance.web.AccountBinance.AccountBinanceService;
 import com.binance.web.Entity.AccountCop;
 import com.binance.web.Entity.Cliente;
 import com.binance.web.Entity.Efectivo;
@@ -14,6 +16,7 @@ import com.binance.web.Repository.AccountCopRepository;
 import com.binance.web.Repository.ClienteRepository;
 import com.binance.web.Repository.EfectivoRepository;
 import com.binance.web.Repository.SupplierRepository;
+import com.binance.web.cryptoAverageRate.CryptoAverageRateService;
 
 import jakarta.transaction.Transactional;
 
@@ -24,25 +27,28 @@ public class BalanceSnapshotService {
     @Autowired private SupplierRepository supplierRepo;
     @Autowired private EfectivoRepository efectivoRepo;
     @Autowired private AccountCopRepository accountCopRepo;
+    @Autowired private AccountBinanceService accountBinanceService;
+    @Autowired private CryptoAverageRateService cryptoAverageRateService;
 
-    // ✅ Ejecuta todos los días a las 00:00
     @Scheduled(cron = "0 0 0 * * *", zone = "America/Bogota")
     @Transactional
     public void actualizarSaldosIniciales() {
 
+        // 🧍 CLIENTES
         List<Cliente> clientes = clienteRepo.findAll();
         for (Cliente c : clientes) {
             c.setSaldoInicialDelDia(c.getSaldo());
         }
         clienteRepo.saveAll(clientes);
 
+        // 🧑‍🏭 PROVEEDORES
         List<Supplier> proveedores = supplierRepo.findAll();
         for (Supplier p : proveedores) {
             p.setSaldoInicialDelDia(p.getBalance());
         }
         supplierRepo.saveAll(proveedores);
         
-     // 💵 CAJAS (EFECTIVO)
+        // 💵 CAJAS (EFECTIVO)
         List<Efectivo> cajas = efectivoRepo.findAll();
         for (Efectivo caja : cajas) {
             caja.setSaldoInicialDelDia(caja.getSaldo());
@@ -56,6 +62,14 @@ public class BalanceSnapshotService {
         }
         accountCopRepo.saveAll(cuentas);
 
-        System.out.println("✅ Saldos iniciales del día actualizados");
+        // 🔁 1) Sincronizar saldos cripto internos desde EXTERNO
+        accountBinanceService.syncAllInternalBalancesFromExternal();
+
+        // 📈 2) Inicializar tasas promedio cripto del día
+        cryptoAverageRateService.inicializarCriptosDelDia(LocalDateTime.now());
+
+        System.out.println("✅ Saldos iniciales del día actualizados (clientes, proveedores, cajas, COP y criptos)");
     }
+    
+    
 }

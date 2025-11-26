@@ -27,5 +27,7 @@ public interface CryptoAverageRateService {
 
     List<CryptoAverageRate> listarPorDia(LocalDate hoy);
 
+	void inicializarCriptosDelDia(LocalDateTime fecha);
+
 }
 
