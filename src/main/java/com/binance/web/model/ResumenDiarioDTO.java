@@ -8,7 +8,10 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class ResumenDiarioDTO {
-    private Double comprasHoy; // entradas
-    private Double ventasHoy;  // salidas
-    private Double ajustesHoy; // ajustes de saldo
+
+    private Double entradasHoy;
+    private Double salidasHoy;
+    private Double ajustesHoy;
+    private Double comprasDolaresHoy;
+    private Double ventasDolaresHoy;
 }

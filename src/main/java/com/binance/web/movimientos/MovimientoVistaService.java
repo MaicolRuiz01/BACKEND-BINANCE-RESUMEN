@@ -8,7 +8,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import com.binance.web.Entity.Movimiento;
+import com.binance.web.Repository.BuyDollarsRepository;
 import com.binance.web.Repository.MovimientoRepository;
+import com.binance.web.Repository.SellDollarsRepository;
 import com.binance.web.model.MovimientoVistaDTO;
 import com.binance.web.model.ResumenDiarioDTO;
 
@@ -17,10 +19,14 @@ public class MovimientoVistaService {
 
     @Autowired
     private MovimientoRepository movimientoRepo;
+    @Autowired
+    private BuyDollarsRepository buyDollarsRepository;
+    @Autowired
+    private SellDollarsRepository sellDollarsRepository;
 
-    /* =====================================================
-       MÉTODOS DE CÁLCULO DE SIGNO Y MONTO
-       ===================================================== */
+    private boolean esHoy(LocalDateTime fecha, LocalDate hoy) {
+        return fecha != null && fecha.toLocalDate().equals(hoy);
+    }
 
     private double basePesosCliente(Movimiento m, boolean esOrigen) {
         if (m.getUsdt() != null) {
@@ -235,17 +241,14 @@ public class MovimientoVistaService {
         }).toList();
     }
     
- // ============================
-    // RESUMEN DIARIO CLIENTE
-    // ============================
     public ResumenDiarioDTO resumenClienteHoy(Integer clienteId) {
         LocalDate hoy = LocalDate.now();
 
-        // 1) Usamos la vista (ya calcula montoSigned / entrada / salida)
+        // 1) Entradas/salidas desde la vista (lo que ya tenías)
         List<MovimientoVistaDTO> vista = vistaPorCliente(clienteId);
 
-        double compras = 0.0;
-        double ventas  = 0.0;
+        double entradas = 0.0;
+        double salidas  = 0.0;
 
         for (MovimientoVistaDTO v : vista) {
             if (!v.getFecha().toLocalDate().equals(hoy)) continue;
@@ -256,13 +259,13 @@ public class MovimientoVistaService {
             }
 
             if (v.isEntrada()) {
-                compras += v.getMontoSigned() != null ? v.getMontoSigned() : 0.0;
+                entradas += v.getMontoSigned() != null ? v.getMontoSigned() : 0.0;
             } else if (v.isSalida()) {
-                ventas += Math.abs(v.getMontoSigned() != null ? v.getMontoSigned() : 0.0);
+                salidas += Math.abs(v.getMontoSigned() != null ? v.getMontoSigned() : 0.0);
             }
         }
 
-        // 2) Ajustes de saldo del día de este cliente
+        // 2) Ajustes de saldo del día de este cliente (igual que antes)
         LocalDateTime inicio = hoy.atStartOfDay();
         LocalDateTime fin    = hoy.plusDays(1).atStartOfDay();
 
@@ -271,26 +274,57 @@ public class MovimientoVistaService {
 
         double ajustesTotal = ajustes.stream()
                 .mapToDouble(m -> {
-                    // si quieres usar diferencia como valor del ajuste:
                     if (m.getDiferencia() != null) return Math.abs(m.getDiferencia());
                     if (m.getMonto() != null)      return Math.abs(m.getMonto());
                     return 0.0;
                 })
                 .sum();
 
-        return new ResumenDiarioDTO(compras, ventas, ajustesTotal);
+        // 3) COMPRAS de dólares (BuyDollars) asignadas a este cliente HOY (en pesos)
+        double comprasDolaresHoy = buyDollarsRepository
+                .findByCliente_IdOrderByDateDesc(clienteId).stream()
+                .filter(b -> esHoy(b.getDate(), hoy))
+                .mapToDouble(b -> {
+                    // por seguridad, si pesos es null calculamos amount * tasa
+                    Double pesos = b.getPesos();
+                    if (pesos != null) return pesos;
+                    Double amount = b.getAmount() != null ? b.getAmount() : 0.0;
+                    Double tasa   = b.getTasa()   != null ? b.getTasa()   : 0.0;
+                    return amount * tasa;
+                })
+                .sum();
+
+        // 4) VENTAS de dólares (SellDollars) asignadas a este cliente HOY (en pesos)
+        double ventasDolaresHoy = sellDollarsRepository
+                .findByCliente_IdOrderByDateDesc(clienteId).stream()
+                .filter(s -> esHoy(s.getDate(), hoy))
+                .mapToDouble(s -> {
+                    Double pesos = s.getPesos();
+                    if (pesos != null) return pesos;
+                    Double dollars = s.getDollars() != null ? s.getDollars() : 0.0;
+                    Double tasa    = s.getTasa()    != null ? s.getTasa()    : 0.0;
+                    return dollars * tasa;
+                })
+                .sum();
+
+        return new ResumenDiarioDTO(
+                entradas,
+                salidas,
+                ajustesTotal,
+                comprasDolaresHoy,
+                ventasDolaresHoy
+        );
     }
 
-    // ============================
-    // RESUMEN DIARIO PROVEEDOR
-    // ============================
     public ResumenDiarioDTO resumenProveedorHoy(Integer proveedorId) {
         LocalDate hoy = LocalDate.now();
+        LocalDateTime inicio = hoy.atStartOfDay();
+        LocalDateTime fin    = hoy.plusDays(1).atStartOfDay();
 
         List<MovimientoVistaDTO> vista = vistaPorProveedor(proveedorId);
 
-        double compras = 0.0;
-        double ventas  = 0.0;
+        double entradas = 0.0;
+        double salidas  = 0.0;
 
         for (MovimientoVistaDTO v : vista) {
             if (!v.getFecha().toLocalDate().equals(hoy)) continue;
@@ -300,14 +334,11 @@ public class MovimientoVistaService {
             }
 
             if (v.isEntrada()) {
-                compras += v.getMontoSigned() != null ? v.getMontoSigned() : 0.0;
+                entradas += v.getMontoSigned() != null ? v.getMontoSigned() : 0.0;
             } else if (v.isSalida()) {
-                ventas += Math.abs(v.getMontoSigned() != null ? v.getMontoSigned() : 0.0);
+                salidas += Math.abs(v.getMontoSigned() != null ? v.getMontoSigned() : 0.0);
             }
         }
-
-        LocalDateTime inicio = hoy.atStartOfDay();
-        LocalDateTime fin    = hoy.plusDays(1).atStartOfDay();
 
         List<Movimiento> ajustes = movimientoRepo
                 .findByAjusteProveedor_IdAndFechaBetween(proveedorId, inicio, fin);
@@ -320,6 +351,31 @@ public class MovimientoVistaService {
                 })
                 .sum();
 
-        return new ResumenDiarioDTO(compras, ventas, ajustesTotal);
+        // ➜ COMPRAS de dólares del proveedor (BuyDollars) HOY
+        double comprasUsdt = buyDollarsRepository
+                .findBySupplier_IdOrderByDateDesc(proveedorId).stream()
+                .filter(b -> esHoy(b.getDate(), hoy))
+                .mapToDouble(b -> b.getPesos() != null
+                        ? b.getPesos()
+                        : (b.getAmount() != null && b.getTasa() != null ? b.getAmount() * b.getTasa() : 0.0))
+                .sum();
+
+        // ➜ VENTAS de dólares del proveedor (SellDollars) HOY
+        double ventasUsdt = sellDollarsRepository
+                .findBySupplier_IdOrderByDateDesc(proveedorId).stream()
+                .filter(s -> esHoy(s.getDate(), hoy))
+                .mapToDouble(s -> s.getPesos() != null
+                        ? s.getPesos()
+                        : (s.getDollars() != null && s.getTasa() != null ? s.getDollars() * s.getTasa() : 0.0))
+                .sum();
+
+        // Construimos el DTO (mismo orden que definimos en la clase)
+        return new ResumenDiarioDTO(
+                entradas,      // entradasHoy (movimientos)
+                salidas,       // salidasHoy  (movimientos)
+                ajustesTotal,  // ajustesHoy
+                comprasUsdt,   // comprasHoy  (buy dollars)
+                ventasUsdt     // ventasHoy   (sell dollars)
+        );
     }
 }
