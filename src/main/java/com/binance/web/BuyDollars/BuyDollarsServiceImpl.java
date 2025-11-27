@@ -344,5 +344,14 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 		  );
 		  return DigestUtils.sha256Hex(base);
 		}
+	
+	@Override
+	public List<BuyDollars> obtenerComprasNoAsignadasPorFecha(LocalDate fecha) {
+	    LocalDateTime start = fecha.atStartOfDay();
+	    LocalDateTime end   = fecha.plusDays(1).atStartOfDay();
+	    return buyDollarsRepository
+	            .findByAsignadaFalseAndDateBetween(start, end);
+	}
+
 
 }

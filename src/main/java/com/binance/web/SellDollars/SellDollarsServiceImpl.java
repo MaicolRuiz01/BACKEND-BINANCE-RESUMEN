@@ -649,4 +649,13 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 		  );
 		  return sha256(base); // 64 chars hex -> cabe en length=64
 		}
+		
+		@Override
+		public List<SellDollars> obtenerVentasNoAsignadasPorFecha(LocalDate fecha) {
+		    LocalDateTime start = fecha.atStartOfDay();
+		    LocalDateTime end   = fecha.plusDays(1).atStartOfDay();
+		    return sellDollarsRepository
+		            .findByAsignadoFalseAndDateBetween(start, end);
+		}
+
 }

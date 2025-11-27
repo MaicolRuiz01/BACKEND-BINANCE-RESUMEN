@@ -18,5 +18,6 @@ public interface SellDollarsService {
 	void registrarVentasAutomaticamente();
 	SellDollars asignarVenta(Integer id, SellDollarsDto dto);
 	List<SellDollarsDto> ventasPorCliente(Integer clienteId);
+	List<SellDollars> obtenerVentasNoAsignadasPorFecha(LocalDate fecha);
 
 }

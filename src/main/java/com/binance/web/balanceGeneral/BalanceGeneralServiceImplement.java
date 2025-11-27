@@ -8,9 +8,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import com.binance.web.AccountBinance.AccountBinanceService;
+import com.binance.web.BuyDollars.BuyDollarsService;
 import com.binance.web.Entity.AccountCop;
 import com.binance.web.Entity.AverageRate;
 import com.binance.web.Entity.BalanceGeneral;
+import com.binance.web.Entity.BuyDollars;
 import com.binance.web.Entity.Cliente;
 import com.binance.web.Entity.CryptoAverageRate;
 import com.binance.web.Entity.Efectivo;
@@ -63,6 +65,8 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
         private AccountCopRepository accountCopRepository;
         @Autowired
         private CryptoAverageRateService cryptoAverageRateService;
+        @Autowired
+        private BuyDollarsService buyDollarsService;
 
         @Override
         @Transactional
@@ -70,6 +74,11 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
 
             BalanceGeneral balance = balanceRepo.findByDate(fecha)
                 .orElseGet(() -> { var b = new BalanceGeneral(); b.setDate(fecha); return b; });
+            
+            double totalComprasNoAsignadasUsdt = calcularTotalComprasNoAsignadasUsdt(fecha);
+            double totalVentasNoAsignadasUsdt  = calcularTotalVentasNoAsignadasUsdt(fecha);
+
+            double netoNoAsignadasUsdt = totalComprasNoAsignadasUsdt - totalVentasNoAsignadasUsdt;
 
             // 1) tasa promedio del día (la misma que usarás para todo)
             Double tasaPromedioDelDia = averageRateRepository.findTopByOrderByFechaDesc()
@@ -185,7 +194,7 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
             balance.setComisionTrust(comisionTrust);
             balance.setProveedores(deudaProveedores);
             balance.setCuentasCop(saldoCop);
-
+            balance.setNetoNoAsignadasUsdt(netoNoAsignadasUsdt);
             balanceRepo.save(balance);
         }
 
@@ -220,4 +229,61 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
                                 .mapToDouble(c -> c.getSaldo())
                                 .sum();
         }
+        
+        private double safe(Double d) {
+            return d == null ? 0.0 : d;
+        }
+
+        /**
+         * Convierte un monto de una cripto a USDT usando la tasa promedio del día.
+         * Si la cripto es USDT o null, simplemente retorna el monto.
+         */
+        private double convertirCriptoAUsdt(String cryptoSymbol, Double amount, LocalDate fecha) {
+            if (amount == null || amount == 0) return 0.0;
+            if (cryptoSymbol == null || "USDT".equalsIgnoreCase(cryptoSymbol)) {
+                return amount;
+            }
+
+            // Busca la tasa promedio del día para esa cripto
+            CryptoAverageRate rate = cryptoAverageRateService
+                    .listarPorDia(fecha).stream()
+                    .filter(r -> cryptoSymbol.equalsIgnoreCase(r.getCripto()))
+                    .findFirst()
+                    .orElse(null);
+
+            if (rate == null || rate.getTasaPromedioDia() == null) return 0.0;
+
+            return amount * rate.getTasaPromedioDia();
+        }
+
+        /**
+         * Total de COMPRAS no asignadas del día en USDT.
+         * Usa amount + cryptoSymbol de BuyDollars.
+         */
+        private double calcularTotalComprasNoAsignadasUsdt(LocalDate fecha) {
+            // Reutiliza lo que ya tengas en el service; si no existe, algo así:
+            List<BuyDollars> comprasNoAsignadas = buyDollarsService.obtenerComprasNoAsignadasPorFecha(fecha);
+
+            return comprasNoAsignadas.stream()
+                    .mapToDouble(c ->
+                            convertirCriptoAUsdt(c.getCryptoSymbol(), c.getAmount(), fecha)
+                    )
+                    .sum();
+        }
+
+        /**
+         * Total de VENTAS no asignadas del día en USDT.
+         * Asumo que 'dollars' es la cantidad en la cripto indicada.
+         * Si en tu modelo 'dollars' YA está en USDT, solo cambia la lógica.
+         */
+        private double calcularTotalVentasNoAsignadasUsdt(LocalDate fecha) {
+            List<SellDollars> ventasNoAsignadas = sellDollarsService.obtenerVentasNoAsignadasPorFecha(fecha);
+
+            return ventasNoAsignadas.stream()
+                    .mapToDouble(v ->
+                            convertirCriptoAUsdt(v.getCryptoSymbol(), v.getDollars(), fecha)
+                    )
+                    .sum();
+        }
+
 }

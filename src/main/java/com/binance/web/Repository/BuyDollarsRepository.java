@@ -22,4 +22,5 @@ public interface BuyDollarsRepository extends JpaRepository<BuyDollars, Integer>
 	List<BuyDollars> findByCliente_IdOrderByDateDesc(Integer clienteId);
 	List<BuyDollars> findBySupplier_IdOrderByDateDesc(Integer supplierId);
 	Optional<BuyDollars> findByDedupeKey(String dedupeKey);
+	List<BuyDollars> findByAsignadaFalseAndDateBetween(LocalDateTime start, LocalDateTime end);
 }

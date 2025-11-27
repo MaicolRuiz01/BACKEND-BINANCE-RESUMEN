@@ -1,5 +1,6 @@
 package com.binance.web.BuyDollars;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -27,4 +28,6 @@ public interface BuyDollarsService {
 	List<BuyDollarsDto> listarComprasPorCliente(Integer clienteId);
 	
 	List<BuyDollarsDto> listarComprasPorProveedor(Integer proveedorId);
+
+	List<BuyDollars> obtenerComprasNoAsignadasPorFecha(LocalDate fecha);
 }
