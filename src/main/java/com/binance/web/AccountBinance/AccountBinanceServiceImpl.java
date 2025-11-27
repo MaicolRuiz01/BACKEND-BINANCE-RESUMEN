@@ -1,6 +1,8 @@
 package com.binance.web.AccountBinance;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -27,6 +29,7 @@ import com.binance.web.Entity.AverageRate;
 import com.binance.web.Repository.AccountBinanceRepository;
 import com.binance.web.Repository.AccountCryptoBalanceRepository;
 import com.binance.web.Repository.AverageRateRepository;
+import com.binance.web.Repository.CryptoAverageRateRepository;
 import com.binance.web.model.CryptoBalanceDto;
 
 import org.springframework.transaction.annotation.Transactional;
@@ -47,6 +50,9 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
 	private volatile long dynamicStablesTs = 0L;
 	private static final long STABLES_TTL_MS = 5 * 60 * 1000; // 5 min
 	private static final double STABLE_TOL = 0.02; // ±2 %
+	@Autowired
+	private CryptoAverageRateRepository cryptoAverageRateRepository;
+	private static final ZoneId ZONE_BOGOTA = ZoneId.of("America/Bogota");
 
 	public AccountBinanceServiceImpl(AccountBinanceRepository accountBinanceRepository, BinanceService binanceService,
 			TronScanService tronScanService, SolscanService solscanService) {
@@ -321,22 +327,49 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
 
 	@Override
 	public BigDecimal getTotalBalanceInterno() {
-		List<AccountCryptoBalanceRepository.SymbolQty> rows = accountCryptoBalanceRepository.sumBySymbol();
+	    // 1) Saldos internos agregados por símbolo
+	    List<AccountCryptoBalanceRepository.SymbolQty> rows =
+	            accountCryptoBalanceRepository.sumBySymbol();
 
-		Map<String, Double> priceCache = new HashMap<>();
-		double totalUsdt = 0.0;
+	    // 2) Tasas promedio del día por cripto (TRX, SOL, SPK, etc.)
+	    Map<String, Double> tasasHoy = getTodayCryptoAverageRates();
 
-		for (var r : rows) {
-			String sym = r.getSymbol();
-			double qty = r.getQty() != null ? r.getQty() : 0.0;
-			if (qty <= 0)
-				continue;
+	    double totalUsdt = 0.0;
 
-			double px = usdtPrice(sym, priceCache); // 1.0 si es stable detectada
-			totalUsdt += qty * px;
-		}
-		return BigDecimal.valueOf(totalUsdt);
+	    for (var r : rows) {
+	        String sym = Optional.ofNullable(r.getSymbol())
+	                .orElse("")
+	                .trim()
+	                .toUpperCase();
+	        double qty = r.getQty() != null ? r.getQty() : 0.0;
+
+	        if (qty <= 0 || sym.isEmpty()) continue;
+
+	        double pxUsdt;
+
+	        if ("USDT".equals(sym)) {
+	            // USDT ya está en USDT
+	            pxUsdt = 1.0;
+	        } else {
+	            // Primero intentamos con la tasa promedio del día
+	            pxUsdt = Optional.ofNullable(tasasHoy.get(sym)).orElse(0.0);
+
+	            // (Opcional) fallback: si no hay tasa promedio, usamos precio de mercado
+	            if (pxUsdt <= 0.0) {
+	                pxUsdt = usdtPrice(sym, new HashMap<>());
+	            }
+	        }
+
+	        if (pxUsdt <= 0.0) continue;  // si sigue sin valor, lo ignoramos
+
+	        totalUsdt += qty * pxUsdt;
+	    }
+
+	    // 👉 devuelve el saldo interno TOTAL en USDT
+	    return BigDecimal.valueOf(totalUsdt);
 	}
+
+
 
 	private double priceInUSDT(String symbol) {
 		if (symbol == null)
@@ -567,5 +600,18 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
 
 	    return out;
 	}
+	
+	private Map<String, Double> getTodayCryptoAverageRates() {
+	    LocalDate hoy = LocalDate.now(ZONE_BOGOTA);
+
+	    return cryptoAverageRateRepository.findByDia(hoy).stream()
+	            .filter(r -> r.getCripto() != null)
+	            .collect(Collectors.toMap(
+	                    r -> r.getCripto().trim().toUpperCase(),
+	                    r -> Optional.ofNullable(r.getTasaPromedioDia()).orElse(0.0),
+	                    (a, b) -> b   // por si se repite, nos quedamos con el último
+	            ));
+	}
+
 
 }

@@ -98,7 +98,7 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
                 .mapToDouble(Cliente::getSaldo).sum();
 
             // 4) usa el NUEVO campo en el total
-            Double saldoTotal = saldoCuentasBinance + saldoCajas + saldoCop - saldoProveedores + clientesSaldo;
+            Double saldoTotal = saldoCuentasBinance + saldoCajas + saldoCop - saldoProveedores - clientesSaldo;
 
             Double totalP2P = saleP2PService.obtenerVentasPorFecha(fecha).stream()
                 .mapToDouble(SaleP2P::getPesosCop).sum();
