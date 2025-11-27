@@ -1,7 +1,13 @@
 package com.binance.web.movimientos;
 
-import java.util.List;
+import java.util.Date;
 
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.util.List;
+import java.util.Map;
+import java.util.TimeZone;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -283,4 +289,15 @@ public class MovimientoController {
 
         return dto;
     }
+    
+    @GetMapping("/debug/time")
+    public Map<String, String> debugTime() {
+        return Map.of(
+            "java_default", new Date().toString(),
+            "localdatetime_now", LocalDateTime.now().toString(),
+            "bogota", ZonedDateTime.now(ZoneId.of("America/Bogota")).toString(),
+            "jvm_timezone", TimeZone.getDefault().getID()
+        );
+    }
+
 }
