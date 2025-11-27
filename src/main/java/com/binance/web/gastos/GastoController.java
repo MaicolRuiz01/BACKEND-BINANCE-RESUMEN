@@ -59,5 +59,15 @@ public class GastoController {
             .orElseGet(() -> ResponseEntity.notFound().build());
     }
     
+    @GetMapping("/total-hoy/cuenta-cop/{id}")
+    public ResponseEntity<Double> getTotalGastosHoyCuentaCop(@PathVariable Integer id) {
+        return ResponseEntity.ok(gastoService.totalGastosHoyCuentaCop(id));
+    }
+
+    @GetMapping("/total-hoy/caja/{id}")
+    public ResponseEntity<Double> getTotalGastosHoyCaja(@PathVariable Integer id) {
+        return ResponseEntity.ok(gastoService.totalGastosHoyCaja(id));
+    }
+
 
 }

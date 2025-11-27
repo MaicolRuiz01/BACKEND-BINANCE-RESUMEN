@@ -11,9 +11,11 @@ import com.binance.web.Repository.AccountCopRepository;
 import com.binance.web.Repository.EfectivoRepository;
 import com.binance.web.Repository.GastoRepository;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+
 
 @Service
 public class GastoServiceImplement implements GastoService{
@@ -67,5 +69,35 @@ public class GastoServiceImplement implements GastoService{
 
         return gastoRepository.save(nuevoGasto);
     }
+    
+    @Override
+    public Double totalGastosHoyCuentaCop(Integer cuentaId) {
+        LocalDate hoy = LocalDate.now();
+        LocalDateTime inicio = hoy.atStartOfDay();
+        LocalDateTime fin = hoy.plusDays(1).atStartOfDay();
+
+        List<Gasto> gastos = gastoRepository
+                .findByCuentaPago_IdAndFechaBetween(cuentaId, inicio, fin);
+
+        return gastos.stream()
+                .mapToDouble(g -> g.getMonto() != null ? g.getMonto() : 0.0)
+                .sum();
+    }
+    
+    @Override
+    public Double totalGastosHoyCaja(Integer cajaId) {
+        LocalDate hoy = LocalDate.now();
+        LocalDateTime inicio = hoy.atStartOfDay();
+        LocalDateTime fin = hoy.plusDays(1).atStartOfDay();
+
+        List<Gasto> gastos = gastoRepository
+                .findByPagoEfectivo_IdAndFechaBetween(cajaId, inicio, fin);
+
+        return gastos.stream()
+                .mapToDouble(g -> g.getMonto() != null ? g.getMonto() : 0.0)
+                .sum();
+    }
+
+
 
 }
