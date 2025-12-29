@@ -14,13 +14,13 @@ import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 
-import com.binance.web.AccountBinance.AccountBinanceService;
 import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.SpotOrder;
 import com.binance.web.Repository.AccountBinanceRepository;
 import com.binance.web.Repository.SpotOrderRepository;
-import com.binance.web.cryptoAverageRate.CryptoAverageRateService;
 import com.binance.web.model.CryptoPendienteDto;
+import com.binance.web.service.AccountBinanceService;
+import com.binance.web.service.CryptoAverageRateService;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;

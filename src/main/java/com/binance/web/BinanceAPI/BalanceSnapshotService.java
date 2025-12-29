@@ -7,7 +7,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
-import com.binance.web.AccountBinance.AccountBinanceService;
 import com.binance.web.Entity.AccountCop;
 import com.binance.web.Entity.Cliente;
 import com.binance.web.Entity.Efectivo;
@@ -16,7 +15,8 @@ import com.binance.web.Repository.AccountCopRepository;
 import com.binance.web.Repository.ClienteRepository;
 import com.binance.web.Repository.EfectivoRepository;
 import com.binance.web.Repository.SupplierRepository;
-import com.binance.web.cryptoAverageRate.CryptoAverageRateService;
+import com.binance.web.service.AccountBinanceService;
+import com.binance.web.service.CryptoAverageRateService;
 
 import jakarta.transaction.Transactional;
 

@@ -308,7 +308,7 @@ public class MovimientoVistaService {
 					return dollars * tasa;
 				}).sum();
 
-		return new ResumenDiarioDTO(entradas, salidas, ajustesTotal, comprasDolaresHoy, ventasDolaresHoy);
+		return new ResumenDiarioDTO(entradas, salidas, ajustesTotal, comprasDolaresHoy, ventasDolaresHoy, 0.0);
 	}
 
 	public ResumenDiarioDTO resumenProveedorHoy(Integer proveedorId) {
@@ -363,62 +363,76 @@ public class MovimientoVistaService {
 				salidas, // salidasHoy (movimientos)
 				ajustesTotal, // ajustesHoy
 				comprasUsdt, // comprasHoy (buy dollars)
-				ventasUsdt // ventasHoy (sell dollars)
+				ventasUsdt, // ventasHoy (sell dollars)
+				0.0
 		);
 	}
 
 	public ResumenDiarioDTO resumenCuentaCopHoy(Integer cuentaId) {
-		LocalDate hoy = LocalDate.now();
-		LocalDateTime inicio = hoy.atStartOfDay();
-		LocalDateTime fin = hoy.plusDays(1).atStartOfDay();
+	    LocalDate hoy = LocalDate.now();
+	    LocalDateTime inicio = hoy.atStartOfDay();
+	    LocalDateTime fin = hoy.plusDays(1).atStartOfDay();
 
-		// 1) Entradas / salidas desde los movimientos de la cuenta
-		List<MovimientoVistaDTO> vista = vistaPorCuentaCop(cuentaId);
+	    // 1) Entradas / salidas desde los movimientos de la cuenta
+	    List<MovimientoVistaDTO> vista = vistaPorCuentaCop(cuentaId);
 
-		double entradas = 0.0;
-		double salidas = 0.0;
+	    double entradas = 0.0;
+	    double salidas = 0.0;
+	    double salidasRetirosHoy = 0.0;   // 👈 NUEVO
 
-		for (MovimientoVistaDTO v : vista) {
-			if (!v.getFecha().toLocalDate().equals(hoy))
-				continue;
+	    for (MovimientoVistaDTO v : vista) {
+	        if (!v.getFecha().toLocalDate().equals(hoy))
+	            continue;
 
-			// ignorar ajustes
-			if (v.getTipo() != null && v.getTipo().toUpperCase().startsWith("AJUSTE_SALDO")) {
-				continue;
-			}
+	        // ignorar ajustes
+	        if (v.getTipo() != null && v.getTipo().toUpperCase().startsWith("AJUSTE_SALDO")) {
+	            continue;
+	        }
 
-			if (v.isEntrada()) {
-				entradas += v.getMontoSigned() != null ? v.getMontoSigned() : 0.0;
-			} else if (v.isSalida()) {
-				salidas += Math.abs(v.getMontoSigned() != null ? v.getMontoSigned() : 0.0);
-			}
-		}
+	        Double signed = v.getMontoSigned() != null ? v.getMontoSigned() : 0.0;
 
-		// 2) Ajustes de saldo de la cuenta COP hoy
-		List<Movimiento> ajustes = movimientoRepo.findByAjusteCuentaCop_IdAndFechaBetween(cuentaId, inicio, fin);
+	        if (v.isEntrada()) {
+	            entradas += signed;
+	        } else if (v.isSalida()) {
+	            double abs = Math.abs(signed);
+	            salidas += abs;
 
-		double ajustesTotal = ajustes.stream().mapToDouble(m -> {
-			if (m.getDiferencia() != null)
-				return Math.abs(m.getDiferencia());
-			if (m.getMonto() != null)
-				return Math.abs(m.getMonto());
-			return 0.0;
-		}).sum();
+	            // 👇 si es un movimiento tipo RETIRO, lo acumulamos aparte
+	            if ("RETIRO".equalsIgnoreCase(v.getTipo())) {
+	                salidasRetirosHoy += abs;
+	            }
+	        }
+	    }
 
-		// 3) Ventas USDT asignadas a esta cuenta hoy (en COP)
-		double ventasUsdtHoy = sellDollarsAccountCopRepository
-				.findByAccountCop_IdAndSellDollars_DateBetween(cuentaId, inicio, fin).stream()
-				.mapToDouble(sa -> sa.getAmount() != null ? sa.getAmount() : 0.0).sum();
+	    // 2) Ajustes de saldo de la cuenta COP hoy
+	    List<Movimiento> ajustes = movimientoRepo.findByAjusteCuentaCop_IdAndFechaBetween(cuentaId, inicio, fin);
 
-		// En cuenta COP no tienes BuyDollars asignados directamente
-		double comprasHoy = 0.0;
+	    double ajustesTotal = ajustes.stream().mapToDouble(m -> {
+	        if (m.getDiferencia() != null)
+	            return Math.abs(m.getDiferencia());
+	        if (m.getMonto() != null)
+	            return Math.abs(m.getMonto());
+	        return 0.0;
+	    }).sum();
 
-		return new ResumenDiarioDTO(entradas, // entradasHoy
-				salidas, // salidasHoy
-				ajustesTotal, // ajustesHoy
-				comprasHoy, // comprasHoy (0)
-				ventasUsdtHoy // ventasHoy (monto asignado a esta cuenta)
-		);
+	    // 3) Ventas USDT asignadas a esta cuenta hoy (en COP)
+	    double ventasUsdtHoy = sellDollarsAccountCopRepository
+	            .findByAccountCop_IdAndSellDollars_DateBetween(cuentaId, inicio, fin).stream()
+	            .mapToDouble(sa -> sa.getAmount() != null ? sa.getAmount() : 0.0).sum();
+
+	    // En cuenta COP no tienes BuyDollars asignados directamente
+	    double comprasHoy = 0.0;
+
+	    // 👇 ahora usamos el constructor con el nuevo campo al final
+	    return new ResumenDiarioDTO(
+	            entradas,        // entradasHoy
+	            salidas,         // salidasHoy
+	            ajustesTotal,    // ajustesHoy
+	            comprasHoy,      // comprasHoy
+	            ventasUsdtHoy,   // ventasHoy
+	            salidasRetirosHoy // 👈 NUEVO: total retiros hoy
+	    );
 	}
+
 
 }

@@ -1,8 +1,8 @@
 package com.binance.web.BinanceAPI;
 
-import com.binance.web.BuyDollars.BuyDollarsDto;
 import com.binance.web.Entity.Cliente;
-import com.binance.web.SellDollars.SellDollarsDto;
+import com.binance.web.model.BuyDollarsDto;
+import com.binance.web.model.SellDollarsDto;
 
 import java.time.Instant;
 import java.time.LocalDate;

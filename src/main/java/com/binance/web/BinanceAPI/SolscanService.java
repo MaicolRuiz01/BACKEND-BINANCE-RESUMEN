@@ -1,7 +1,7 @@
 package com.binance.web.BinanceAPI;
 
-import com.binance.web.BuyDollars.BuyDollarsDto;
-import com.binance.web.SellDollars.SellDollarsDto;
+import com.binance.web.model.BuyDollarsDto;
+import com.binance.web.model.SellDollarsDto;
 import com.binance.web.Entity.Cliente;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;

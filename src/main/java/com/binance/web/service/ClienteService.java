@@ -1,0 +1,15 @@
+package com.binance.web.service;
+
+import java.util.List;
+
+import com.binance.web.Entity.Cliente;
+
+public interface ClienteService {
+	
+	List<Cliente> allClientes();
+	Cliente crearCliente(Cliente cliente);
+
+	// === MÉTODO NUEVO: transferencia de saldo ===
+	void transferir(Integer origenId, Integer destinoId, Double monto, String nota);
+	Cliente reemplazar(Integer id, Cliente nuevo);
+}

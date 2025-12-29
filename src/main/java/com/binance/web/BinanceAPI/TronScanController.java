@@ -18,7 +18,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.binance.web.BuyDollars.BuyDollarsDto;
 import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.BuyDollars;
 import com.binance.web.Entity.Cliente;
@@ -28,7 +27,8 @@ import com.binance.web.Repository.AccountBinanceRepository;
 import com.binance.web.Repository.BuyDollarsRepository;
 import com.binance.web.Repository.ClienteRepository;
 import com.binance.web.Repository.SellDollarsRepository;
-import com.binance.web.SellDollars.SellDollarsDto;
+import com.binance.web.model.BuyDollarsDto;
+import com.binance.web.model.SellDollarsDto;
 import com.binance.web.transacciones.TransaccionesDTO;
 import com.binance.web.transacciones.TransaccionesRepository;
 import com.fasterxml.jackson.databind.JsonNode;

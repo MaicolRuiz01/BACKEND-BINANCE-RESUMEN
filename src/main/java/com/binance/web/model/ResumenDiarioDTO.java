@@ -14,4 +14,5 @@ public class ResumenDiarioDTO {
     private Double ajustesHoy;
     private Double comprasDolaresHoy;
     private Double ventasDolaresHoy;
+    private Double salidasRetirosHoy;
 }
