@@ -17,14 +17,18 @@ import com.binance.web.Entity.Efectivo;
 import com.binance.web.Entity.SaleP2P;
 import com.binance.web.Entity.SellDollars;
 import com.binance.web.Entity.Supplier;
+import com.binance.web.Entity.AccountVes;
+import com.binance.web.Entity.VesAverageRate;
 import com.binance.web.Repository.AccountBinanceRepository;
 import com.binance.web.Repository.AccountCopRepository;
+import com.binance.web.Repository.AccountVesRepository;
 import com.binance.web.Repository.AverageRateRepository;
 import com.binance.web.Repository.BalanceGeneralRepository;
 import com.binance.web.Repository.ClienteRepository;
 import com.binance.web.Repository.EfectivoRepository;
 
 import com.binance.web.Repository.SupplierRepository;
+import com.binance.web.Repository.VesAverageRateRepository;
 import com.binance.web.model.CryptoResumenDiaDto;
 import com.binance.web.service.AccountBinanceService;
 import com.binance.web.service.BalanceGeneralService;
@@ -68,6 +72,10 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
         private CryptoAverageRateService cryptoAverageRateService;
         @Autowired
         private BuyDollarsService buyDollarsService;
+        @Autowired
+        private AccountVesRepository accountVesRepository;
+        @Autowired
+        private VesAverageRateRepository vesAverageRateRepository;
 
         @Override
         @Transactional
@@ -108,7 +116,7 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
                 .mapToDouble(Cliente::getSaldo).sum();
 
             // 4) usa el NUEVO campo en el total
-            Double saldoTotal = saldoCuentasBinance + saldoCajas + saldoCop - saldoProveedores - clientesSaldo;
+            
 
             Double totalP2P = saleP2PService.obtenerVentasPorFecha(fecha).stream()
                 .mapToDouble(SaleP2P::getPesosCop).sum();
@@ -121,6 +129,25 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
 
             Double pesosVentasGenerales = sellDollarsService.obtenerVentasPorFecha(fecha).stream()
                 .mapToDouble(SellDollars::getPesos).sum();
+            
+            Double totalVesCuentas = accountVesRepository.findAll().stream()
+                    .mapToDouble(acc -> acc.getBalance() == null ? 0.0 : acc.getBalance())
+                    .sum();
+            
+            
+            double tasaPromedioVes = vesAverageRateRepository.findByDia(fecha).stream()
+                    .sorted((a, b) -> b.getFechaCalculo().compareTo(a.getFechaCalculo())) // última del día
+                    .map(VesAverageRate::getTasaPromedioDia)
+                    .findFirst()
+                    .orElseGet(() -> 
+                        vesAverageRateRepository.findTopByOrderByFechaCalculoDesc()
+                            .map(VesAverageRate::getTasaPromedioDia)
+                            .orElse(0.0)
+                    );
+            
+            Double pesosTotalCuentasVES = totalVesCuentas * tasaPromedioVes;
+            
+            Double saldoTotal = saldoCuentasBinance + saldoCajas + saldoCop + pesosTotalCuentasVES - saldoProveedores - clientesSaldo;
             
             double deudaProveedores = supplierRepository.findAll().stream()
             	    .mapToDouble(s -> s.getBalance() == null ? 0.0 : s.getBalance())
@@ -196,6 +223,7 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
             balance.setProveedores(deudaProveedores);
             balance.setCuentasCop(saldoCop);
             balance.setNetoNoAsignadasUsdt(netoNoAsignadasUsdt);
+            balance.setSaldosVES(pesosTotalCuentasVES);
             balanceRepo.save(balance);
         }
 

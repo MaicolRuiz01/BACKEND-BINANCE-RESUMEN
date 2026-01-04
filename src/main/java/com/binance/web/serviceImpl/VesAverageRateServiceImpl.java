@@ -83,26 +83,49 @@ public class VesAverageRateServiceImpl implements VesAverageRateService {
 
         LocalDate dia = fechaOperacion.atZone(ZONE_BOGOTA).toLocalDate();
 
-        VesAverageRate ultima = repo.findTopByOrderByFechaCalculoDesc()
-                .orElseThrow(() -> new IllegalStateException(
-                        "Primero debes configurar la tasa promedio inicial VES."
-                ));
+        // Último registro que exista (puede ser null si es la primera vez)
+        VesAverageRate ultima = repo.findTopByOrderByFechaCalculoDesc().orElse(null);
 
-        // Inventario real actual en VES (ya después de haber aplicado la compra en las cuentas VES)
+        // Inventario real actual en VES (después de aplicar la compra en las cuentas VES)
         Double saldoActualVes = accountVesService.getTotalSaldoVes();
         if (saldoActualVes == null) saldoActualVes = 0.0;
 
+        // ==========================
+        //  CASO 1: NUNCA HUBO NADA
+        // ==========================
+        if (ultima == null) {
+            Double saldoInicialDia = saldoActualVes - cantidadVesComprada;
+            // tasa de la primera compra
+            Double tasaCompra = totalPesosCompra / cantidadVesComprada;
+
+            VesAverageRate nuevo = new VesAverageRate();
+            nuevo.setDia(dia);
+            nuevo.setFechaCalculo(fechaOperacion);
+
+            nuevo.setSaldoInicialVes(saldoInicialDia);
+            nuevo.setTasaBaseCop(tasaCompra);      // 👈 base = primera tasa
+            nuevo.setTotalVesCompradosDia(cantidadVesComprada);
+            nuevo.setTotalPesosComprasDia(totalPesosCompra);
+
+            nuevo.setTasaPromedioDia(tasaCompra);  // 👈 promedio = primera tasa
+            nuevo.setSaldoFinalVes(saldoActualVes);
+
+            return repo.save(nuevo);
+        }
+
+        // ==========================
+        //  CASO 2: YA HABÍA HISTORIAL
+        // ==========================
         VesAverageRate snapshotDia = repo.findByDia(dia).stream().findFirst().orElse(null);
 
         if (snapshotDia == null) {
-            // ===== Primera compra del día =====
+            // Primera compra de este día, pero ya había días anteriores
             Double saldoInicialDia = saldoActualVes - cantidadVesComprada;
-
             Double tasaBase = ultima.getTasaPromedioDia();
-            Double pesosSaldoInicial = saldoInicialDia * tasaBase;
 
-            Double totalVesDia = saldoInicialDia + cantidadVesComprada;
-            Double totalPesosDia = pesosSaldoInicial + totalPesosCompra;
+            Double pesosSaldoInicial = saldoInicialDia * tasaBase;
+            Double totalVesDia       = saldoInicialDia + cantidadVesComprada;
+            Double totalPesosDia     = pesosSaldoInicial + totalPesosCompra;
 
             Double nuevaTasa = totalVesDia > 0 ? totalPesosDia / totalVesDia : tasaBase;
 
@@ -112,24 +135,21 @@ public class VesAverageRateServiceImpl implements VesAverageRateService {
 
             snapshotDia.setSaldoInicialVes(saldoInicialDia);
             snapshotDia.setTasaBaseCop(tasaBase);
-
             snapshotDia.setTotalVesCompradosDia(cantidadVesComprada);
             snapshotDia.setTotalPesosComprasDia(totalPesosCompra);
-
             snapshotDia.setTasaPromedioDia(nuevaTasa);
             snapshotDia.setSaldoFinalVes(saldoActualVes);
 
         } else {
-            // ===== Siguientes compras del mismo día =====
+            // Más compras en el mismo día
             Double saldoInicialDia = snapshotDia.getSaldoInicialVes();
             Double tasaBase        = snapshotDia.getTasaBaseCop();
 
-            Double pesosSaldoInicial = saldoInicialDia * tasaBase;
-
+            Double pesosSaldoInicial    = saldoInicialDia * tasaBase;
             Double totalVesCompradosDia = snapshotDia.getTotalVesCompradosDia() + cantidadVesComprada;
             Double totalPesosComprasDia = snapshotDia.getTotalPesosComprasDia() + totalPesosCompra;
 
-            Double totalVesDia = saldoInicialDia + totalVesCompradosDia;
+            Double totalVesDia   = saldoInicialDia + totalVesCompradosDia;
             Double totalPesosDia = pesosSaldoInicial + totalPesosComprasDia;
 
             Double nuevaTasa = totalVesDia > 0 ? totalPesosDia / totalVesDia : tasaBase;

@@ -48,4 +48,6 @@ public class BalanceGeneral {
     @Column(columnDefinition = "TEXT")
     private String detalleCriptosJson;
     private Double netoNoAsignadasUsdt;
+    
+    private Double saldosVES;
 }

@@ -16,6 +16,7 @@ import com.binance.web.Repository.ClienteRepository;
 import com.binance.web.Repository.CompraVesRepository;
 import com.binance.web.Repository.SupplierRepository;
 import com.binance.web.service.CompraVesService;
+import com.binance.web.service.VesAverageRateService;
 
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,6 +30,7 @@ public class CompraVesServiceImpl implements CompraVesService {
     private final CompraVesRepository repo;
     private final SupplierRepository supplierRepository;
     private final ClienteRepository clienteRepository;
+    private final VesAverageRateService vesAverageRateService;
 
     private static final ZoneId ZONE_BOGOTA = ZoneId.of("America/Bogota");
 
@@ -38,13 +40,21 @@ public class CompraVesServiceImpl implements CompraVesService {
     @Override
     public CompraVES create(CompraVES compra) {
         validateAssignment(compra);
-        normalize(compra);
+        normalize(compra);              // pone date y calcula pesos
 
         CompraVES saved = repo.save(compra);
         applyDebt(saved);
 
+        // 👇 AQUÍ se actualiza la tasa promedio del día VES
+        vesAverageRateService.actualizarPorCompra(
+                saved.getBolivares(),   // cantidad VES comprados
+                saved.getPesos(),       // pesos que costó
+                saved.getDate()         // fecha de la compra
+        );
+
         return saved;
     }
+
 
     // =======================
     // UPDATE
