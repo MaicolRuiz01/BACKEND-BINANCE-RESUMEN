@@ -19,5 +19,6 @@ public interface AccountBinanceRepository  extends JpaRepository<AccountBinance,
 	
 	List<AccountBinance> findByTipo(String tipo);
 
+	AccountBinance findFirstByNameIgnoreCase(String name);
 
 }

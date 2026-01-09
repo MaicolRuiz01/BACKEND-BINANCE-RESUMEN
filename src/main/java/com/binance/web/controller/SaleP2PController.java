@@ -14,7 +14,8 @@ import com.binance.web.Repository.AccountBinanceRepository;
 import com.binance.web.model.AssignAccountDto;
 import com.binance.web.model.SaleP2PDto;
 import com.binance.web.service.SaleP2PService;
-
+import java.time.LocalDate;
+import org.springframework.format.annotation.DateTimeFormat;
 @RestController
 @RequestMapping("/saleP2P")
 public class SaleP2PController {
@@ -35,11 +36,12 @@ public class SaleP2PController {
 		List<SaleP2PDto> sales = saleP2PService.getLastSaleP2pToday(account);
 		return ResponseEntity.ok(sales);
 	}
+	
 	@GetMapping("/all")
-public ResponseEntity<List<SaleP2PDto>> getAllP2P() {
+	public ResponseEntity<List<SaleP2PDto>> getAllP2P() {
     List<SaleP2PDto> sales = saleP2PService.findAllSaleP2P();
     return ResponseEntity.ok(sales);
-}
+	}
 
 
 	@GetMapping("/{id}")
@@ -84,5 +86,18 @@ public ResponseEntity<List<SaleP2PDto>> getAllP2P() {
 
 		return ResponseEntity.ok(result);
 	}
+	
+
+
+	@GetMapping("/binance/range")
+	public ResponseEntity<String> getP2PFromBinanceRange(
+	        @RequestParam String account,
+	        @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+	        @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
+	) {
+	    String json = saleP2PService.getAllP2PFromBinance(account, from, to);
+	    return ResponseEntity.ok(json);
+	}
+
 
 }

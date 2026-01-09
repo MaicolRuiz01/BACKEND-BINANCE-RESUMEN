@@ -20,5 +20,6 @@ public interface SaleP2PService {
     void saveUtilitydefinitive(List<SaleP2P> rangeSales, Double averageRate);
     List<SaleP2P> obtenerVentasPorFecha(LocalDate fecha);
     Double obtenerComisionesPorFecha(LocalDate fecha);
+	String getAllP2PFromBinance(String account, LocalDate from, LocalDate to);
 
 }

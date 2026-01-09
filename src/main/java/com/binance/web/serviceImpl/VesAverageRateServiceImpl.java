@@ -83,45 +83,21 @@ public class VesAverageRateServiceImpl implements VesAverageRateService {
 
         LocalDate dia = fechaOperacion.atZone(ZONE_BOGOTA).toLocalDate();
 
-        // Último registro que exista (puede ser null si es la primera vez)
-        VesAverageRate ultima = repo.findTopByOrderByFechaCalculoDesc().orElse(null);
+        // 👇 AHORA ES OBLIGATORIO QUE YA EXISTA UNA TASA INICIAL
+        VesAverageRate ultima = repo.findTopByOrderByFechaCalculoDesc()
+                .orElseThrow(() -> new IllegalStateException(
+                        "Primero debes configurar la tasa promedio inicial VES."
+                ));
 
-        // Inventario real actual en VES (después de aplicar la compra en las cuentas VES)
         Double saldoActualVes = accountVesService.getTotalSaldoVes();
         if (saldoActualVes == null) saldoActualVes = 0.0;
 
-        // ==========================
-        //  CASO 1: NUNCA HUBO NADA
-        // ==========================
-        if (ultima == null) {
-            Double saldoInicialDia = saldoActualVes - cantidadVesComprada;
-            // tasa de la primera compra
-            Double tasaCompra = totalPesosCompra / cantidadVesComprada;
-
-            VesAverageRate nuevo = new VesAverageRate();
-            nuevo.setDia(dia);
-            nuevo.setFechaCalculo(fechaOperacion);
-
-            nuevo.setSaldoInicialVes(saldoInicialDia);
-            nuevo.setTasaBaseCop(tasaCompra);      // 👈 base = primera tasa
-            nuevo.setTotalVesCompradosDia(cantidadVesComprada);
-            nuevo.setTotalPesosComprasDia(totalPesosCompra);
-
-            nuevo.setTasaPromedioDia(tasaCompra);  // 👈 promedio = primera tasa
-            nuevo.setSaldoFinalVes(saldoActualVes);
-
-            return repo.save(nuevo);
-        }
-
-        // ==========================
-        //  CASO 2: YA HABÍA HISTORIAL
-        // ==========================
         VesAverageRate snapshotDia = repo.findByDia(dia).stream().findFirst().orElse(null);
 
         if (snapshotDia == null) {
-            // Primera compra de este día, pero ya había días anteriores
+            // Primera compra del día (ya con tasa base existente)
             Double saldoInicialDia = saldoActualVes - cantidadVesComprada;
-            Double tasaBase = ultima.getTasaPromedioDia();
+            Double tasaBase        = ultima.getTasaPromedioDia();
 
             Double pesosSaldoInicial = saldoInicialDia * tasaBase;
             Double totalVesDia       = saldoInicialDia + cantidadVesComprada;
@@ -141,7 +117,7 @@ public class VesAverageRateServiceImpl implements VesAverageRateService {
             snapshotDia.setSaldoFinalVes(saldoActualVes);
 
         } else {
-            // Más compras en el mismo día
+            // Más compras del mismo día
             Double saldoInicialDia = snapshotDia.getSaldoInicialVes();
             Double tasaBase        = snapshotDia.getTasaBaseCop();
 
@@ -163,6 +139,7 @@ public class VesAverageRateServiceImpl implements VesAverageRateService {
 
         return repo.save(snapshotDia);
     }
+
 
     @Override
     public List<VesAverageRate> listarPorDia(LocalDate dia) {

@@ -817,5 +817,66 @@ public class BinanceService {
 			throw new RuntimeException("No pude cargar exchangeInfo: " + e.getMessage(), e);
 		}
 	}
+	
+	public String getP2POrdersInRange(String account, long startTime, long endTime, String tradeType) {
+	    try {
+	        String[] credentials = getApiCredentials(account);
+	        if (credentials == null) return "{\"error\": \"Cuenta no válida.\"}";
+
+	        String apiKey = credentials[0];
+	        String secretKey = credentials[1];
+
+	        List<JsonObject> allOrders = new ArrayList<>();
+	        int currentPage = 1;
+	        int rows = 50;
+
+	        while (true) {
+	            long timestamp = getServerTime();
+
+	            StringBuilder query = new StringBuilder();
+	            // ✅ tradeType opcional
+	            if (tradeType != null && !tradeType.isBlank()) {
+	                query.append("tradeType=").append(tradeType).append("&");
+	            }
+
+	            query.append("startTimestamp=").append(startTime)
+	                 .append("&endTimestamp=").append(endTime)
+	                 .append("&page=").append(currentPage)
+	                 .append("&rows=").append(rows)
+	                 .append("&recvWindow=60000")
+	                 .append("&timestamp=").append(timestamp);
+
+	            String signature = hmacSha256(secretKey, query.toString());
+	            String url = P2P_ORDERS_API_URL + "?" + query + "&signature=" + signature;
+
+	            String response = sendBinanceRequestWithProxy(url, apiKey);
+	            JsonObject jsonResponse = JsonParser.parseString(response).getAsJsonObject();
+
+	            if (jsonResponse.has("code") && !"000000".equals(jsonResponse.get("code").getAsString())) {
+	                return "{\"error\": \"" + jsonResponse.get("msg").getAsString() + "\"}";
+	            }
+
+	            JsonArray dataArray = jsonResponse.getAsJsonArray("data");
+	            if (dataArray == null || dataArray.size() == 0) break;
+
+	            dataArray.forEach(order -> allOrders.add(order.getAsJsonObject()));
+
+	            int totalOrders = jsonResponse.has("total") ? jsonResponse.get("total").getAsInt() : 0;
+	            if (allOrders.size() >= totalOrders) break;
+
+	            currentPage++;
+	        }
+
+	        JsonObject finalResponse = new JsonObject();
+	        finalResponse.add("data", JsonParser.parseString(allOrders.toString()));
+	        return finalResponse.toString();
+
+	    } catch (Exception e) {
+	        e.printStackTrace(); // 🔥 para ver la excepción real en consola
+	        return "{\"error\": \"Error interno: " + e.getClass().getName() + " - " + e.getMessage() + "\"}";
+	    }
+
+	}
+
 
 }

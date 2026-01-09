@@ -31,6 +31,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+
 @Service
 public class SaleP2PServiceImpl implements SaleP2PService {
 
@@ -269,4 +270,18 @@ public class SaleP2PServiceImpl implements SaleP2PService {
 		// TODO Auto-generated method stub
 		return null;
 	}
+	
+	@Override
+	public String getAllP2PFromBinance(String account, LocalDate from, LocalDate to) {
+	    ZoneId zone = ZoneId.of("America/Bogota");
+
+	    long start = from.atStartOfDay(zone).toInstant().toEpochMilli();
+	    long end   = to.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli();
+
+	    // ✅ ESTE MÉTODO EXISTE
+	    return binanceService.getP2POrdersInRange(account, start, end);
+	}
+
+
+
 }
