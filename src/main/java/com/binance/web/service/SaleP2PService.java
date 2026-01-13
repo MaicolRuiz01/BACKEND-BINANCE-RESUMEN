@@ -21,5 +21,7 @@ public interface SaleP2PService {
     List<SaleP2P> obtenerVentasPorFecha(LocalDate fecha);
     Double obtenerComisionesPorFecha(LocalDate fecha);
 	String getAllP2PFromBinance(String account, LocalDate from, LocalDate to);
+	List<SaleP2PDto> getTodayNoAsignadas(String account);
+	List<SaleP2PDto> getTodayNoAsignadasAllAccounts();
 
 }

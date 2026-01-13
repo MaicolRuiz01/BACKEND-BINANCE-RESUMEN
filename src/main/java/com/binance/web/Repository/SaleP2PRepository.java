@@ -15,18 +15,49 @@ import com.binance.web.Entity.SaleP2P;
 
 @Repository
 public interface SaleP2PRepository extends JpaRepository<SaleP2P, Integer> {
-	List<SaleP2P> findByBinanceAccount(AccountBinance accountBinance);
-
-	@Query(value = "SELECT * FROM sale_p2p WHERE DATE(date) = DATE(:fecha)", nativeQuery = true)
-	List<SaleP2P> findByDateWithoutTime(@Param("fecha") LocalDate fecha);
-
-	@Query("SELECT s FROM SaleP2P s WHERE DATE(s.date) = :date AND s.binanceAccount.id = :binanceAccountId")
-	List<SaleP2P> findByDateAndBinanceAccount(@Param("date") LocalDate date,
-			@Param("binanceAccountId") Integer binanceAccountId);
-
-	List<SaleP2P> findByDateBetween(LocalDateTime start, LocalDateTime end);
+	
 	boolean existsByNumberOrder(String numberOrder);
 
+    @Query("""
+        SELECT s FROM SaleP2P s
+        WHERE s.date >= :start AND s.date < :end
+    """)
+    List<SaleP2P> findByDateBetween(@Param("start") LocalDateTime start,
+                                   @Param("end") LocalDateTime end);
 
+    @Query("""
+        SELECT s FROM SaleP2P s
+        WHERE s.date >= :start AND s.date < :end
+          AND s.asignado = false
+    """)
+    List<SaleP2P> findNoAsignadasByDateBetween(@Param("start") LocalDateTime start,
+                                              @Param("end") LocalDateTime end);
+
+    // Si tu método actual findByDateAndBinanceAccount ya existe, déjalo.
+    // Si NO existe, usa este:
+    @Query("""
+        SELECT s FROM SaleP2P s
+        WHERE s.binanceAccount.id = :accountId
+          AND s.date >= :start AND s.date < :end
+    """)
+    List<SaleP2P> findByAccountAndDateBetween(@Param("accountId") Integer accountId,
+                                             @Param("start") LocalDateTime start,
+                                             @Param("end") LocalDateTime end);
+
+    @Query("""
+        SELECT s FROM SaleP2P s
+        WHERE s.binanceAccount.id = :accountId
+          AND s.date >= :start AND s.date < :end
+          AND s.asignado = false
+    """)
+    List<SaleP2P> findNoAsignadasByAccountAndDateBetween(@Param("accountId") Integer accountId,
+                                                        @Param("start") LocalDateTime start,
+                                                        @Param("end") LocalDateTime end);
+
+    default List<SaleP2P> findByDay(LocalDate day) {
+        LocalDateTime start = day.atStartOfDay();
+        LocalDateTime end = start.plusDays(1);
+        return findByDateBetween(start, end);
+      }
 
 }

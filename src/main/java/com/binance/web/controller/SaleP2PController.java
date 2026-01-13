@@ -99,5 +99,14 @@ public class SaleP2PController {
 	    return ResponseEntity.ok(json);
 	}
 
+	@GetMapping("/today/no-asignadas")
+	public ResponseEntity<List<SaleP2PDto>> getTodayNoAsignadas(@RequestParam String account) {
+	    return ResponseEntity.ok(saleP2PService.getTodayNoAsignadas(account));
+	}
+
+	@GetMapping("/today/no-asignadas/all-binance")
+	public ResponseEntity<List<SaleP2PDto>> getTodayNoAsignadasAllBinance() {
+	    return ResponseEntity.ok(saleP2PService.getTodayNoAsignadasAllAccounts());
+	}
 
 }

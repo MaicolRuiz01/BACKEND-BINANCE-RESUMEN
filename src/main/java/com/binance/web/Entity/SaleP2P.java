@@ -6,6 +6,7 @@ import java.util.List;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import jakarta.persistence.CascadeType;
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -14,6 +15,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -22,25 +24,38 @@ import lombok.NoArgsConstructor;
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
-@Table(name = "sale_p2p")
+@Table(
+    name = "sale_p2p",
+    uniqueConstraints = {
+        @UniqueConstraint(name = "uk_sale_p2p_number_order", columnNames = "number_order")
+    }
+)
 public class SaleP2P {
-	@Id
-	@GeneratedValue(strategy = GenerationType.IDENTITY)
-	private Integer id;
-	private String numberOrder;
-	private LocalDateTime date;
-	private Double commission;
-	private Double pesosCop;
-	private Double dollarsUs;
-	private Double tasa;
 
-	@OneToMany(mappedBy = "saleP2p", cascade = CascadeType.ALL, orphanRemoval = true)
-	@JsonIgnore
-	private List<SaleP2pAccountCop> accountCopsDetails;
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Integer id;
 
-	@ManyToOne
-	@JoinColumn(name = "binance_account_id")
-	private AccountBinance binanceAccount;
+    @Column(name = "number_order", nullable = false, unique = true, length = 64)
+    private String numberOrder;
 
-	private Double utilidad;
+    private LocalDateTime date;
+    private Double commission;
+    private Double pesosCop;
+    private Double dollarsUs;
+    private Double tasa;
+
+    @OneToMany(mappedBy = "saleP2p", cascade = CascadeType.ALL, orphanRemoval = true)
+    @JsonIgnore
+    private List<SaleP2pAccountCop> accountCopsDetails;
+
+    @ManyToOne
+    @JoinColumn(name = "binance_account_id")
+    private AccountBinance binanceAccount;
+
+    private Double utilidad;
+
+    // ✅ como SellDollars
+    private Boolean asignado = false;
 }
+
