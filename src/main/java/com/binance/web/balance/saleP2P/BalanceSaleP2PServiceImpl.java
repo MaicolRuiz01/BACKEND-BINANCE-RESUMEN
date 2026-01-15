@@ -19,16 +19,14 @@ public class BalanceSaleP2PServiceImpl implements BalanceSaleP2PService{
 
 	
 	public BalanceSaleP2PDto balanceSaleP2PDay(LocalDate fecha) {
-		List<SaleP2P> daySales = generateListSaleP2PDay(fecha);
-		BalanceSaleP2PDto  balanceSaleP2P = createBalanceSaleP2PDto(daySales, fecha);
+	//	List<SaleP2P> daySales = generateListSaleP2PDay(fecha);
+		//BalanceSaleP2PDto  balanceSaleP2P = createBalanceSaleP2PDto(daySales, fecha);
 		
 		
-		return balanceSaleP2P;
+		return null;
 	}
 	
-	private List<SaleP2P> generateListSaleP2PDay(LocalDate fecha) {
-		return p2pRepository.findByDateWithoutTime(fecha);
-	}
+	
 	
 
 	private BalanceSaleP2PDto createBalanceSaleP2PDto(List<SaleP2P> daySales, LocalDate fecha) {
