@@ -88,6 +88,5 @@ public class SupplierController {
     public ResponseEntity<List<BuyDollarsDto>> listarComprasPorProveedor(@PathVariable Integer proveedorId) {
         return ResponseEntity.ok(buyDollarsService.listarComprasPorProveedor(proveedorId));
     }
-
-
+    
 }
