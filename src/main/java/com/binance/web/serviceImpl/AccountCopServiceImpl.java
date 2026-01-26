@@ -7,6 +7,7 @@ import java.util.List;
 import org.springframework.stereotype.Service;
 
 import com.binance.web.Entity.AccountCop;
+import com.binance.web.Entity.BankType;
 import com.binance.web.Entity.SaleP2P;
 import com.binance.web.Entity.SaleP2pAccountCop;
 import com.binance.web.Repository.AccountCopRepository;
@@ -39,29 +40,32 @@ public class AccountCopServiceImpl implements AccountCopService {
 
 	@Override
 	public void saveAccountCop(AccountCop accountCop) {
-	    // Verificar si los campos obligatorios no son nulos o inválidos
 	    if (accountCop.getName() == null || accountCop.getBalance() == null) {
 	        throw new IllegalArgumentException("El nombre de la cuenta y el saldo no pueden ser nulos.");
 	    }
+
+	    
+
 	    accountCop.setSaldoInicialDelDia(accountCop.getBalance());
-	    // Guardar la cuenta en el repositorio
 	    AccountCopRepository.save(accountCop);
 	}
 
 	@Override
 	public void updateAccountCop(Integer id, AccountCop accountCop) {
-	    // Verificar si la cuenta existe
-	    AccountCop existingAccountCop = AccountCopRepository.findById(id).orElse(null);
-	    if (existingAccountCop == null) {
+	    AccountCop existing = AccountCopRepository.findById(id).orElse(null);
+	    if (existing == null) {
 	        throw new IllegalArgumentException("La cuenta con el ID " + id + " no existe.");
 	    }
 
-	    // Actualizar solo los campos modificados
-	    existingAccountCop.setName(accountCop.getName());
-	    existingAccountCop.setBalance(accountCop.getBalance());
+	    existing.setName(accountCop.getName());
+	    existing.setBalance(accountCop.getBalance());
 
-	    // Guardar la cuenta actualizada
-	    AccountCopRepository.save(existingAccountCop);
+	    // 👇 actualizar bankType si viene
+	    if (accountCop.getBankType() != null) {
+	        existing.setBankType(accountCop.getBankType());
+	    }
+
+	    AccountCopRepository.save(existing);
 	}
 
 

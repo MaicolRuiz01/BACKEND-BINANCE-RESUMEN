@@ -12,7 +12,9 @@ import jakarta.persistence.ManyToOne;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
+@JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 @Entity
 @Data
 @AllArgsConstructor
@@ -55,6 +57,7 @@ public class CompraVES {
      */
     @ManyToOne
     @JoinColumn(name = "cliente_id")
+    @JsonIgnoreProperties({"hibernateLazyInitializer","handler"}) 
     private Cliente cliente;
 
     /**
@@ -62,6 +65,7 @@ public class CompraVES {
      */
     @ManyToOne
     @JoinColumn(name = "proveedor_id")
+    @JsonIgnoreProperties({"hibernateLazyInitializer","handler"}) 
     private Supplier supplier;
 
     /**
@@ -70,6 +74,12 @@ public class CompraVES {
      */
     @ManyToOne
     @JoinColumn(name = "cuenta_cop_id")
+    @JsonIgnoreProperties({"hibernateLazyInitializer","handler"}) 
     private AccountCop cuentaCop;
+    @ManyToOne
+    @JoinColumn(name = "cuenta_ves_id")
+    @JsonIgnoreProperties({"hibernateLazyInitializer","handler"}) 
+    private AccountVes cuentaVes;
+
 
 }

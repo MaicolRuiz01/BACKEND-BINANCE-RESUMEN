@@ -7,6 +7,8 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -27,6 +29,10 @@ public class AccountCop {
 	private Integer id;
 	private String name;
 	private Double balance;
+	
+	@Enumerated(EnumType.STRING)
+    @Column(name = "bank_type", nullable = false)
+    private BankType bankType;
 	
 	@OneToMany(mappedBy = "accountCop", cascade = CascadeType.ALL, orphanRemoval = true)
 	@JsonIgnore

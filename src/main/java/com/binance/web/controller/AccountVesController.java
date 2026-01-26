@@ -2,6 +2,7 @@ package com.binance.web.controller;
 
 import java.util.List;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -14,6 +15,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.binance.web.Entity.AccountVes;
+import com.binance.web.Entity.CompraVES;
+import com.binance.web.Entity.VentaVES;
+import com.binance.web.Repository.CompraVesRepository;
+import com.binance.web.Repository.VentaVesRepository;
 import com.binance.web.service.AccountVesService;
 
 @RestController
@@ -21,9 +26,19 @@ import com.binance.web.service.AccountVesService;
 public class AccountVesController {
 
     private final AccountVesService accountVesService;
+    @Autowired
+    private final CompraVesRepository compraVesRepository;
 
-    public AccountVesController(AccountVesService accountVesService) {
+    private final VentaVesRepository ventaVesRepository;
+
+    public AccountVesController(
+            AccountVesService accountVesService,
+            CompraVesRepository compraVesRepository,
+            VentaVesRepository ventaVesRepository
+    ) {
         this.accountVesService = accountVesService;
+        this.compraVesRepository = compraVesRepository;
+        this.ventaVesRepository = ventaVesRepository;
     }
 
     @GetMapping(produces = "application/json")
@@ -61,5 +76,15 @@ public class AccountVesController {
     public ResponseEntity<Void> deleteAccountVes(@PathVariable Integer id) {
         accountVesService.deleteAccountVes(id);
         return ResponseEntity.noContent().build();
+    }
+    
+    @GetMapping("/{id}/compras")
+    public List<CompraVES> comprasPorCuenta(@PathVariable Integer id) {
+      return compraVesRepository.findByCuentaVesIdOrderByDateDesc(id);
+    }
+
+    @GetMapping("/{id}/ventas")
+    public List<VentaVES> ventasPorCuenta(@PathVariable Integer id) {
+      return ventaVesRepository.findByCuentaVesIdOrderByDateDesc(id);
     }
 }

@@ -9,5 +9,5 @@ import com.binance.web.Entity.CompraVES;
 
 public interface CompraVesRepository extends JpaRepository<CompraVES, Long> {
 	List<CompraVES> findByDateBetweenOrderByDateDesc(LocalDateTime start, LocalDateTime end);
-
+	List<CompraVES> findByCuentaVesIdOrderByDateDesc(Integer cuentaVesId);
 }
