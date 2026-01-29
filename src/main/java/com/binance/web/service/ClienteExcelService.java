@@ -1,26 +1,23 @@
 package com.binance.web.service;
-
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import com.binance.web.Entity.Supplier;
-import com.binance.web.Repository.BuyDollarsRepository;
-import com.binance.web.Repository.CompraVesRepository;
-import com.binance.web.Repository.SellDollarsRepository;
-import com.binance.web.Repository.SupplierRepository;
-import com.binance.web.Repository.VentaVesRepository;
-import com.binance.web.movimientos.MovimientoVistaService;
-
 import lombok.RequiredArgsConstructor;
 
+import com.binance.web.Entity.Cliente;
+import com.binance.web.Repository.ClienteRepository;
+import com.binance.web.Repository.BuyDollarsRepository;
+import com.binance.web.Repository.SellDollarsRepository;
+import com.binance.web.Repository.CompraVesRepository;
+import com.binance.web.Repository.VentaVesRepository;
+import com.binance.web.movimientos.MovimientoVistaService;
 
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
-public class ProveedorExcelService {
+public class ClienteExcelService {
 
     private final MovimientoVistaService movimientoVistaService;
-    private final SupplierRepository supplierRepository;
+    private final ClienteRepository clienteRepository;
 
     // USDT
     private final BuyDollarsRepository buyDollarsRepository;
@@ -30,22 +27,22 @@ public class ProveedorExcelService {
     private final CompraVesRepository compraVesRepository;
     private final VentaVesRepository ventaVesRepository;
 
-    public byte[] exportProveedor(Integer proveedorId) throws Exception {
+    public byte[] exportCliente(Integer clienteId) throws Exception {
 
-        Supplier prov = supplierRepository.findById(proveedorId)
-                .orElseThrow(() -> new RuntimeException("Proveedor no encontrado"));
+        Cliente cli = clienteRepository.findById(clienteId)
+                .orElseThrow(() -> new RuntimeException("Cliente no encontrado"));
 
-        var movimientos = movimientoVistaService.vistaPorProveedor(proveedorId);
+        var movimientos = movimientoVistaService.vistaPorCliente(clienteId);
 
         // ===== USDT =====
-        var comprasUsdt = buyDollarsRepository.findBySupplier_IdOrderByDateDesc(proveedorId);
-        var ventasUsdt  = sellDollarsRepository.findBySupplier_IdOrderByDateDesc(proveedorId);
+        var comprasUsdt = buyDollarsRepository.findByCliente_IdOrderByDateDesc(clienteId);
+        var ventasUsdt  = sellDollarsRepository.findByCliente_IdOrderByDateDesc(clienteId);
 
         // ===== VES =====
-        var comprasVes = compraVesRepository.findBySupplier_IdOrderByDateDesc(proveedorId);
-        var ventasVes  = ventaVesRepository.findByProveedor_IdOrderByDateDesc(proveedorId);
+        var comprasVes = compraVesRepository.findByCliente_IdOrderByDateDesc(clienteId);
+        var ventasVes  = ventaVesRepository.findByCliente_IdOrderByDateDesc(clienteId);
 
-        double saldo = prov.getBalance() != null ? prov.getBalance() : 0.0;
+        double saldo = cli.getSaldo() != null ? cli.getSaldo() : 0.0;
         String estado = saldo > 0 ? "LE DEBEMOS" : (saldo < 0 ? "NOS DEBE" : "EN PAZ");
 
         try (var wb = new org.apache.poi.xssf.usermodel.XSSFWorkbook()) {
@@ -55,8 +52,8 @@ public class ProveedorExcelService {
             int r = 0;
 
             var a = sh0.createRow(r++);
-            a.createCell(0).setCellValue("Proveedor");
-            a.createCell(1).setCellValue(prov.getName());
+            a.createCell(0).setCellValue("Cliente");
+            a.createCell(1).setCellValue(cli.getNombre());
 
             var b = sh0.createRow(r++);
             b.createCell(0).setCellValue("Saldo/Deuda (COP)");
@@ -95,6 +92,7 @@ public class ProveedorExcelService {
             // ================= COMPRAS USDT =================
             var sh2 = wb.createSheet("Compras USDT");
             int j = 0;
+
             var h2 = sh2.createRow(j++);
             h2.createCell(0).setCellValue("Fecha");
             h2.createCell(1).setCellValue("USDT");
@@ -117,6 +115,7 @@ public class ProveedorExcelService {
             // ================= VENTAS USDT =================
             var sh3 = wb.createSheet("Ventas USDT");
             int k = 0;
+
             var h3 = sh3.createRow(k++);
             h3.createCell(0).setCellValue("Fecha");
             h3.createCell(1).setCellValue("USDT");
@@ -139,6 +138,7 @@ public class ProveedorExcelService {
             // ================= COMPRAS VES =================
             var sh4 = wb.createSheet("Compras VES");
             int x = 0;
+
             var h4 = sh4.createRow(x++);
             h4.createCell(0).setCellValue("Fecha");
             h4.createCell(1).setCellValue("Bolívares (VES)");
@@ -161,6 +161,7 @@ public class ProveedorExcelService {
             // ================= VENTAS VES =================
             var sh5 = wb.createSheet("Ventas VES");
             int y = 0;
+
             var h5 = sh5.createRow(y++);
             h5.createCell(0).setCellValue("Fecha");
             h5.createCell(1).setCellValue("Bolívares (VES)");

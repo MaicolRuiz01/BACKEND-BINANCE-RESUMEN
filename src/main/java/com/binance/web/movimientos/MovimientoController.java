@@ -27,6 +27,7 @@ import com.binance.web.model.PagoClienteAClienteDto;
 import com.binance.web.model.PagoClienteAProveedorDto;
 import com.binance.web.model.PagoProveedorAClienteDto;
 import com.binance.web.model.ResumenDiarioDTO;
+import com.binance.web.service.ClienteExcelService;
 import com.binance.web.service.ProveedorExcelService;
 
 
@@ -41,6 +42,8 @@ public class MovimientoController {
 	private MovimientoVistaService vistaService;
 	@Autowired
 	private ProveedorExcelService proveedorExcelService;
+	@Autowired
+	private ClienteExcelService clienteExcelService;
 
 	@PostMapping("/deposito")
 	public Movimiento deposito(@RequestParam Integer cuentaId, @RequestParam Integer cajaId,
@@ -316,6 +319,19 @@ public class MovimientoController {
     		        .header("Content-Disposition", "attachment; filename=\"" + filename + "\"")
     		        .body(file);
     		}
+    		
+    		@GetMapping(
+    				  value = "/excel/cliente/{clienteId}",
+    				  produces = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    				)
+    				public ResponseEntity<byte[]> excelCliente(@PathVariable Integer clienteId) throws Exception {
+    				    byte[] file = clienteExcelService.exportCliente(clienteId);
+
+    				    String filename = "cliente_" + clienteId + "_movimientos.xlsx";
+    				    return ResponseEntity.ok()
+    				        .header("Content-Disposition", "attachment; filename=\"" + filename + "\"")
+    				        .body(file);
+    				}
 
 
 }
