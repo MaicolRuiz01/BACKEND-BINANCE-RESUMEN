@@ -1,6 +1,8 @@
 package com.binance.web.BinanceAPI;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,6 +19,7 @@ import com.binance.web.Repository.EfectivoRepository;
 import com.binance.web.Repository.SupplierRepository;
 import com.binance.web.service.AccountBinanceService;
 import com.binance.web.service.CryptoAverageRateService;
+import com.binance.web.util.CupoDiarioRules;
 
 import jakarta.transaction.Transactional;
 
@@ -57,8 +60,18 @@ public class BalanceSnapshotService {
 
         // 🏦 CUENTAS COP
         List<AccountCop> cuentas = accountCopRepo.findAll();
+        LocalDate hoy = LocalDate.now(ZoneId.of("America/Bogota"));
+
         for (AccountCop acc : cuentas) {
             acc.setSaldoInicialDelDia(acc.getBalance());
+
+            // ✅ cupo max según banco (TU clase)
+            double cupoMax = CupoDiarioRules.maxPorBanco(acc.getBankType());
+            acc.setCupoDiarioMax(cupoMax);
+
+            // ✅ reset diario
+            acc.setCupoFecha(hoy);
+            acc.setCupoDisponibleHoy(cupoMax);
         }
         accountCopRepo.saveAll(cuentas);
 

@@ -1,5 +1,6 @@
 package com.binance.web.Entity;
 
+import java.time.LocalDate;
 import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -43,4 +44,13 @@ public class AccountCop {
     private List<SellDollarsAccountCop> sellDollars;
 	@Column(name = "saldo_inicial_del_dia")
     private Double saldoInicialDelDia;
+	@JsonIgnore
+	@Column(name = "cupo_diario_max")
+    private Double cupoDiarioMax;
+
+    @Column(name = "cupo_disponible_hoy")
+    private Double cupoDisponibleHoy;
+
+    @Column(name = "cupo_fecha")
+    private LocalDate cupoFecha;
 }

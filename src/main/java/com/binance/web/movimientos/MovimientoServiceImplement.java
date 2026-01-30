@@ -1,6 +1,8 @@
 package com.binance.web.movimientos;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -21,6 +23,7 @@ import com.binance.web.model.PagoClienteAClienteDto;
 import com.binance.web.model.PagoClienteAProveedorDto;
 import com.binance.web.model.PagoProveedorAClienteDto;
 import com.binance.web.movimientos.MovimientoDTO;
+import com.binance.web.util.CupoDiarioRules;
 
 import jakarta.transaction.Transactional;
 
@@ -38,6 +41,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 	private ClienteRepository clienteRepository;
 	@Autowired
 	private SupplierRepository supplierRepository;
+	private static final ZoneId ZONE_BOGOTA = ZoneId.of("America/Bogota");
 
 	@Override
 	public Movimiento RegistrarTransferencia(Integer idCuentoFrom, Integer idCuentaTo, Double monto) {
@@ -62,27 +66,83 @@ public class MovimientoServiceImplement implements MovimientoService {
 
 		return movimientoRepository.save(mov);
 	}
+	
+	private void asegurarCupoHoy(AccountCop acc) {
+	    if (acc.getBankType() == null) {
+	        throw new IllegalStateException("La cuenta COP no tiene bankType");
+	    }
+
+	    LocalDate hoy = LocalDate.now(ZONE_BOGOTA);
+
+	    // 1) cupo máximo según banco (tu clase)
+	    double cupoMax = CupoDiarioRules.maxPorBanco(acc.getBankType());
+	    acc.setCupoDiarioMax(cupoMax);
+
+	    // 2) si es nuevo día o nunca se inicializó, reset
+	    if (acc.getCupoFecha() == null || !hoy.equals(acc.getCupoFecha()) || acc.getCupoDisponibleHoy() == null) {
+	        acc.setCupoFecha(hoy);
+	        acc.setCupoDisponibleHoy(cupoMax);
+	    }
+	}
 
 	@Override
+	@Transactional
 	public Movimiento RegistrarRetiro(Integer cuentaId, Integer cajaId, Double monto) {
-		AccountCop cuentaOrigen = accountCopRepository.findById(cuentaId).orElseThrow();
-		Efectivo caja = efectivoRepository.findById(cajaId).orElseThrow();
 
-		double comision = monto * 0.004;
-		double montoConComision = monto + comision;
+	    if (monto == null || monto <= 0) {
+	        throw new IllegalArgumentException("Monto debe ser > 0");
+	    }
 
-		Movimiento mov = Movimiento.builder().tipo("RETIRO").fecha(LocalDateTime.now()).monto(monto)
-				.cuentaOrigen(cuentaOrigen).caja(caja).comision(comision) // ✅ era un bug: antes guardabas
-																			// montoConComision
-				.build();
+	    // 🔒 lock para que retiros simultáneos no se “salten” el cupo
+	    AccountCop cuentaOrigen = accountCopRepository.findByIdForUpdate(cuentaId)
+	            .orElseThrow(() -> new RuntimeException("Cuenta de Origen no encontrada"));
 
-		cuentaOrigen.setBalance(cuentaOrigen.getBalance() - montoConComision);
-		caja.setSaldo(caja.getSaldo() + monto);
-		accountCopRepository.save(cuentaOrigen);
-		efectivoRepository.save(caja);
+	    Efectivo caja = efectivoRepository.findById(cajaId)
+	            .orElseThrow(() -> new RuntimeException("Caja no encontrada"));
 
-		return movimientoRepository.save(mov);
+	    // ✅ inicializar/resetear cupo diario (USANDO TU CLASE)
+	    asegurarCupoHoy(cuentaOrigen);
+
+	    double disponible = cuentaOrigen.getCupoDisponibleHoy() != null ? cuentaOrigen.getCupoDisponibleHoy() : 0.0;
+
+	    // ✅ validar cupo (se descuenta por MONTO, no por comisión)
+	    if (monto > disponible) {
+	        throw new IllegalArgumentException("Cupo diario insuficiente. Disponible: " + disponible + " requerido: " + monto);
+	    }
+
+	    // ✅ comisión 4x1000
+	    double comision = monto * 0.004;
+	    double montoConComision = monto + comision;
+
+	    double saldoCuenta = cuentaOrigen.getBalance() != null ? cuentaOrigen.getBalance() : 0.0;
+	    if (montoConComision > saldoCuenta) {
+	        throw new IllegalArgumentException("Saldo insuficiente. Disponible: " + saldoCuenta + " requerido: " + montoConComision);
+	    }
+
+	    // ✅ descontar cupo
+	    cuentaOrigen.setCupoDisponibleHoy(round2(disponible - monto));
+
+	    Movimiento mov = Movimiento.builder()
+	            .tipo("RETIRO")
+	            .fecha(LocalDateTime.now())
+	            .monto(monto)
+	            .cuentaOrigen(cuentaOrigen)
+	            .caja(caja)
+	            .comision(comision)
+	            .build();
+
+	    // ✅ actualizar saldos
+	    cuentaOrigen.setBalance(round2(saldoCuenta - montoConComision));
+
+	    double saldoCaja = caja.getSaldo() != null ? caja.getSaldo() : 0.0;
+	    caja.setSaldo(round2(saldoCaja + monto));
+
+	    accountCopRepository.save(cuentaOrigen);
+	    efectivoRepository.save(caja);
+
+	    return movimientoRepository.save(mov);
 	}
+
 
 	@Override
 	public Movimiento RegistrarDeposito(Integer cuentaId, Integer cajaId, Double monto) {

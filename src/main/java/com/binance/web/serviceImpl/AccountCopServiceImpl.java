@@ -1,5 +1,7 @@
 package com.binance.web.serviceImpl;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -13,12 +15,14 @@ import com.binance.web.Entity.SaleP2pAccountCop;
 import com.binance.web.Repository.AccountCopRepository;
 import com.binance.web.Repository.SaleP2PRepository;
 import com.binance.web.service.AccountCopService;
+import com.binance.web.util.CupoDiarioRules;
 
 @Service
 public class AccountCopServiceImpl implements AccountCopService {
 
 	private final AccountCopRepository AccountCopRepository;
-	private final SaleP2PRepository saleP2PRepository; 
+	private final SaleP2PRepository saleP2PRepository;
+	private static final ZoneId ZONE_BOGOTA = ZoneId.of("America/Bogota");
 
 	public AccountCopServiceImpl(AccountCopRepository AccountCopRepository, SaleP2PRepository saleP2PRepository) {
 	    this.AccountCopRepository = AccountCopRepository;
@@ -39,16 +43,25 @@ public class AccountCopServiceImpl implements AccountCopService {
 
 
 	@Override
-	public void saveAccountCop(AccountCop accountCop) {
-	    if (accountCop.getName() == null || accountCop.getBalance() == null) {
-	        throw new IllegalArgumentException("El nombre de la cuenta y el saldo no pueden ser nulos.");
-	    }
+    public void saveAccountCop(AccountCop accountCop) {
+        if (accountCop.getName() == null || accountCop.getBalance() == null) {
+            throw new IllegalArgumentException("El nombre de la cuenta y el saldo no pueden ser nulos.");
+        }
+        if (accountCop.getBankType() == null) {
+            throw new IllegalArgumentException("bankType es obligatorio.");
+        }
 
-	    
+        // ✅ saldo inicial del día
+        accountCop.setSaldoInicialDelDia(accountCop.getBalance());
 
-	    accountCop.setSaldoInicialDelDia(accountCop.getBalance());
-	    AccountCopRepository.save(accountCop);
-	}
+        // ✅ inicializar cupos al crear
+        double max = CupoDiarioRules.maxPorBanco(accountCop.getBankType());
+        accountCop.setCupoDiarioMax(max);
+        accountCop.setCupoDisponibleHoy(max);
+        accountCop.setCupoFecha(LocalDate.now(ZONE_BOGOTA));
+
+        AccountCopRepository.save(accountCop);
+    }
 
 	@Override
 	public void updateAccountCop(Integer id, AccountCop accountCop) {
