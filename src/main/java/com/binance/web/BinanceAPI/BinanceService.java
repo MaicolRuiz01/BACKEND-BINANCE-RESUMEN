@@ -143,27 +143,46 @@ public class BinanceService {
 	}
 
 	private String sendBinanceRequestWithProxy(String url, String apiKey) throws Exception {
-		HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
-		connection.setRequestMethod("GET");
+	    HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
+	    connection.setRequestMethod("GET");
 
-		if (apiKey != null) {
-			connection.setRequestProperty("X-MBX-APIKEY", apiKey);
-		}
+	    if (apiKey != null) {
+	        connection.setRequestProperty("X-MBX-APIKEY", apiKey);
+	    }
 
-		int responseCode = connection.getResponseCode();
-		if (responseCode != 200) {
-			throw new RuntimeException("Error HTTP: " + responseCode);
-		}
+	    int responseCode = connection.getResponseCode();
 
-		try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()))) {
-			StringBuilder response = new StringBuilder();
-			String line;
-			while ((line = reader.readLine()) != null) {
-				response.append(line);
-			}
-			return response.toString();
-		}
+	    // ✅ Si es Futures y falla por permisos, NO rompemos: devolvemos vacío
+	    boolean isFutures = url.contains("fapi.binance.com");
+	    if (isFutures && (responseCode == 401 || responseCode == 403)) {
+	        System.out.println("⚠️ Futures sin permiso (" + responseCode + ") para URL: " + url);
+	        return "[]"; // o "{}" según lo que esperes parsear
+	    }
+
+	    // (Opcional) Si quieres también tolerar 429/418 en futures:
+	    // if (isFutures && (responseCode == 429 || responseCode == 418)) return "[]";
+
+	    if (responseCode != 200) {
+	        // lee body de error para más info (muy útil)
+	        String errBody = "";
+	        try (BufferedReader r = new BufferedReader(new InputStreamReader(connection.getErrorStream()))) {
+	            String line;
+	            StringBuilder sb = new StringBuilder();
+	            while ((line = r.readLine()) != null) sb.append(line);
+	            errBody = sb.toString();
+	        } catch (Exception ignore) {}
+
+	        throw new RuntimeException("Error HTTP: " + responseCode + " Body: " + errBody);
+	    }
+
+	    try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()))) {
+	        StringBuilder response = new StringBuilder();
+	        String line;
+	        while ((line = reader.readLine()) != null) response.append(line);
+	        return response.toString();
+	    }
 	}
+
 
 	private String[] getApiCredentials(String accountName) {
 		AccountBinance account = accountRepo.findByName(accountName);
@@ -560,6 +579,7 @@ public class BinanceService {
 				}
 			} catch (Exception ex) {
 				System.out.println("⚠️ Error Futures: " + ex.getMessage());
+				ex.printStackTrace(); 
 			}
 
 			// 🔸 Funding Wallet
