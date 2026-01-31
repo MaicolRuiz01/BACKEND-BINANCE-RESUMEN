@@ -72,6 +72,8 @@ public class AccountCopServiceImpl implements AccountCopService {
 
 	    existing.setName(accountCop.getName());
 	    existing.setBalance(accountCop.getBalance());
+	    existing.setNumeroCuenta(accountCop.getNumeroCuenta());
+	    existing.setCedula(accountCop.getCedula());
 
 	    // 👇 actualizar bankType si viene
 	    if (accountCop.getBankType() != null) {

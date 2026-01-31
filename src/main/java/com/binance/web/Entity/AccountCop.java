@@ -53,4 +53,10 @@ public class AccountCop {
 
     @Column(name = "cupo_fecha")
     private LocalDate cupoFecha;
+    
+    @Column(name = "numero_cuenta")
+    private String numeroCuenta;
+
+    @Column(name = "cedula")
+    private String cedula;
 }
