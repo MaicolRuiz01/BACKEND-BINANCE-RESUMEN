@@ -100,6 +100,11 @@ public class BuyDollarsController {
     public ResponseEntity<List<BuyDollarsDto>> getNoAsignadasHoy() {
         return ResponseEntity.ok(buyDollarsService.getComprasNoAsignadasHoy());
     }
+    @GetMapping("/no-asignadas")
+    public ResponseEntity<List<BuyDollarsDto>> getNoAsignadas(){
+    	return ResponseEntity.ok(buyDollarsService.getComprasNoAsignadas());
+    }
+    
 
     @PutMapping("/asignar/{id}")
     public ResponseEntity<?> asignarCompra(

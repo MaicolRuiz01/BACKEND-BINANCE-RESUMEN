@@ -355,5 +355,24 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 	            .findByAsignadaFalseAndDateBetween(start, end);
 	}
 
+	@Override
+	public List<BuyDollarsDto> getComprasNoAsignadas() {
+	    List<BuyDollars> compras = buyDollarsRepository.findByAsignadaFalseOrderByDateDesc();
+
+	    return compras.stream().map(buy -> {
+	        BuyDollarsDto dto = new BuyDollarsDto();
+	        dto.setId(buy.getId());
+	        dto.setAmount(buy.getAmount());
+	        dto.setCryptoSymbol(buy.getCryptoSymbol());
+	        dto.setTasa(buy.getTasa());
+	        dto.setNameAccount(buy.getNameAccount());
+	        dto.setDate(buy.getDate());
+	        dto.setIdDeposit(buy.getIdDeposit());
+	        dto.setPesos(buy.getPesos());
+	        dto.setAccountBinanceId(buy.getAccountBinance().getId());
+	        dto.setAsignada(buy.getAsignada());
+	        return dto;
+	    }).collect(Collectors.toList());
+	}
 
 }
