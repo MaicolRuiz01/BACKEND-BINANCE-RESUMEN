@@ -338,8 +338,6 @@ public class SaleP2PServiceImpl implements SaleP2PService {
 	@Override
 	public List<SaleP2PDto> getTodayNoAsignadasAllAccounts() {
 	    LocalDate today = LocalDate.now(ZoneId.of("America/Bogota"));
-	    LocalDateTime start = today.atStartOfDay();
-	    LocalDateTime end = start.plusDays(1);
 
 	    List<SaleP2PDto> out = new ArrayList<>();
 
@@ -348,15 +346,18 @@ public class SaleP2PServiceImpl implements SaleP2PService {
 	            .collect(Collectors.toList());
 
 	    for (AccountBinance acc : binanceAccounts) {
-	        // importa + guarda
+	        // ✅ puedes seguir importando las de HOY (opcional)
 	        createSaleP2pDirectly(acc.getName(), today);
 
-	        // trae no asignadas
-	        List<SaleP2P> sales = saleP2PRepository.findNoAsignadasByAccountAndDateBetween(acc.getId(), start, end);
+	        // ✅ trae NO asignadas SIN filtro de fecha
+	        List<SaleP2P> sales = saleP2PRepository.findByBinanceAccount_IdAndAsignadoFalse(acc.getId());
+
 	        out.addAll(sales.stream().map(this::convertToDto).collect(Collectors.toList()));
 	    }
+
 	    return out;
 	}
+
 
 
 

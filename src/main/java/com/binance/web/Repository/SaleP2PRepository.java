@@ -59,5 +59,6 @@ public interface SaleP2PRepository extends JpaRepository<SaleP2P, Integer> {
         LocalDateTime end = start.plusDays(1);
         return findByDateBetween(start, end);
       }
+    List<SaleP2P> findByBinanceAccount_IdAndAsignadoFalse(Integer accountId);
 
 }
