@@ -60,5 +60,16 @@ public interface SaleP2PRepository extends JpaRepository<SaleP2P, Integer> {
         return findByDateBetween(start, end);
       }
     List<SaleP2P> findByBinanceAccount_IdAndAsignadoFalse(Integer accountId);
+    List<SaleP2P> findByAsignadoFalse();
+    @Query("SELECT s FROM SaleP2P s WHERE COALESCE(s.asignado, false) = false")
+    List<SaleP2P> findByAsignadoFalseGeneral();
 
+    @Query("SELECT s FROM SaleP2P s WHERE s.binanceAccount.id = :accountId AND COALESCE(s.asignado, false) = false")
+    List<SaleP2P> findByBinanceAccount_IdAndAsignadoFalseGeneral(@Param("accountId") Integer accountId);
+    
+    @Query("SELECT s FROM SaleP2P s WHERE s.binanceAccount.id = :accountId AND COALESCE(s.asignado, false) = false")
+    List<SaleP2P> findNoAsignadasGeneralByAccount(@Param("accountId") Integer accountId);
+
+    @Query("SELECT s FROM SaleP2P s WHERE COALESCE(s.asignado, false) = false")
+    List<SaleP2P> findNoAsignadasGeneralAll();
 }
