@@ -23,5 +23,6 @@ public interface SaleP2PService {
 	String getAllP2PFromBinance(String account, LocalDate from, LocalDate to);
 	List<SaleP2PDto> getTodayNoAsignadas(String account);
 	List<SaleP2PDto> getTodayNoAsignadasAllAccounts();
+	String fixDuplicateAssignmentsAuto(Integer saleP2pId);
 
 }

@@ -106,7 +106,11 @@ public class SaleP2PController {
 
 	@GetMapping("/today/no-asignadas/all-binance")
 	public ResponseEntity<List<SaleP2PDto>> getTodayNoAsignadasAllBinance() {
+		//metodo auxiliar por si hay una asignacion doble
+		//saleP2PService.fixDuplicateAssignmentsAuto(70);
+
 	    return ResponseEntity.ok(saleP2PService.getTodayNoAsignadasAllAccounts());
 	}
-
+	
+	
 }

@@ -107,5 +107,18 @@ public class AccountCopServiceImpl implements AccountCopService {
 	    return sales;
 	}
 
-	
+	@Override
+	public void saveAccountCopSafe(AccountCop accountCop) {
+	    AccountCop existing = AccountCopRepository.findById(accountCop.getId()).orElse(null);
+	    if (existing == null) {
+	        throw new RuntimeException("No existe AccountCop id " + accountCop.getId());
+	    }
+
+	    // ✅ SOLO actualiza campos que cambian en movimientos
+	    existing.setBalance(accountCop.getBalance());
+	    existing.setCupoDisponibleHoy(accountCop.getCupoDisponibleHoy());
+
+	    AccountCopRepository.save(existing);
+	}
+
 }

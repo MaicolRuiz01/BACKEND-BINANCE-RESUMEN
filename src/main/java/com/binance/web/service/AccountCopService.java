@@ -12,5 +12,6 @@ public interface AccountCopService {
     void updateAccountCop(Integer id, AccountCop AccountCop);
     void deleteAccountCop(Integer id);
     List<SaleP2P> getSalesByAccountCopId(Integer accountCopId);
+	void saveAccountCopSafe(AccountCop accountCop);
 
 }

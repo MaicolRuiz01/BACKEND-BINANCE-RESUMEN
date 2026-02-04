@@ -5,11 +5,15 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.binance.web.BinanceAPI.BinanceService;
 import com.binance.web.Entity.AccountBinance;
@@ -22,6 +26,7 @@ import com.binance.web.OrderP2P.OrderP2PService;
 import com.binance.web.Repository.AccountBinanceRepository;
 
 import com.binance.web.Repository.SaleP2PRepository;
+import com.binance.web.Repository.SaleP2pAccountCopRepository;
 import com.binance.web.model.AssignAccountDto;
 import com.binance.web.model.SaleP2PDto;
 import com.binance.web.service.AccountBinanceService;
@@ -52,6 +57,8 @@ public class SaleP2PServiceImpl implements SaleP2PService {
 
 	@Autowired
 	private AccountBinanceService accountBinanceService;
+	@Autowired
+	private SaleP2pAccountCopRepository saleP2pAccountCopRepository;
 
 
     
@@ -434,7 +441,7 @@ public class SaleP2PServiceImpl implements SaleP2PService {
 
 	    // ✅ Importa últimos 7 días (ajusta si quieres más)
 	    LocalDate to = LocalDate.now(zone);
-	    LocalDate from = to.minusDays(2);
+	    LocalDate from = to.minusDays(1);
 
 	    List<SaleP2PDto> out = new ArrayList<>();
 
@@ -454,9 +461,72 @@ public class SaleP2PServiceImpl implements SaleP2PService {
 
 	    return out;
 	}
+	
+	@Override
+	@Transactional
+	public String fixDuplicateAssignmentsAuto(Integer saleP2pId) {
 
+	    // 1) Traer todos los detalles de esa venta
+	    List<SaleP2pAccountCop> details = saleP2pAccountCopRepository.findBySaleP2p_Id(saleP2pId);
 
+	    if (details == null || details.size() <= 1) {
+	        return "OK: La venta " + saleP2pId + " no tiene duplicados.";
+	    }
 
+	    // 2) Agrupar por "misma cuenta + mismo monto"
+	    // clave: si hay accountCop -> ID, si no -> nameAccount
+	    Map<String, List<SaleP2pAccountCop>> grouped = new HashMap<>();
 
+	    for (SaleP2pAccountCop d : details) {
+	        String accKey = (d.getAccountCop() != null)
+	                ? "ID:" + d.getAccountCop().getId()
+	                : "NAME:" + (d.getNameAccount() == null ? "" : d.getNameAccount().trim().toUpperCase());
 
+	        double amount = d.getAmount() != null ? d.getAmount() : 0.0;
+
+	        String key = accKey + "|AMT:" + amount;
+	        grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(d);
+	    }
+
+	    int removed = 0;
+
+	    // 3) Para cada grupo duplicado, dejamos 1 y borramos el resto
+	    for (List<SaleP2pAccountCop> list : grouped.values()) {
+	        if (list.size() <= 1) continue;
+
+	        // deja el menor id como "bueno" y borra los demás
+	        list.sort(Comparator.comparing(SaleP2pAccountCop::getId));
+
+	        for (int i = 1; i < list.size(); i++) {
+	            SaleP2pAccountCop dup = list.get(i);
+
+	            // 3.1) Revertir balance/cupo SOLO para ese duplicado
+	            if (dup.getAccountCop() != null) {
+	                AccountCop acc = accountCopService.findByIdAccountCop(dup.getAccountCop().getId());
+	                if (acc != null) {
+	                    double amt = dup.getAmount() != null ? dup.getAmount() : 0.0;
+
+	                    if (acc.getBalance() == null) acc.setBalance(0.0);
+	                    acc.setBalance(acc.getBalance() - amt);
+
+	                    if (acc.getCupoDisponibleHoy() == null) acc.setCupoDisponibleHoy(0.0);
+	                    acc.setCupoDisponibleHoy(acc.getCupoDisponibleHoy() + amt);
+
+	                    accountCopService.saveAccountCopSafe(acc);
+	                }
+	            }
+
+	            // 3.2) Borrar el duplicado
+	            saleP2pAccountCopRepository.deleteById(dup.getId());
+	            removed++;
+	        }
+	    }
+
+	    if (removed == 0) {
+	        return "OK: No se detectaron duplicados exactos en la venta " + saleP2pId + ".";
+	    }
+
+	    return "✅ Arreglado: se eliminaron " + removed + " asignación(es) duplicada(s) y se revirtió balance/cupo.";
+	}
+	
 }
