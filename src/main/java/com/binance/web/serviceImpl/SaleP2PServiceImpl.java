@@ -239,7 +239,7 @@ public class SaleP2PServiceImpl implements SaleP2PService {
 
 
     @Transactional
-    private SaleP2P assignAccountCop(List<AssignAccountDto> accounts, SaleP2P sale) {
+    public SaleP2P assignAccountCop(List<AssignAccountDto> accounts, SaleP2P sale) {
 
         // 1) REVERSAR asignaciones anteriores (si existían)
         if (sale.getAccountCopsDetails() != null && !sale.getAccountCopsDetails().isEmpty()) {
