@@ -439,9 +439,10 @@ public class SaleP2PServiceImpl implements SaleP2PService {
 	public List<SaleP2PDto> getTodayNoAsignadasAllAccounts() {
 	    ZoneId zone = ZoneId.of("America/Bogota");
 
-	    // ✅ Importa últimos 7 días (ajusta si quieres más)
-	    LocalDate to = LocalDate.now(zone);
-	    LocalDate from = to.minusDays(1);
+	    // ✅ SOLO HOY
+	    LocalDate today = LocalDate.now(zone);
+	    LocalDate from = today;
+	    LocalDate to   = today;
 
 	    List<SaleP2PDto> out = new ArrayList<>();
 
@@ -450,10 +451,10 @@ public class SaleP2PServiceImpl implements SaleP2PService {
 	            .collect(Collectors.toList());
 
 	    for (AccountBinance acc : binanceAccounts) {
-	        // 1) Importa rango (no solo hoy)
+	        // 1) Importa SOLO HOY
 	        importSalesP2PRange(acc.getName(), from, to);
 
-	        // 2) Consulta NO asignadas (incluye NULL como false)
+	        // 2) Devuelve NO asignadas de esa cuenta (sin filtrar por fecha)
 	        List<SaleP2P> sales = saleP2PRepository.findNoAsignadasGeneralByAccount(acc.getId());
 
 	        out.addAll(sales.stream().map(this::convertToDto).collect(Collectors.toList()));
@@ -461,6 +462,7 @@ public class SaleP2PServiceImpl implements SaleP2PService {
 
 	    return out;
 	}
+
 	
 	@Override
 	@Transactional
