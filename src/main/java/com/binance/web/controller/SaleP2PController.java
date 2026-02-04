@@ -16,6 +16,7 @@ import com.binance.web.model.SaleP2PDto;
 import com.binance.web.service.SaleP2PService;
 import java.time.LocalDate;
 import org.springframework.format.annotation.DateTimeFormat;
+
 @RestController
 @RequestMapping("/saleP2P")
 public class SaleP2PController {
@@ -36,13 +37,12 @@ public class SaleP2PController {
 		List<SaleP2PDto> sales = saleP2PService.getLastSaleP2pToday(account);
 		return ResponseEntity.ok(sales);
 	}
-	
+
 	@GetMapping("/all")
 	public ResponseEntity<List<SaleP2PDto>> getAllP2P() {
-    List<SaleP2PDto> sales = saleP2PService.findAllSaleP2P();
-    return ResponseEntity.ok(sales);
+		List<SaleP2PDto> sales = saleP2PService.findAllSaleP2P();
+		return ResponseEntity.ok(sales);
 	}
-
 
 	@GetMapping("/{id}")
 	public ResponseEntity<SaleP2P> getSaleById(@PathVariable Integer id) {
@@ -77,8 +77,7 @@ public class SaleP2PController {
 	public ResponseEntity<List<SaleP2PDto>> getAllSalesTodayAllBinanceAccounts() {
 		List<SaleP2PDto> result = new ArrayList<>();
 		List<AccountBinance> binanceAccounts = accountBinanceRepository.findAll().stream()
-				.filter(acc -> "BINANCE".equalsIgnoreCase(acc.getTipo()))
-				.collect(Collectors.toList());
+				.filter(acc -> "BINANCE".equalsIgnoreCase(acc.getTipo())).collect(Collectors.toList());
 
 		for (AccountBinance account : binanceAccounts) {
 			result.addAll(saleP2PService.getLastSaleP2pToday(account.getName()));
@@ -86,31 +85,26 @@ public class SaleP2PController {
 
 		return ResponseEntity.ok(result);
 	}
-	
-
 
 	@GetMapping("/binance/range")
-	public ResponseEntity<String> getP2PFromBinanceRange(
-	        @RequestParam String account,
-	        @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
-	        @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
-	) {
-	    String json = saleP2PService.getAllP2PFromBinance(account, from, to);
-	    return ResponseEntity.ok(json);
+	public ResponseEntity<String> getP2PFromBinanceRange(@RequestParam String account,
+			@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+			@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+		String json = saleP2PService.getAllP2PFromBinance(account, from, to);
+		return ResponseEntity.ok(json);
 	}
 
 	@GetMapping("/today/no-asignadas")
 	public ResponseEntity<List<SaleP2PDto>> getTodayNoAsignadas(@RequestParam String account) {
-	    return ResponseEntity.ok(saleP2PService.getTodayNoAsignadas(account));
+		return ResponseEntity.ok(saleP2PService.getTodayNoAsignadas(account));
 	}
 
 	@GetMapping("/today/no-asignadas/all-binance")
 	public ResponseEntity<List<SaleP2PDto>> getTodayNoAsignadasAllBinance() {
-		//metodo auxiliar por si hay una asignacion doble
-		//saleP2PService.fixDuplicateAssignmentsAuto(70);
+		// metodo auxiliar por si hay una asignacion doble
+		// saleP2PService.fixDuplicateAssignmentsAuto(70);
 
-	    return ResponseEntity.ok(saleP2PService.getTodayNoAsignadasAllAccounts());
+		return ResponseEntity.ok(saleP2PService.getTodayNoAsignadasAllAccounts());
 	}
-	
-	
+
 }

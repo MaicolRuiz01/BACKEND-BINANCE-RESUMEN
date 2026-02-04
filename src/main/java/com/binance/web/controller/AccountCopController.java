@@ -66,4 +66,10 @@ public class AccountCopController {
         List<SaleP2P> sales = AccountCopService.getSalesByAccountCopId(id);
         return ResponseEntity.ok(sales);
     }
+	
+	@PostMapping("/accountCop/{id}/reconcile")
+	public ResponseEntity<String> reconcile(@PathVariable Integer id){
+	    return ResponseEntity.ok(AccountCopService.reconcileAccountCop(id));
+	}
+
 }

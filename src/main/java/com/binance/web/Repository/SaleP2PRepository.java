@@ -3,8 +3,10 @@ package com.binance.web.Repository;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -12,6 +14,8 @@ import org.springframework.stereotype.Repository;
 import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.AccountCop;
 import com.binance.web.Entity.SaleP2P;
+
+import jakarta.persistence.LockModeType;
 
 @Repository
 public interface SaleP2PRepository extends JpaRepository<SaleP2P, Integer> {
@@ -72,4 +76,8 @@ public interface SaleP2PRepository extends JpaRepository<SaleP2P, Integer> {
 
     @Query("SELECT s FROM SaleP2P s WHERE COALESCE(s.asignado, false) = false")
     List<SaleP2P> findNoAsignadasGeneralAll();
+    
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT s FROM SaleP2P s WHERE s.id = :id")
+    Optional<SaleP2P> findByIdForUpdate(@Param("id") Integer id);
 }

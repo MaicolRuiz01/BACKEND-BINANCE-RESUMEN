@@ -13,5 +13,6 @@ public interface AccountCopService {
     void deleteAccountCop(Integer id);
     List<SaleP2P> getSalesByAccountCopId(Integer accountCopId);
 	void saveAccountCopSafe(AccountCop accountCop);
+	String reconcileAccountCop(Integer accId);
 
 }

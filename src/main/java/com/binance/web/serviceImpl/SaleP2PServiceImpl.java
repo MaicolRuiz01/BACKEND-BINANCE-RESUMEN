@@ -211,8 +211,15 @@ public class SaleP2PServiceImpl implements SaleP2PService {
     @Override
     public String processAssignAccountCop(Integer saleId, List<AssignAccountDto> accounts) {
         SaleP2P sale = saleP2PRepository.findById(saleId).orElse(null);
-        if (sale == null)
+
+        if (sale == null) {
             return "No se realizo la asignacion de cuenta, No se encontro la venta con id " + saleId;
+        }
+
+        // ✅ AQUÍ MISMO
+        if (Boolean.TRUE.equals(sale.getAsignado())) {
+            return "Esta venta ya está asignada.";
+        }
 
         if (!accounts.isEmpty()) {
             sale = assignAccountCop(accounts, sale);
@@ -220,42 +227,80 @@ public class SaleP2PServiceImpl implements SaleP2PService {
 
         accountBinanceService.subtractBalance(sale.getBinanceAccount().getName(), sale.getDollarsUs());
 
-        // si utilidad es null, evita NPE
         if (sale.getUtilidad() == null) sale.setUtilidad(0.0);
         sale.setUtilidad(sale.getUtilidad() + generateTax(sale));
 
-        sale.setAsignado(true); // ✅
+        sale.setAsignado(true);
         saleP2PRepository.save(sale);
 
         return "Asignacion de cuenta realizada con exito";
     }
 
 
+
+    @Transactional
     private SaleP2P assignAccountCop(List<AssignAccountDto> accounts, SaleP2P sale) {
-        if (sale.getAccountCopsDetails() == null) {
-            sale.setAccountCopsDetails(new ArrayList<>());
-        } else {
-            for (SaleP2pAccountCop acc : sale.getAccountCopsDetails()) {
-                acc.setSaleP2p(null);
+
+        // 1) REVERSAR asignaciones anteriores (si existían)
+        if (sale.getAccountCopsDetails() != null && !sale.getAccountCopsDetails().isEmpty()) {
+
+            for (SaleP2pAccountCop prev : sale.getAccountCopsDetails()) {
+
+                if (prev.getAccountCop() != null) {
+                    AccountCop acc = accountCopService.findByIdAccountCop(prev.getAccountCop().getId());
+                    if (acc != null) {
+                        double amt = prev.getAmount() != null ? prev.getAmount() : 0.0;
+
+                        if (acc.getBalance() == null) acc.setBalance(0.0);
+                        if (acc.getCupoDisponibleHoy() == null) acc.setCupoDisponibleHoy(0.0);
+
+                        // ✅ REVERSA EFECTOS (porque estás quitando esa asignación)
+                        acc.setBalance(acc.getBalance() - amt);
+                        acc.setCupoDisponibleHoy(acc.getCupoDisponibleHoy() + amt);
+
+                        // ✅ NO uses saveAccountCop() (ese resetea cupos)
+                        accountCopService.saveAccountCopSafe(acc);
+                    }
+                }
+            }
+
+            // limpiar relación
+            for (SaleP2pAccountCop prev : sale.getAccountCopsDetails()) {
+                prev.setSaleP2p(null);
             }
             sale.getAccountCopsDetails().clear();
+
+        } else {
+            sale.setAccountCopsDetails(new ArrayList<>());
         }
 
-        for (AssignAccountDto account : accounts) {
-            SaleP2pAccountCop assignAccount = new SaleP2pAccountCop();
-            assignAccount.setSaleP2p(sale);
-            assignAccount.setAmount(account.getAmount());
-            assignAccount.setNameAccount(account.getNameAccount());
+        // 2) APLICAR nuevas asignaciones
+        for (AssignAccountDto dto : accounts) {
 
-            if (account.getAccountCop() != null) {
-                AccountCop accountCop = accountCopService.findByIdAccountCop(account.getAccountCop());
-                assignAccount.setAccountCop(accountCop);
-                accountCop.setBalance(accountCop.getBalance() + account.getAmount());
-                accountCopService.saveAccountCop(accountCop);
+            SaleP2pAccountCop detail = new SaleP2pAccountCop();
+            detail.setSaleP2p(sale);
+            detail.setAmount(dto.getAmount());
+            detail.setNameAccount(dto.getNameAccount());
+
+            if (dto.getAccountCop() != null) {
+                AccountCop acc = accountCopService.findByIdAccountCop(dto.getAccountCop());
+                detail.setAccountCop(acc);
+
+                double amt = dto.getAmount() != null ? dto.getAmount() : 0.0;
+
+                if (acc.getBalance() == null) acc.setBalance(0.0);
+                if (acc.getCupoDisponibleHoy() == null) acc.setCupoDisponibleHoy(0.0);
+
+                // ✅ APLICA EFECTOS
+                acc.setBalance(acc.getBalance() + amt);
+                acc.setCupoDisponibleHoy(acc.getCupoDisponibleHoy() - amt);
+
+                accountCopService.saveAccountCopSafe(acc);
             }
 
-            sale.getAccountCopsDetails().add(assignAccount);
+            sale.getAccountCopsDetails().add(detail);
         }
+
         return sale;
     }
 

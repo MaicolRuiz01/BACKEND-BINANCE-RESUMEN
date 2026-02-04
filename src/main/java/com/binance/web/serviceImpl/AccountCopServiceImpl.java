@@ -1,12 +1,14 @@
 package com.binance.web.serviceImpl;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.binance.web.Entity.AccountCop;
 import com.binance.web.Entity.BankType;
@@ -14,6 +16,7 @@ import com.binance.web.Entity.SaleP2P;
 import com.binance.web.Entity.SaleP2pAccountCop;
 import com.binance.web.Repository.AccountCopRepository;
 import com.binance.web.Repository.SaleP2PRepository;
+import com.binance.web.Repository.SaleP2pAccountCopRepository;
 import com.binance.web.service.AccountCopService;
 import com.binance.web.util.CupoDiarioRules;
 
@@ -21,12 +24,14 @@ import com.binance.web.util.CupoDiarioRules;
 public class AccountCopServiceImpl implements AccountCopService {
 
 	private final AccountCopRepository AccountCopRepository;
+	private final SaleP2pAccountCopRepository saleP2pAccountCopRepository;
 	private final SaleP2PRepository saleP2PRepository;
 	private static final ZoneId ZONE_BOGOTA = ZoneId.of("America/Bogota");
 
-	public AccountCopServiceImpl(AccountCopRepository AccountCopRepository, SaleP2PRepository saleP2PRepository) {
+	public AccountCopServiceImpl(AccountCopRepository AccountCopRepository, SaleP2PRepository saleP2PRepository, SaleP2pAccountCopRepository saleP2pAccountCopRepository) {
 	    this.AccountCopRepository = AccountCopRepository;
 	    this.saleP2PRepository = saleP2PRepository;
+	    this.saleP2pAccountCopRepository = saleP2pAccountCopRepository;
 	}
 
 	@Override
@@ -120,5 +125,40 @@ public class AccountCopServiceImpl implements AccountCopService {
 
 	    AccountCopRepository.save(existing);
 	}
+	@Override
+	@Transactional
+	public String reconcileAccountCop(Integer accId) {
+	    ZoneId zone = ZoneId.of("America/Bogota");
+	    LocalDate today = LocalDate.now(zone);
+	    LocalDateTime start = today.atStartOfDay();
+	    LocalDateTime end = start.plusDays(1);
+
+	    AccountCop acc = AccountCopRepository.findById(accId)
+	        .orElseThrow(() -> new RuntimeException("No existe cuenta " + accId));
+
+	    // BASE: si no tienes base, usa 0 (tu caso)
+	    double baseBalance = 0.0;
+
+	    double totalAll = saleP2pAccountCopRepository.sumAllByAccount(accId);
+	    double totalToday = saleP2pAccountCopRepository.sumByAccountBetween(accId, start, end);
+
+	    if (acc.getCupoDiarioMax() == null) acc.setCupoDiarioMax(CupoDiarioRules.maxPorBanco(acc.getBankType()));
+	    double cupoMax = acc.getCupoDiarioMax();
+
+	    double newBalance = baseBalance + totalAll;
+	    double newCupoHoy = cupoMax - totalToday;
+
+	    // por seguridad
+	    if (newCupoHoy < 0) newCupoHoy = 0;
+
+	    acc.setBalance(newBalance);
+	    acc.setCupoDisponibleHoy(newCupoHoy);
+	    acc.setCupoFecha(today);
+
+	    AccountCopRepository.save(acc);
+
+	    return "OK balance=" + newBalance + " cupoDisponibleHoy=" + newCupoHoy;
+	}
+
 
 }
