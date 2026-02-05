@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.binance.web.Entity.AccountCop;
 import com.binance.web.Entity.SaleP2P;
+import com.binance.web.service.AccountCopExcelService;
 import com.binance.web.service.AccountCopService;
 
 @RestController
@@ -22,9 +23,11 @@ import com.binance.web.service.AccountCopService;
 public class AccountCopController {
 
 	private final AccountCopService AccountCopService;
+	private final AccountCopExcelService accountCopExcelService;
 
-	public AccountCopController(AccountCopService AccountCopService) {
+	public AccountCopController(AccountCopService AccountCopService, AccountCopExcelService accountCopExcelService) {
 		this.AccountCopService = AccountCopService;
+		this.accountCopExcelService = accountCopExcelService;
 	}
 
 	@GetMapping(produces = "application/json")
@@ -71,5 +74,19 @@ public class AccountCopController {
 	public ResponseEntity<String> reconcile(@PathVariable Integer id){
 	    return ResponseEntity.ok(AccountCopService.reconcileAccountCop(id));
 	}
+	
+	@GetMapping(
+	        value = "/excel/{cuentaId}",
+	        produces = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+	    )
+	    public ResponseEntity<byte[]> excelAccountCop(@PathVariable Integer cuentaId) throws Exception {
+
+	        byte[] file = accountCopExcelService.exportAccountCop(cuentaId);
+	        String filename = "cuenta_cop_" + cuentaId + "_reporte.xlsx";
+
+	        return ResponseEntity.ok()
+	                .header("Content-Disposition", "attachment; filename=\"" + filename + "\"")
+	                .body(file);
+	    }
 
 }

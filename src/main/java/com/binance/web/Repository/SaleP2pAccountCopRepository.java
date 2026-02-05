@@ -30,5 +30,7 @@ public interface SaleP2pAccountCopRepository extends JpaRepository<SaleP2pAccoun
     double sumByAccountBetween(@Param("accId") Integer accId,
                                @Param("start") LocalDateTime start,
                                @Param("end") LocalDateTime end);
+    
+    List<SaleP2pAccountCop> findByAccountCop_IdOrderByIdDesc(Integer accountCopId);
 
 }
