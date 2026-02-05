@@ -209,20 +209,66 @@ public class SaleP2PServiceImpl implements SaleP2PService {
     }
 
     @Override
+    @Transactional
     public String processAssignAccountCop(Integer saleId, List<AssignAccountDto> accounts) {
+
         SaleP2P sale = saleP2PRepository.findById(saleId).orElse(null);
+        if (sale == null) return "No se encontró la venta con id " + saleId;
 
-        if (sale == null) {
-            return "No se realizo la asignacion de cuenta, No se encontro la venta con id " + saleId;
-        }
-
-        // ✅ AQUÍ MISMO
         if (Boolean.TRUE.equals(sale.getAsignado())) {
             return "Esta venta ya está asignada.";
         }
 
-        if (!accounts.isEmpty()) {
-            sale = assignAccountCop(accounts, sale);
+        // ✅ Asegura lista inicializada una sola vez
+        if (sale.getAccountCopsDetails() == null) {
+            sale.setAccountCopsDetails(new ArrayList<>());
+        }
+
+        // ✅ 1) REVERTIR EFECTOS de detalles anteriores (si existían)
+        for (SaleP2pAccountCop prev : sale.getAccountCopsDetails()) {
+            if (prev.getAccountCop() != null) {
+                AccountCop acc = accountCopService.findByIdAccountCop(prev.getAccountCop().getId());
+                if (acc != null) {
+                    double amt = prev.getAmount() != null ? prev.getAmount() : 0.0;
+
+                    if (acc.getBalance() == null) acc.setBalance(0.0);
+                    if (acc.getCupoDisponibleHoy() == null) acc.setCupoDisponibleHoy(0.0);
+
+                    acc.setBalance(acc.getBalance() - amt);
+                    acc.setCupoDisponibleHoy(acc.getCupoDisponibleHoy() + amt);
+
+                    accountCopService.saveAccountCopSafe(acc);
+                }
+            }
+        }
+
+        // ✅ 2) BORRAR detalles anteriores (MISMA lista, NO reasignar)
+        sale.getAccountCopsDetails().clear();
+
+        // ✅ 3) APLICAR nuevas asignaciones
+        for (AssignAccountDto dto : accounts) {
+
+            SaleP2pAccountCop detail = new SaleP2pAccountCop();
+            detail.setSaleP2p(sale);
+            detail.setAmount(dto.getAmount());
+            detail.setNameAccount(dto.getNameAccount());
+
+            if (dto.getAccountCop() != null) {
+                AccountCop acc = accountCopService.findByIdAccountCop(dto.getAccountCop());
+                detail.setAccountCop(acc);
+
+                double amt = dto.getAmount() != null ? dto.getAmount() : 0.0;
+
+                if (acc.getBalance() == null) acc.setBalance(0.0);
+                if (acc.getCupoDisponibleHoy() == null) acc.setCupoDisponibleHoy(0.0);
+
+                acc.setBalance(acc.getBalance() + amt);
+                acc.setCupoDisponibleHoy(acc.getCupoDisponibleHoy() - amt);
+
+                accountCopService.saveAccountCopSafe(acc);
+            }
+
+            sale.getAccountCopsDetails().add(detail);
         }
 
         accountBinanceService.subtractBalance(sale.getBinanceAccount().getName(), sale.getDollarsUs());
@@ -231,10 +277,13 @@ public class SaleP2PServiceImpl implements SaleP2PService {
         sale.setUtilidad(sale.getUtilidad() + generateTax(sale));
 
         sale.setAsignado(true);
+
+        // ✅ con cascade=ALL se guardan detalles
         saleP2PRepository.save(sale);
 
-        return "Asignacion de cuenta realizada con exito";
+        return "Asignación realizada con éxito";
     }
+
 
 
 
