@@ -71,5 +71,7 @@ public class SellDollars {
 	
 	@Column(name = "dedupe_key", nullable = false, length = 255)
 	  private String dedupeKey;
+	@Column(name="tx_id", length=128)
+	private String txId;
 
 }

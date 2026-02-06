@@ -26,4 +26,5 @@ public class BuyDollarsDto {
 	private Integer supplierId;
     private Integer clienteId;
 	private Boolean asignada;
+	private String txId;
 }

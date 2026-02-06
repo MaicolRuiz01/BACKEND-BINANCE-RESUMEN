@@ -188,6 +188,7 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
                 nueva.setAsignada(false);
                 nueva.setAccountBinance(account);
                 nueva.setDedupeKey(dedupeKey);
+                nueva.setTxId(dto.getTxId());
                 buyDollarsRepository.save(nueva);
                 existentes.add(dto.getIdDeposit());
             }
@@ -321,6 +322,7 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 	    dto.setNameAccount(b.getNameAccount());
 	    dto.setIdDeposit(b.getIdDeposit());
 	    dto.setAsignada(b.getAsignada());
+	    dto.setTxId(b.getTxId());
 
 	    // Campos relacionales (con null-safety)
 	    if (b.getCliente() != null) dto.setClienteId(b.getCliente().getId());

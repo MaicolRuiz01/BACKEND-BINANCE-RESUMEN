@@ -37,4 +37,5 @@ public class SellDollarsDto {
     // Nuevo: símbolo de la cripto vendida
     private String cryptoSymbol; // Ej: "USDT", "TRX"
     private String tipoCuenta;
+    private String txId;
 }

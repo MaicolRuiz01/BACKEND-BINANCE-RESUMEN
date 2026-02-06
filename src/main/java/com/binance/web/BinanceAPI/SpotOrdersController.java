@@ -160,21 +160,63 @@ public class SpotOrdersController {
      * Devuelve depósitos de hoy que no han sido registrados como compras.
      */
     @GetMapping("/compras-no-registradas")
-    public ResponseEntity<List<BuyDollarsDto>> getComprasNoRegistradas(@RequestParam(defaultValue = "30") int limit) {
+    public ResponseEntity<List<BuyDollarsDto>> getComprasNoRegistradas(
+            @RequestParam(defaultValue = "30") int limit) {
+
         List<BuyDollarsDto> resultado = new ArrayList<>();
         ObjectMapper mapper = new ObjectMapper();
-        LocalDate hoy = LocalDate.now(ZoneId.of("America/Bogota"));
+        ZoneId zoneId = ZoneId.of("America/Bogota");
+        LocalDate hoy = LocalDate.now(zoneId);
 
         try {
+            // 1) IDs de depósitos ya registrados como BuyDollars
             Set<String> comprasIds = buyDollarsRepository.findAll().stream()
                     .map(BuyDollars::getIdDeposit)
+                    .filter(Objects::nonNull)
                     .collect(Collectors.toSet());
 
+            // 2) Mis direcciones internas (normalizadas)
+            Set<String> ownAddrsLower = accountBinanceRepository.findAll().stream()
+                    .map(AccountBinance::getAddress)
+                    .filter(Objects::nonNull)
+                    .map(a -> a.trim().toLowerCase())
+                    .collect(Collectors.toSet());
+
+            // 3) txId de traspasos internos detectados por withdrawals hacia direcciones internas
+            Set<String> internalTxIds = new HashSet<>();
+
+            for (String account : binanceService.getAllAccountNames()) {
+                String wresp = binanceService.getSpotWithdrawals(account, limit);
+                JsonNode wroot = mapper.readTree(wresp);
+
+                ArrayNode warr;
+                if (wroot.isArray()) {
+                    warr = (ArrayNode) wroot;
+                } else {
+                    JsonNode dataNode = wroot.path("data");
+                    if (!dataNode.isArray()) continue;
+                    warr = (ArrayNode) dataNode;
+                }
+
+                for (JsonNode wd : warr) {
+                    String addr = wd.path("address").asText(null);
+                    String txId = wd.path("txId").asText(null);
+
+                    // retiro a address interna => traspaso interno
+                    if (addr != null && ownAddrsLower.contains(addr.trim().toLowerCase())) {
+                        if (txId != null && !txId.isBlank()) {
+                            internalTxIds.add(txId.trim());
+                        }
+                    }
+                }
+            }
+
+            // 4) Ahora sí: recorremos depósitos y filtramos los internos por txId
             for (String account : binanceService.getAllAccountNames()) {
                 String resp = binanceService.getSpotDeposits(account, limit);
                 JsonNode root = mapper.readTree(resp);
-                ArrayNode arr;
 
+                ArrayNode arr;
                 if (root.isArray()) {
                     arr = (ArrayNode) root;
                 } else {
@@ -186,10 +228,15 @@ public class SpotOrdersController {
                 for (JsonNode dep : arr) {
                     String id = dep.path("id").asText();
                     double amount = dep.path("amount").asDouble(0);
-                    String coin = dep.path("coin").asText("");  // 🔥 cualquier cripto
+                    String coin = dep.path("coin").asText("");
+                    String txId = dep.path("txId").asText(null);
                     String tsStr = dep.path("insertTime").asText(null);
 
+                    // ya registrado o inválido
                     if (comprasIds.contains(id) || amount <= 0) continue;
+
+                    // ✅ filtro: si es el "mismo txId" de un retiro interno, NO es compra
+                    if (txId != null && internalTxIds.contains(txId.trim())) continue;
 
                     LocalDateTime fecha = parseFecha(tsStr);
                     if (fecha != null && fecha.toLocalDate().isEqual(hoy)) {
@@ -197,17 +244,23 @@ public class SpotOrdersController {
                         dto.setIdDeposit(id);
                         dto.setNameAccount(account);
                         dto.setDate(fecha);
-                        dto.setAmount(amount);           // cantidad en la cripto
-                        dto.setCryptoSymbol(coin);       // tipo de cripto
+                        dto.setAmount(amount);
+                        dto.setCryptoSymbol(coin);
+                        // si tu dto tiene txId, también:
+                        // dto.setTxId(txId);
                         resultado.add(dto);
                     }
                 }
             }
+
+            return ResponseEntity.ok(resultado);
+
         } catch (Exception e) {
+            e.printStackTrace();
             return ResponseEntity.status(500).body(new ArrayList<>());
         }
-        return ResponseEntity.ok(resultado);
     }
+
     
     /**
      * Retorna retiros (ventas) de hoy que no son traspasos internos.
@@ -373,20 +426,26 @@ public class SpotOrdersController {
         try {
             if (txId == null) return false;
 
+            // ✅ CASO 1: Off-chain (Binance interno) -> NO buscar en TronScan
+            if (txId.startsWith("Off-chain transfer")) {
+                return true; // o mejor: return txIdsInternos.contains(txId) si lo pasas como parámetro
+            }
+
+            // ✅ CASO 2: On-chain real -> TronScan
             if ("TRC20".equalsIgnoreCase(network) || "TRX".equalsIgnoreCase(network)) {
                 JsonNode tx = tronScanService.getTxByHash(txId);
                 String fromAddr = tx.path("from").asText(null);
                 if (fromAddr != null && ownAddrs.contains(fromAddr.trim().toLowerCase())) {
-                    return true; // ✅ Vino de wallet tuya → interno
+                    return true;
                 }
             }
 
-            // TODO: BSC, ETH, SOL si los usas
             return false;
         } catch (Exception e) {
             return false;
         }
     }
+
     
     private Set<String> getOwnAddressesLower() {
     	  return accountBinanceRepository.findAll().stream()

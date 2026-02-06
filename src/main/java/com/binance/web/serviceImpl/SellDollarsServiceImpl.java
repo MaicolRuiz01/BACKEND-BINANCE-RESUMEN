@@ -128,7 +128,8 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 					AccountCop acc = accountCopService.findByIdAccountCop(assignDto.getAccountCop());
 					double currentCopBalance = acc.getBalance() != null ? acc.getBalance() : 0.0;
 					acc.setBalance(currentCopBalance + assignDto.getAmount());
-					accountCopService.saveAccountCop(acc);
+					accountCopService.saveAccountCopSafe(acc);
+
 
 					SellDollarsAccountCop detalle = new SellDollarsAccountCop();
 					detalle.setSellDollars(sale);
@@ -188,7 +189,8 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 	            double monto = assignDto.getAmount() != null ? assignDto.getAmount() : 0.0;
 
 	            acc.setBalance(current + monto);
-	            accountCopService.saveAccountCop(acc);
+	            accountCopService.saveAccountCopSafe(acc);
+
 
 	            SellDollarsAccountCop det = new SellDollarsAccountCop();
 	            det.setSellDollars(existing);
@@ -433,7 +435,8 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 			for (SellDollarsAccountCop det : sell.getSellDollarsAccounts()) {
 				AccountCop acc = det.getAccountCop();
 				acc.setBalance(acc.getBalance() - det.getAmount());
-				accountCopService.saveAccountCop(acc);
+				accountCopService.saveAccountCopSafe(acc);
+
 			}
 		}
 	}
@@ -482,7 +485,8 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 
 					double currentBalance = acc.getBalance() != null ? acc.getBalance() : 0.0;
 					acc.setBalance(currentBalance + assignDto.getAmount());
-					accountCopService.saveAccountCop(acc);
+					accountCopService.saveAccountCopSafe(acc);
+
 
 					SellDollarsAccountCop detalle = new SellDollarsAccountCop();
 					detalle.setSellDollars(existing);
@@ -593,6 +597,7 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 	      nueva.setComision(feeTRX);
 	      nueva.setTipoCuenta(tipoCuenta);
 	      nueva.setCryptoSymbol(symbol);
+	      nueva.setTxId(dto.getTxId());
 
 	      // ✅ clave anti-duplicados obligatoria (NOT NULL)
 	      nueva.setDedupeKey(dedupeKey);

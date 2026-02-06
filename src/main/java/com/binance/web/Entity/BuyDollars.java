@@ -55,5 +55,7 @@ public class BuyDollars {
 	  // 🔒 Clave de desduplicación SIEMPRE no-nula
 	  @Column(name = "dedupe_key", nullable = false, length = 128)
 	  private String dedupeKey;
+	  @Column(name="tx_id", length=128)
+	  private String txId;
 	
 }
