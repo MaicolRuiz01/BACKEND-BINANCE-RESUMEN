@@ -32,9 +32,7 @@ public class BuyP2P {
 
     @Column(unique = true)
     private String numberOrder;
-
     private LocalDateTime date;
-
     private Double commission;
     private Double pesosCop;
     private Double dollarsUs;

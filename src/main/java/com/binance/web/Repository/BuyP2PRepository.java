@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import com.binance.web.Entity.BuyDollars;
 import com.binance.web.Entity.BuyP2P;
 
 public interface BuyP2PRepository extends JpaRepository<BuyP2P, Integer> {
@@ -37,4 +38,5 @@ public interface BuyP2PRepository extends JpaRepository<BuyP2P, Integer> {
     """)
     List<BuyP2P> findNoAsignadasByDateBetween(@Param("start") LocalDateTime start,
                                              @Param("end") LocalDateTime end);
+
 }

@@ -20,5 +20,6 @@ public interface SellDollarsService {
 	SellDollars asignarVenta(Integer id, SellDollarsDto dto);
 	List<SellDollarsDto> ventasPorCliente(Integer clienteId);
 	List<SellDollars> obtenerVentasNoAsignadasPorFecha(LocalDate fecha);
+	List<SellDollars> obtenerVentasNoAsignadas();
 
 }

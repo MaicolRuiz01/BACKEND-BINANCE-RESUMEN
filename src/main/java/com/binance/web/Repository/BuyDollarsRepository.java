@@ -24,5 +24,5 @@ public interface BuyDollarsRepository extends JpaRepository<BuyDollars, Integer>
 	Optional<BuyDollars> findByDedupeKey(String dedupeKey);
 	List<BuyDollars> findByAsignadaFalseAndDateBetween(LocalDateTime start, LocalDateTime end);
 	List<BuyDollars> findByAsignadaFalseOrderByDateDesc();
-
+	List<BuyDollars> findByAsignadaFalse();
 }

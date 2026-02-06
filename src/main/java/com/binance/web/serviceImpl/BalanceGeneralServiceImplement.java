@@ -51,7 +51,6 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
         private AccountCopRepository accountCopRepo;
         @Autowired
         private SupplierRepository accountProveedorRepo;
-
         @Autowired
         private SaleP2PService saleP2PService;
         @Autowired
@@ -87,8 +86,6 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
             double totalComprasNoAsignadasUsdt = calcularTotalComprasNoAsignadasUsdt(fecha);
             double totalVentasNoAsignadasUsdt  = calcularTotalVentasNoAsignadasUsdt(fecha);
 
-            double netoNoAsignadasUsdt = totalComprasNoAsignadasUsdt - totalVentasNoAsignadasUsdt;
-
             // 1) tasa promedio del día (la misma que usarás para todo)
             Double tasaPromedioDelDia = averageRateRepository.findTopByOrderByFechaDesc()
                 .map(AverageRate::getAverageRate)
@@ -114,9 +111,6 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
 
             Double clientesSaldo = clienteRepository.findAll().stream()
                 .mapToDouble(Cliente::getSaldo).sum();
-
-            // 4) usa el NUEVO campo en el total
-            
 
             Double totalP2P = saleP2PService.obtenerVentasPorFecha(fecha).stream()
                 .mapToDouble(SaleP2P::getPesosCop).sum();
@@ -147,7 +141,7 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
             
             Double pesosTotalCuentasVES = totalVesCuentas * tasaPromedioVes;
             
-            Double saldoTotal = saldoCuentasBinance + saldoCajas + saldoCop + pesosTotalCuentasVES - saldoProveedores - clientesSaldo;
+            
             
             double deudaProveedores = supplierRepository.findAll().stream()
             	    .mapToDouble(s -> s.getBalance() == null ? 0.0 : s.getBalance())
@@ -163,7 +157,7 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
 
             Double comisionesP2P = saleP2PService.obtenerComisionesPorFecha(fecha) * tasaPromedioDelDia;
             Double cuatroPorMil   = totalP2P * 0.004;
-
+            double netoNoAsignadasUsdt = ( totalVentasNoAsignadasUsdt - totalComprasNoAsignadasUsdt) * tasaPromedioDelDia;
             Double utilidadP2P = (totalUsdt * tasaVenta)
                 - (totalUsdt * tasaPromedioDelDia)
                 - comisionesP2P - cuatroPorMil;
@@ -178,6 +172,7 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
 
             Double utilidadVentasGenerales = (totalUSDTVentasGenerales * tasaVentaGenerales)
                 - (totalUSDTVentasGenerales * tasaPromedioDelDia);
+            Double saldoTotal = saldoCuentasBinance + saldoCajas + saldoCop + pesosTotalCuentasVES - saldoProveedores - clientesSaldo + netoNoAsignadasUsdt;
             
             List<CryptoAverageRate> ratesHoy = cryptoAverageRateService.listarPorDia(fecha);
 
@@ -290,14 +285,17 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
          * Usa amount + cryptoSymbol de BuyDollars.
          */
         private double calcularTotalComprasNoAsignadasUsdt(LocalDate fecha) {
-            // Reutiliza lo que ya tengas en el service; si no existe, algo así:
-            List<BuyDollars> comprasNoAsignadas = buyDollarsService.obtenerComprasNoAsignadasPorFecha(fecha);
+            List<BuyDollars> comprasNoAsignadas = buyDollarsService.obtenerComprasNoAsignadas();
 
             return comprasNoAsignadas.stream()
-                    .mapToDouble(c ->
-                            convertirCriptoAUsdt(c.getCryptoSymbol(), c.getAmount(), fecha)
+                .mapToDouble(c ->
+                    convertirCriptoAUsdt(
+                        c.getCryptoSymbol(),
+                        c.getAmount(),
+                        c.getDate() != null ? c.getDate().toLocalDate() : fecha
                     )
-                    .sum();
+                )
+                .sum();
         }
 
         /**
@@ -306,13 +304,17 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
          * Si en tu modelo 'dollars' YA está en USDT, solo cambia la lógica.
          */
         private double calcularTotalVentasNoAsignadasUsdt(LocalDate fecha) {
-            List<SellDollars> ventasNoAsignadas = sellDollarsService.obtenerVentasNoAsignadasPorFecha(fecha);
+            List<SellDollars> ventasNoAsignadas = sellDollarsService.obtenerVentasNoAsignadas();
 
             return ventasNoAsignadas.stream()
-                    .mapToDouble(v ->
-                            convertirCriptoAUsdt(v.getCryptoSymbol(), v.getDollars(), fecha)
+                .mapToDouble(v ->
+                    convertirCriptoAUsdt(
+                        v.getCryptoSymbol(),
+                        v.getDollars(),
+                        v.getDate() != null ? v.getDate().toLocalDate() : fecha
                     )
-                    .sum();
+                )
+                .sum();
         }
 
 }

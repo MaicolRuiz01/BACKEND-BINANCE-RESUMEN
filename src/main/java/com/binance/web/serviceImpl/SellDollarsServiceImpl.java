@@ -660,5 +660,11 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 		    return sellDollarsRepository
 		            .findByAsignadoFalseAndDateBetween(start, end);
 		}
+		
+		@Override
+		public List<SellDollars> obtenerVentasNoAsignadas() {
+		    return sellDollarsRepository.findByAsignadoFalse();
+		}
+
 
 }

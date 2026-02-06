@@ -14,6 +14,7 @@ import org.springframework.stereotype.Repository;
 import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.AccountCop;
 import com.binance.web.Entity.SaleP2P;
+import com.binance.web.Entity.SellDollars;
 
 import jakarta.persistence.LockModeType;
 
@@ -80,4 +81,5 @@ public interface SaleP2PRepository extends JpaRepository<SaleP2P, Integer> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT s FROM SaleP2P s WHERE s.id = :id")
     Optional<SaleP2P> findByIdForUpdate(@Param("id") Integer id);
+
 }

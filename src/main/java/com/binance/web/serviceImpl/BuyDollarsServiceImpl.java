@@ -374,5 +374,14 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 	        return dto;
 	    }).collect(Collectors.toList());
 	}
+	
+	@Override
+    public List<BuyDollars> obtenerComprasNoAsignadas() {
+        // si quieres ordenadas:
+        return buyDollarsRepository.findByAsignadaFalseOrderByDateDesc();
+
+        // o sin orden:
+        // return buyDollarsRepository.findByAsignadaFalse();
+    }
 
 }

@@ -33,4 +33,6 @@ public interface BuyDollarsService {
 	List<BuyDollars> obtenerComprasNoAsignadasPorFecha(LocalDate fecha);
 
 	List<BuyDollarsDto> getComprasNoAsignadas();
+
+	List<BuyDollars> obtenerComprasNoAsignadas();
 }

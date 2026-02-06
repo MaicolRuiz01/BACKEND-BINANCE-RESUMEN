@@ -24,7 +24,7 @@ public class BalanceGeneral {
 	@Column(nullable = false)
     private LocalDate date;
 
-    private Double saldo; // saldo total del día
+    private Double saldo;
     private Double tasaPromedioDelDia;
     private Double tasaVentaDelDia;
 
@@ -36,14 +36,13 @@ public class BalanceGeneral {
     private Double totalVentasGeneralesDelDia;
     private Double utilidadVentasGenerales;
     
-    private Double efectivoDelDia; //este va a hacer la suma de las cajas
-    private Double saldoClientes; //saldo total de clientes
+    private Double efectivoDelDia;
+    private Double saldoClientes;
     
-    private Double comisionTrust; //comisiones del las selldollars
+    private Double comisionTrust;
     private Double saldoCuentasBinance;
     private Double proveedores;
     private Double cuentasCop;
-    
     @Lob
     @Column(columnDefinition = "TEXT")
     private String detalleCriptosJson;
