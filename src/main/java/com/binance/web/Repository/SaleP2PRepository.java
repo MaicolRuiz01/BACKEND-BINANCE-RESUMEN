@@ -13,6 +13,7 @@ import org.springframework.stereotype.Repository;
 
 import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.AccountCop;
+import com.binance.web.Entity.BalanceGeneral;
 import com.binance.web.Entity.SaleP2P;
 import com.binance.web.Entity.SellDollars;
 
@@ -81,5 +82,9 @@ public interface SaleP2PRepository extends JpaRepository<SaleP2P, Integer> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT s FROM SaleP2P s WHERE s.id = :id")
     Optional<SaleP2P> findByIdForUpdate(@Param("id") Integer id);
+
+    List<SaleP2P> findByAsignadoFalseAndDateBetween(LocalDateTime start, LocalDateTime end);
+    List<SaleP2P> findByAsignadoFalseAndDateLessThan(LocalDateTime end);
+
 
 }

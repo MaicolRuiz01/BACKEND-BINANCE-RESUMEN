@@ -1,6 +1,7 @@
 package com.binance.web.serviceImpl;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
 
@@ -24,9 +25,12 @@ import com.binance.web.Repository.AccountCopRepository;
 import com.binance.web.Repository.AccountVesRepository;
 import com.binance.web.Repository.AverageRateRepository;
 import com.binance.web.Repository.BalanceGeneralRepository;
+import com.binance.web.Repository.BuyDollarsRepository;
+import com.binance.web.Repository.BuyP2PRepository;
 import com.binance.web.Repository.ClienteRepository;
 import com.binance.web.Repository.EfectivoRepository;
-
+import com.binance.web.Repository.SaleP2PRepository;
+import com.binance.web.Repository.SellDollarsRepository;
 import com.binance.web.Repository.SupplierRepository;
 import com.binance.web.Repository.VesAverageRateRepository;
 import com.binance.web.model.CryptoResumenDiaDto;
@@ -75,6 +79,15 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
         private AccountVesRepository accountVesRepository;
         @Autowired
         private VesAverageRateRepository vesAverageRateRepository;
+        @Autowired
+        private BuyP2PRepository buyP2PRepository;
+        @Autowired
+        private SaleP2PRepository saleP2PRepository;
+        @Autowired
+        private SellDollarsRepository sellDollarsRepository;
+        @Autowired
+        private BuyDollarsRepository buyDollarsRepository;
+
 
         @Override
         @Transactional
@@ -85,6 +98,9 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
             
             double totalComprasNoAsignadasUsdt = calcularTotalComprasNoAsignadasUsdt(fecha);
             double totalVentasNoAsignadasUsdt  = calcularTotalVentasNoAsignadasUsdt(fecha);
+            double totalComprasP2PNoAsignadasUsdt = calcularTotalComprasP2PNoAsignadasUsdt(fecha);
+            double totalVentasP2PNoAsignadasUsdt  = calcularTotalVentasP2PNoAsignadasUsdt(fecha);
+
 
             // 1) tasa promedio del día (la misma que usarás para todo)
             Double tasaPromedioDelDia = averageRateRepository.findTopByOrderByFechaDesc()
@@ -157,7 +173,13 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
 
             Double comisionesP2P = saleP2PService.obtenerComisionesPorFecha(fecha) * tasaPromedioDelDia;
             Double cuatroPorMil   = totalP2P * 0.004;
-            double netoNoAsignadasUsdt = ( totalVentasNoAsignadasUsdt - totalComprasNoAsignadasUsdt) * tasaPromedioDelDia;
+            double netoNoAsignadasUsdt =
+            	    (
+            	      (totalVentasNoAsignadasUsdt + totalVentasP2PNoAsignadasUsdt)
+            	      -
+            	      (totalComprasNoAsignadasUsdt + totalComprasP2PNoAsignadasUsdt)
+            	    ) * tasaPromedioDelDia;
+
             Double utilidadP2P = (totalUsdt * tasaVenta)
                 - (totalUsdt * tasaPromedioDelDia)
                 - comisionesP2P - cuatroPorMil;
@@ -285,18 +307,20 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
          * Usa amount + cryptoSymbol de BuyDollars.
          */
         private double calcularTotalComprasNoAsignadasUsdt(LocalDate fecha) {
-            List<BuyDollars> comprasNoAsignadas = buyDollarsService.obtenerComprasNoAsignadas();
+            LocalDateTime end = endOfDay(fecha);
+
+            // Ideal: crea en repo un método findByAsignadaFalseAndDateLessThan(end)
+            List<BuyDollars> comprasNoAsignadas = buyDollarsRepository.findByAsignadaFalseAndDateLessThan(end);
 
             return comprasNoAsignadas.stream()
-                .mapToDouble(c ->
-                    convertirCriptoAUsdt(
-                        c.getCryptoSymbol(),
-                        c.getAmount(),
-                        c.getDate() != null ? c.getDate().toLocalDate() : fecha
-                    )
-                )
+                .mapToDouble(c -> convertirCriptoAUsdt(
+                    c.getCryptoSymbol(),
+                    c.getAmount(),
+                    c.getDate() != null ? c.getDate().toLocalDate() : fecha
+                ))
                 .sum();
         }
+
 
         /**
          * Total de VENTAS no asignadas del día en USDT.
@@ -304,17 +328,41 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
          * Si en tu modelo 'dollars' YA está en USDT, solo cambia la lógica.
          */
         private double calcularTotalVentasNoAsignadasUsdt(LocalDate fecha) {
-            List<SellDollars> ventasNoAsignadas = sellDollarsService.obtenerVentasNoAsignadas();
+            LocalDateTime end = endOfDay(fecha);
+
+            List<SellDollars> ventasNoAsignadas = sellDollarsRepository.findByAsignadoFalseAndDateLessThan(end);
 
             return ventasNoAsignadas.stream()
-                .mapToDouble(v ->
-                    convertirCriptoAUsdt(
-                        v.getCryptoSymbol(),
-                        v.getDollars(),
-                        v.getDate() != null ? v.getDate().toLocalDate() : fecha
-                    )
-                )
+                .mapToDouble(v -> convertirCriptoAUsdt(
+                    v.getCryptoSymbol(),
+                    v.getDollars(),
+                    v.getDate() != null ? v.getDate().toLocalDate() : fecha
+                ))
                 .sum();
+        }
+
+
+        
+        private double calcularTotalComprasP2PNoAsignadasUsdt(LocalDate fecha) {
+            LocalDateTime end = endOfDay(fecha);
+
+            return buyP2PRepository.findByAsignadoFalseAndDateLessThan(end).stream()
+                .mapToDouble(b -> safe(b.getDollarsUs()))
+                .sum();
+        }
+
+
+        private double calcularTotalVentasP2PNoAsignadasUsdt(LocalDate fecha) {
+            LocalDateTime end = endOfDay(fecha);
+
+            return saleP2PRepository.findByAsignadoFalseAndDateLessThan(end).stream()
+                .mapToDouble(s -> safe(s.getDollarsUs()))
+                .sum();
+        }
+
+        
+        private LocalDateTime endOfDay(LocalDate fecha) {
+            return fecha.plusDays(1).atStartOfDay(); // exclusivo
         }
 
 }
