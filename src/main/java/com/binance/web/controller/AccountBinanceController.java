@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import lombok.extern.slf4j.Slf4j;
 
 import com.binance.web.Entity.AccountBinance;
 
@@ -14,6 +15,7 @@ import com.binance.web.model.AccountBinanceDTO;
 import com.binance.web.model.CryptoBalanceDto;
 import com.binance.web.service.AccountBinanceService;
 
+@Slf4j
 @RestController
 @RequestMapping("/cuenta-binance")
 public class AccountBinanceController {
@@ -41,9 +43,16 @@ public class AccountBinanceController {
 	}
 
 	@PostMapping
-	public ResponseEntity<AccountBinance> createAccount(@RequestBody AccountBinance accountBinance) {
-		accountBinanceService.saveAccountBinance(accountBinance);
-		return ResponseEntity.status(HttpStatus.CREATED).body(accountBinance);
+	public ResponseEntity<?> createAccount(@RequestBody AccountBinance accountBinance) {
+		try {
+			accountBinanceService.saveAccountBinance(accountBinance);
+			return ResponseEntity.status(HttpStatus.CREATED).body(accountBinance);
+		} catch (Exception e) {
+			log.error("[AccountBinance] Error al crear cuenta '{}': {}", accountBinance.getName(), e.getMessage(), e);
+			String msg = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
+			return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+					.body(Map.of("message", msg != null ? msg : "Error interno al guardar la cuenta"));
+		}
 	}
 
 	@PutMapping("/{id}")

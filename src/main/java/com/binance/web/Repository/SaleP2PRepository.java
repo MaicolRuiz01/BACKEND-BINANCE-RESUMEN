@@ -4,6 +4,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
@@ -23,6 +24,9 @@ import jakarta.persistence.LockModeType;
 public interface SaleP2PRepository extends JpaRepository<SaleP2P, Integer> {
 	
 	boolean existsByNumberOrder(String numberOrder);
+
+    @Query("SELECT s.numberOrder FROM SaleP2P s WHERE s.numberOrder IS NOT NULL")
+    Set<String> findAllOrderNumbers();
 
     @Query("""
         SELECT s FROM SaleP2P s

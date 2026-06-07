@@ -7,9 +7,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
@@ -18,11 +18,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.binance.web.Entity.AccountBinance;
-import com.binance.web.Entity.BuyDollars;
 import com.binance.web.Entity.Cliente;
-import com.binance.web.Entity.SellDollars;
-import com.binance.web.Entity.Transacciones;
 import com.binance.web.Repository.AccountBinanceRepository;
 import com.binance.web.Repository.BuyDollarsRepository;
 import com.binance.web.Repository.ClienteRepository;
@@ -34,211 +30,184 @@ import com.binance.web.transacciones.TransaccionesRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+@Slf4j
 @RestController
 @RequestMapping("/api")
 @CrossOrigin(origins = "*")
 public class TronScanController {
 
-	@Autowired
-	private TronScanService tronScanService;
+	@Autowired private TronScanService tronScanService;
+	@Autowired private BuyDollarsRepository buyDollarsRepository;
+	@Autowired private SellDollarsRepository sellDollarsRepository;
+	@Autowired private TransaccionesRepository transaccionesRepository;
+	@Autowired private AccountBinanceRepository accountBinanceRepository;
+	@Autowired private ClienteRepository clienteRepository;
 
-	@Autowired
-	private BuyDollarsRepository buyDollarsRepository;
-
-	@Autowired
-	private SellDollarsRepository sellDollarsRepository;
-
-	@Autowired
-	private TransaccionesRepository transaccionesRepository;
-
-	@Autowired
-	private AccountBinanceRepository accountBinanceRepository;
-
-	@Autowired
-	private ClienteRepository clienteRepository;
-	
+	/** Lista todas las wallets TRUST registradas */
 	@GetMapping
 	private List<String> getAllTrustWallets() {
-		return accountBinanceRepository.findAll().stream()
-				.filter(account -> "TRUST".equalsIgnoreCase(account.getTipo())).map(AccountBinance::getAddress)
-				.filter(address -> address != null && !address.trim().isEmpty()).collect(Collectors.toList());
+		return accountBinanceRepository.findTrustAddresses();
 	}
 
-	// Entradas nativas TRX (NO TRC20)
+	/** Entradas nativas TRX (NO TRC20) */
 	@GetMapping("/trx-entradas")
 	public ResponseEntity<List<BuyDollarsDto>> getTrustTransactions() {
-		String walletAddress = "TJjK97sE4anv35hBQGwGEZEo5FYxToxFQM";
+		// Wallets TRUST con nombre "TRUST_IN" o similar — se toman de BD, no hardcodeadas
+		List<String> trustAddresses = accountBinanceRepository.findTrustAddresses();
+		if (trustAddresses.isEmpty()) {
+			return ResponseEntity.ok(List.of());
+		}
+		String walletAddress = trustAddresses.get(0); // primera wallet TRUST como principal de entrada
 
-		Set<String> assignedIds = buyDollarsRepository.findAll().stream().map(BuyDollars::getIdDeposit)
-				.collect(Collectors.toSet());
+		Set<String> assignedIds = buyDollarsRepository.findAllDepositIds();
 
 		String response = tronScanService.getTransactions(walletAddress);
-		List<BuyDollarsDto> transactions = tronScanService.parseIncomingTransactions(response, walletAddress,
-				assignedIds);
+		List<BuyDollarsDto> transactions = tronScanService.parseIncomingTransactions(response, walletAddress, assignedIds);
 
 		return ResponseEntity.ok(transactions);
 	}
 
-	// Salidas nativas TRX (uso informativo)
+	/** Salidas nativas TRX (uso informativo) */
 	@GetMapping("/trx-salidas")
 	public ResponseEntity<List<BuyDollarsDto>> getTrustOutgoingTransactions() {
-		String walletAddress = "TSWNB8wEhTgeypycsXC1omKEDL3yPV2Tde";
+		List<String> trustAddresses = accountBinanceRepository.findTrustAddresses();
+		if (trustAddresses.isEmpty()) {
+			return ResponseEntity.ok(List.of());
+		}
+		// segunda wallet si existe, si no la primera
+		String walletAddress = trustAddresses.size() > 1 ? trustAddresses.get(1) : trustAddresses.get(0);
 
-		Set<String> assignedIds = buyDollarsRepository.findAll().stream().map(BuyDollars::getIdDeposit)
-				.collect(Collectors.toSet());
+		Set<String> assignedIds = buyDollarsRepository.findAllDepositIds();
 
 		String response = tronScanService.getTransactions(walletAddress);
-		List<BuyDollarsDto> outgoingTransactions = tronScanService.parseOutgoingTransactions(response, walletAddress,
-				assignedIds);
+		List<BuyDollarsDto> outgoingTransactions = tronScanService.parseOutgoingTransactions(response, walletAddress, assignedIds);
 
 		return ResponseEntity.ok(outgoingTransactions);
 	}
 
-	// Crudo TRC20 desde TronGrid (debug/inspección)
+	/** Crudo TRC20 desde TronGrid (debug/inspección) */
 	@GetMapping("/usdt-trc20-trongrid")
-	public ResponseEntity<String> getTRC20TransfersUsingTronGrid() {
-		String walletAddress = "TPDNfJ72Fh6Hrfk6faYVps1rN78NB8LQGu";
+	public ResponseEntity<String> getTRC20TransfersUsingTronGrid(@RequestParam(required = false) String address) {
+		List<String> trustAddresses = accountBinanceRepository.findTrustAddresses();
+		String walletAddress = (address != null && !address.isBlank())
+				? address
+				: (trustAddresses.isEmpty() ? "" : trustAddresses.get(0));
+		if (walletAddress.isEmpty()) {
+			return ResponseEntity.badRequest().body("{\"error\": \"No hay wallets TRUST registradas\"}");
+		}
 		String response = tronScanService.getTRC20TransfersUsingTronGrid(walletAddress);
 		return ResponseEntity.ok(response);
 	}
 
-	// Entradas TRC20 multi-cripto (antes: solo USDT)
+	/** Entradas TRC20 multi-cripto para todas las wallets TRUST */
 	@GetMapping("/usdt-entradas")
 	public ResponseEntity<List<BuyDollarsDto>> getUSDTIncomingTransfers() {
-		Set<String> assignedIds = buyDollarsRepository.findAll().stream().map(BuyDollars::getIdDeposit)
-				.collect(Collectors.toSet());
+		Set<String> assignedIds = buyDollarsRepository.findAllDepositIds();
 
-		List<AccountBinance> trustWallets = accountBinanceRepository.findAll().stream()
-				.filter(account -> "TRUST".equalsIgnoreCase(account.getTipo()))
-				.filter(account -> account.getAddress() != null && !account.getAddress().trim().isEmpty())
+		List<com.binance.web.Entity.AccountBinance> trustWallets = accountBinanceRepository.findByTipo("TRUST").stream()
+				.filter(a -> a.getAddress() != null && !a.getAddress().isBlank())
 				.collect(Collectors.toList());
 
 		List<BuyDollarsDto> result = new ArrayList<>();
-
-		for (AccountBinance trustAccount : trustWallets) {
+		for (var trustAccount : trustWallets) {
 			String walletAddress = trustAccount.getAddress();
 			String accountName = trustAccount.getName();
 			String response = tronScanService.getTRC20TransfersUsingTronGrid(walletAddress);
-
-			// ⬇️ IMPORTANTE: usa el parser multi-cripto
-			List<BuyDollarsDto> incoming = tronScanService.parseTRC20IncomingTransfers(response, walletAddress,
-					accountName, assignedIds);
-
-			result.addAll(incoming);
+			result.addAll(tronScanService.parseTRC20IncomingTransfers(response, walletAddress, accountName, assignedIds));
 		}
 
 		return ResponseEntity.ok(result);
 	}
 
-	// Salidas TRC20 multi-cripto + comisión en TRX
+	/** Salidas TRC20 multi-cripto + comisión en TRX */
 	@GetMapping("/usdt-salidas")
 	public ResponseEntity<List<SellDollarsDto>> getUSDTOutgoingTransfers() {
-		Set<String> assignedIds = sellDollarsRepository.findAll().stream().map(SellDollars::getIdWithdrawals)
-				.collect(Collectors.toSet());
+		Set<String> assignedIds = sellDollarsRepository.findAllWithdrawalIds();
 
-		Map<String, Cliente> clientePorWallet = clienteRepository.findAll().stream()
-				.filter(c -> c.getWallet() != null && !c.getWallet().trim().isEmpty())
-				.collect(Collectors.toMap(c -> c.getWallet().trim().toLowerCase(), c -> c));
+		Map<String, Cliente> clientePorWallet = clienteRepository.findByWalletNotNull().stream()
+				.collect(Collectors.toMap(c -> c.getWallet().trim().toLowerCase(), c -> c, (a, b) -> a));
 
-		List<AccountBinance> trustWallets = accountBinanceRepository.findAll().stream()
-				.filter(account -> "TRUST".equalsIgnoreCase(account.getTipo()))
-				.filter(account -> account.getAddress() != null && !account.getAddress().trim().isEmpty())
+		List<com.binance.web.Entity.AccountBinance> trustWallets = accountBinanceRepository.findByTipo("TRUST").stream()
+				.filter(a -> a.getAddress() != null && !a.getAddress().isBlank())
 				.collect(Collectors.toList());
 
 		List<SellDollarsDto> result = new ArrayList<>();
-
-		for (AccountBinance trustAccount : trustWallets) {
+		for (var trustAccount : trustWallets) {
 			String walletAddress = trustAccount.getAddress();
 			String accountName = trustAccount.getName();
 			String response = tronScanService.getTRC20TransfersUsingTronGrid(walletAddress);
-
-			// ⬇️ IMPORTANTE: usa el parser multi-cripto renombrado
-			List<SellDollarsDto> outgoing = tronScanService.parseTRC20OutgoingTransfers(response, walletAddress,
-					accountName, assignedIds, clientePorWallet);
-
-			result.addAll(outgoing);
+			result.addAll(tronScanService.parseTRC20OutgoingTransfers(response, walletAddress, accountName, assignedIds, clientePorWallet));
 		}
 
 		return ResponseEntity.ok(result);
 	}
 
-	// Traspasos internos TRC20 (este endpoint sigue filtrando USDT; puedes
-	// generalizarlo si quieres)
+	/** Traspasos internos TRC20 entre wallets propias */
 	@GetMapping("/trust-transacciones-salientes")
 	public ResponseEntity<List<TransaccionesDTO>> getTrustOutgoingTransfers() {
-
-		Set<String> registeredIds = transaccionesRepository.findAll().stream().map(Transacciones::getIdtransaccion)
-				.collect(Collectors.toSet());
-
-		Set<String> registeredAddresses = accountBinanceRepository.findAll().stream().map(AccountBinance::getAddress)
-				.filter(address -> address != null && !address.trim().isEmpty()).collect(Collectors.toSet());
-
-		List<String> trustWallets = accountBinanceRepository.findAll().stream()
-				.filter(a -> "TRUST".equalsIgnoreCase(a.getTipo())).map(AccountBinance::getAddress)
-				.filter(address -> address != null && !address.trim().isEmpty()).collect(Collectors.toList());
+		Set<String> registeredIds      = transaccionesRepository.findAllTransaccionIds();
+		Set<String> registeredAddresses = accountBinanceRepository.findAllAddresses();
+		List<String> trustWallets       = accountBinanceRepository.findTrustAddresses();
 
 		List<TransaccionesDTO> result = new ArrayList<>();
+		ObjectMapper mapper = new ObjectMapper();
 
 		for (String walletAddress : trustWallets) {
 			try {
 				String response = tronScanService.getTRC20TransfersUsingTronGrid(walletAddress);
-				JsonNode root = new ObjectMapper().readTree(response);
-				JsonNode data = root.path("data");
+				JsonNode data = mapper.readTree(response).path("data");
 
-				if (data.isArray()) {
-					for (JsonNode tx : data) {
-						String from = tx.path("from").asText();
-						String to = tx.path("to").asText();
-						String txId = tx.path("transaction_id").asText();
-						JsonNode tokenInfo = tx.path("token_info");
-						String symbol = tokenInfo.path("symbol").asText();
+				if (!data.isArray()) continue;
 
-						if (from.equalsIgnoreCase(walletAddress) && symbol.equalsIgnoreCase("USDT") // <- puedes hacerlo
-																									// multi-cripto si
-																									// quieres
-								&& !registeredIds.contains(txId) && registeredAddresses.contains(to)) {
+				for (JsonNode tx : data) {
+					String from   = tx.path("from").asText();
+					String to     = tx.path("to").asText();
+					String txId   = tx.path("transaction_id").asText();
+					String symbol = tx.path("token_info").path("symbol").asText();
 
-							double amount = Double.parseDouble(tx.path("value").asText("0")) / 1_000_000.0;
-							long timestamp = tx.path("block_timestamp").asLong();
+					if (!from.equalsIgnoreCase(walletAddress)) continue;
+					if (!"USDT".equalsIgnoreCase(symbol)) continue;
+					if (registeredIds.contains(txId)) continue;
+					if (!registeredAddresses.contains(to)) continue;
 
-							TransaccionesDTO dto = new TransaccionesDTO();
-							dto.setIdtransaccion(txId);
-							dto.setCuentaFrom(walletAddress);
-							dto.setCuentaTo(to);
-							dto.setFecha(LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp),
-									ZoneId.of("America/Bogota")));
-							dto.setMonto(amount);
-							dto.setTipo("TRUST");
+					int decimals = 6;
+					try { decimals = Integer.parseInt(tx.path("token_info").path("decimals").asText("6")); } catch (Exception ignore) {}
+					double amount = Double.parseDouble(tx.path("value").asText("0")) / Math.pow(10, decimals);
+					long timestamp = tx.path("block_timestamp").asLong();
 
-							result.add(dto);
-						}
-					}
+					TransaccionesDTO dto = new TransaccionesDTO();
+					dto.setIdtransaccion(txId);
+					dto.setCuentaFrom(walletAddress);
+					dto.setCuentaTo(to);
+					dto.setFecha(LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp), ZoneId.of("America/Bogota")));
+					dto.setMonto(amount);
+					dto.setTipo("TRUST");
+					result.add(dto);
 				}
 			} catch (Exception e) {
-				e.printStackTrace();
+				log.error("Error procesando traspasos TRUST para wallet {}: {}", walletAddress, e.getMessage());
 			}
 		}
 
 		return ResponseEntity.ok(result);
 	}
 
-	// Total assets de la wallet (USD)
+	/** Total assets de la wallet (USD) */
 	@GetMapping("/wallet-total-assets")
 	public ResponseEntity<Double> getWalletTotalAssets(@RequestParam String walletAddress) {
 		double totalUsd = tronScanService.getTotalAssetTokenOverview(walletAddress);
 		return ResponseEntity.ok(totalUsd);
 	}
-	
-	// TronScanController
+
+	/** Movimientos unificados TRC20 + TRX nativos en un solo array ordenado */
 	@GetMapping("/trongrid/movements-flat")
 	public ResponseEntity<String> unifiedMovements(
-	        @RequestParam String address,
-	        @RequestParam(defaultValue = "200") int limit) {
-
-	    String json = tronScanService.getUnifiedMovementsJson(address, limit);
-	    return ResponseEntity.ok()
-	            .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
-	            .body(json);
+			@RequestParam String address,
+			@RequestParam(defaultValue = "200") int limit) {
+		String json = tronScanService.getUnifiedMovementsJson(address, limit);
+		return ResponseEntity.ok()
+				.contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+				.body(json);
 	}
 
 }

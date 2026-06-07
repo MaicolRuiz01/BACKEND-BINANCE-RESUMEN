@@ -1,6 +1,7 @@
 package com.binance.web.controller;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -101,10 +102,43 @@ public class SaleP2PController {
 
 	@GetMapping("/today/no-asignadas/all-binance")
 	public ResponseEntity<List<SaleP2PDto>> getTodayNoAsignadasAllBinance() {
-		// metodo auxiliar por si hay una asignacion doble
-		// saleP2PService.fixDuplicateAssignmentsAuto(70);
-
 		return ResponseEntity.ok(saleP2PService.getTodayNoAsignadasAllAccounts());
+	}
+
+	/**
+	 * Ventas asignadas entre dos fechas (inclusive).
+	 * GET /saleP2P/range?inicio=2024-01-01&fin=2024-01-31
+	 */
+	@GetMapping("/range")
+	public ResponseEntity<List<SaleP2PDto>> getAsignadasByRange(
+			@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate inicio,
+			@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fin) {
+		java.time.LocalDateTime start = inicio.atStartOfDay();
+		java.time.LocalDateTime end   = fin.atTime(23, 59, 59);
+		List<SaleP2P> ventas = saleP2PService.obtenerVentasEntreFechas(start, end);
+		List<SaleP2PDto> dtos = ventas.stream()
+				.filter(v -> Boolean.TRUE.equals(v.getAsignado()))
+				.map(v -> {
+					List<SaleP2PDto.AccountCopDetailDto> details = v.getAccountCopsDetails() == null
+							? java.util.Collections.emptyList()
+							: v.getAccountCopsDetails().stream()
+								.map(d -> new SaleP2PDto.AccountCopDetailDto(d.getNameAccount(), d.getAmount()))
+								.collect(Collectors.toList());
+					return SaleP2PDto.builder()
+							.id(v.getId())
+							.numberOrder(v.getNumberOrder())
+							.date(v.getDate())
+							.pesosCop(v.getPesosCop())
+							.dollarsUs(v.getDollarsUs())
+							.tasa(v.getTasa())
+							.commission(v.getCommission())
+							.asignado(v.getAsignado())
+							.nameAccountBinance(v.getBinanceAccount() != null ? v.getBinanceAccount().getName() : null)
+							.accountCopsDetails(details)
+							.build();
+				})
+				.collect(Collectors.toList());
+		return ResponseEntity.ok(dtos);
 	}
 
 }

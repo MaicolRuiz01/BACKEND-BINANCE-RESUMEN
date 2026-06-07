@@ -5,6 +5,8 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
+import java.util.Set;
+
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -27,4 +29,8 @@ public interface SellDollarsRepository extends JpaRepository<SellDollars, Intege
 	List<SellDollars> findBySupplier_IdOrderByDateDesc(Integer supplierId);
 	List<SellDollars> findByAsignadoFalseAndDateLessThan(LocalDateTime end);
 	List<SellDollars> findByAsignadoFalseAndDateBetween(LocalDateTime start, LocalDateTime end);
+
+	/** Solo IDs — evita cargar entidades completas para deduplicación */
+	@Query("SELECT s.idWithdrawals FROM SellDollars s WHERE s.idWithdrawals IS NOT NULL")
+	Set<String> findAllWithdrawalIds();
 }

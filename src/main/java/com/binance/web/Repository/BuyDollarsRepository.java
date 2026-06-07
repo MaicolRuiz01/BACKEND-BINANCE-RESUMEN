@@ -27,4 +27,8 @@ public interface BuyDollarsRepository extends JpaRepository<BuyDollars, Integer>
 	List<BuyDollars> findByAsignadaFalse();
 	List<BuyDollars> findByAsignadaFalseAndDateLessThan(LocalDateTime end);
 
+	/** Solo IDs — evita cargar entidades completas para deduplicación */
+	@Query("SELECT b.idDeposit FROM BuyDollars b WHERE b.idDeposit IS NOT NULL")
+	java.util.Set<String> findAllDepositIds();
+
 }

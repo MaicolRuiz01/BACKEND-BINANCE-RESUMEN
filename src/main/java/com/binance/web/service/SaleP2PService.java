@@ -25,4 +25,15 @@ public interface SaleP2PService {
 	List<SaleP2PDto> getTodayNoAsignadasAllAccounts();
 	String fixDuplicateAssignmentsAuto(Integer saleP2pId);
 
+	/**
+	 * Reasigna una venta P2P ya asignada a una cuenta COP distinta.
+	 * Revierte el efecto (balance/cupo) en la cuenta anterior
+	 * y aplica en la nueva.
+	 *
+	 * @param saleId       ID de la venta P2P
+	 * @param copAccountId ID de la nueva cuenta COP destino
+	 * @return mensaje de resultado
+	 */
+	String reassignSale(Integer saleId, Integer copAccountId);
+
 }

@@ -7,17 +7,16 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.BuyDollars;
 import com.binance.web.Entity.Cliente;
-import com.binance.web.Entity.SellDollars;
-import com.binance.web.Entity.Transacciones;
 import com.binance.web.Repository.AccountBinanceRepository;
 import com.binance.web.Repository.BuyDollarsRepository;
 import com.binance.web.Repository.ClienteRepository;
@@ -30,10 +29,8 @@ import com.binance.web.model.SellDollarsDto;
 import com.binance.web.model.Transaction;
 import com.binance.web.transacciones.TransaccionesDTO;
 import com.binance.web.transacciones.TransaccionesRepository;
-import java.util.function.Function;
 
-
-
+@Slf4j
 @RestController
 @RequestMapping("/api")
 @CrossOrigin(origins = "*")
@@ -41,21 +38,12 @@ public class PaymentController {
 
 	private static final String nameAccount = "account";
 
-	@Autowired
-	private BinanceService binanceService;
-
-	@Autowired
-	private AccountBinanceRepository accountBinanceRepository;
-
-	@Autowired
-	private BuyDollarsRepository buyDollarsRepository;
-
-	@Autowired
-	private SellDollarsRepository sellDollarsRepository;
-	@Autowired
-	private TransaccionesRepository transaccionesRepository;
-	@Autowired
-	private ClienteRepository clienteRepository;
+	@Autowired private BinanceService binanceService;
+	@Autowired private AccountBinanceRepository accountBinanceRepository;
+	@Autowired private BuyDollarsRepository buyDollarsRepository;
+	@Autowired private SellDollarsRepository sellDollarsRepository;
+	@Autowired private TransaccionesRepository transaccionesRepository;
+	@Autowired private ClienteRepository clienteRepository;
 
 	@GetMapping("/payments")
 	public ResponseEntity<String> getPaymentHistory(@RequestParam(nameAccount) String account) {
@@ -64,263 +52,169 @@ public class PaymentController {
 	}
 
 	public List<Transaction> parseTransactions(String response) {
-		// Asumiendo que la respuesta es un JSON, usa alguna librería como Jackson para
-		// convertir el JSON en objetos de tipo Transaction
 		ObjectMapper objectMapper = new ObjectMapper();
 		try {
 			JsonNode rootNode = objectMapper.readTree(response);
 			JsonNode dataNode = rootNode.path("data");
-
-			// Verificamos si la propiedad 'data' está presente y contiene elementos
 			if (dataNode.isArray() && dataNode.size() > 0) {
 				List<Transaction> transactions = new ArrayList<>();
 				for (JsonNode node : dataNode) {
-					// Convertimos cada transacción del JSON a un objeto Transaction
-					Transaction transaction = objectMapper.treeToValue(node, Transaction.class);
-					transactions.add(transaction);
+					transactions.add(objectMapper.treeToValue(node, Transaction.class));
 				}
 				return transactions;
-			} else {
-				// Si no hay datos en la propiedad "data", devolvemos una lista vacía
-				return new ArrayList<>();
 			}
+			return new ArrayList<>();
 		} catch (JsonProcessingException e) {
-			throw new RuntimeException("Error parsing the transactions", e);
+			throw new RuntimeException("Error parsing BinancePay transactions", e);
 		}
 	}
-	
+
 	@GetMapping("/compras-binancepay")
-    public ResponseEntity<List<BuyDollarsDto>> getComprasNoRegistradas() {
-        List<BuyDollarsDto> resultados = new ArrayList<>();
+	public ResponseEntity<List<BuyDollarsDto>> getComprasNoRegistradas() {
+		List<BuyDollarsDto> resultados = new ArrayList<>();
+		try {
+			LocalDate hoy = LocalDate.now(ZoneId.of("America/Bogota"));
+			Set<String> userBinanceValidos = accountBinanceRepository.findAllUserBinances();
+			Set<String> idsRegistrados     = buyDollarsRepository.findAllDepositIds();
 
-        try {
-            LocalDate hoy = LocalDate.now(ZoneId.of("America/Bogota"));
+			for (String cuenta : binanceService.getAllAccountNames()) {
+				for (Transaction tx : parseTransactions(binanceService.getPaymentHistory(cuenta))) {
+					double monto = tx.getAmount();
+					LocalDateTime fecha = tx.getTransactionTime();
+					if (monto <= 0 || idsRegistrados.contains(tx.getOrderId())
+							|| fecha == null || !fecha.toLocalDate().isEqual(hoy)) continue;
+					if (tx.getPayerInfo() == null || userBinanceValidos.contains(tx.getPayerInfo().getName())) continue;
 
-            Set<String> userBinanceValidos = accountBinanceRepository.findAll().stream()
-                    .map(AccountBinance::getUserBinance)
-                    .filter(nombre -> nombre != null && !nombre.isBlank())
-                    .collect(Collectors.toSet());
-
-            Set<String> idsRegistrados = buyDollarsRepository.findAll().stream()
-                    .map(BuyDollars::getIdDeposit)
-                    .collect(Collectors.toSet());
-
-            for (String cuenta : binanceService.getAllAccountNames()) {
-                String respuesta = binanceService.getPaymentHistory(cuenta);
-                List<Transaction> transacciones = parseTransactions(respuesta);
-
-                for (Transaction tx : transacciones) {
-                    double monto = tx.getAmount();
-                    LocalDateTime fecha = tx.getTransactionTime();
-                    String cryptoSymbol = tx.getCurrency();
-
-                    if (monto > 0 && !idsRegistrados.contains(tx.getOrderId())
-                            && fecha != null && fecha.toLocalDate().isEqual(hoy)) {
-                        if (tx.getPayerInfo() != null && !userBinanceValidos.contains(tx.getPayerInfo().getName())) {
-                            BuyDollarsDto dto = new BuyDollarsDto();
-                            dto.setIdDeposit(tx.getOrderId());
-                            dto.setNameAccount(cuenta);
-                            dto.setDate(fecha);
-                            // ✅ Corregido: Usar 'amount' en lugar de 'dollars'
-                            dto.setAmount(monto);
-                            dto.setTasa(0.0);
-                            dto.setPesos(0.0);
-                            dto.setCryptoSymbol(cryptoSymbol);
-
-                            resultados.add(dto);
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-            return ResponseEntity.status(500).body(new ArrayList<>());
-        }
-        return ResponseEntity.ok(resultados);
-    }
-	
-	@GetMapping("/compras-binancepay/{fecha}")
-	public ResponseEntity<List<BuyDollarsDto>> getComprasPorFecha(
-	        @PathVariable String fecha) {
-
-	    LocalDate fechaFiltro = LocalDate.parse(fecha); // ejemplo "2025-10-15"
-	    List<BuyDollarsDto> resultados = new ArrayList<>();
-
-	    try {
-	        Set<String> userBinanceValidos = accountBinanceRepository.findAll().stream()
-	                .map(AccountBinance::getUserBinance)
-	                .filter(nombre -> nombre != null && !nombre.isBlank())
-	                .collect(Collectors.toSet());
-
-	        Set<String> idsRegistrados = buyDollarsRepository.findAll().stream()
-	                .map(BuyDollars::getIdDeposit)
-	                .collect(Collectors.toSet());
-
-	        for (String cuenta : binanceService.getAllAccountNames()) {
-	            String respuesta = binanceService.getPaymentHistory(cuenta);
-	            List<Transaction> transacciones = parseTransactions(respuesta);
-
-	            for (Transaction tx : transacciones) {
-	                double monto = tx.getAmount();
-	                LocalDateTime fechaTx = tx.getTransactionTime();
-
-	                if (monto > 0 && !idsRegistrados.contains(tx.getOrderId())
-	                        && fechaTx != null && fechaTx.toLocalDate().isEqual(fechaFiltro)) {
-
-	                    if (tx.getPayerInfo() != null && 
-	                        !userBinanceValidos.contains(tx.getPayerInfo().getName())) {
-
-	                        // DTO para devolver
-	                        BuyDollarsDto dto = new BuyDollarsDto();
-	                        dto.setIdDeposit(tx.getOrderId());
-	                        dto.setNameAccount(cuenta);
-	                        dto.setDate(fechaTx);
-	                        dto.setAmount(monto);
-	                        dto.setTasa(0.0);
-	                        dto.setPesos(0.0);
-	                        dto.setCryptoSymbol(tx.getCurrency());
-	                        resultados.add(dto);
-
-	                        // ENTIDAD para guardar
-	                        BuyDollars entidad = new BuyDollars();
-	                        entidad.setIdDeposit(tx.getOrderId());
-	                        entidad.setNameAccount(cuenta);
-	                        entidad.setDate(fechaTx);
-	                        entidad.setAmount(monto);
-	                        entidad.setTasa(0.0);
-	                        entidad.setPesos(0.0);
-	                        entidad.setCryptoSymbol(tx.getCurrency());
-
-	                        buyDollarsRepository.save(entidad);
-	                    }
-	                }
-	            }
-	        }
-	    } catch (Exception e) {
-	        e.printStackTrace();
-	        return ResponseEntity.status(500).body(new ArrayList<>());
-	    }
-
-	    return ResponseEntity.ok(resultados);
+					BuyDollarsDto dto = new BuyDollarsDto();
+					dto.setIdDeposit(tx.getOrderId());
+					dto.setNameAccount(cuenta);
+					dto.setDate(fecha);
+					dto.setAmount(monto);
+					dto.setTasa(0.0);
+					dto.setPesos(0.0);
+					dto.setCryptoSymbol(tx.getCurrency());
+					resultados.add(dto);
+				}
+			}
+		} catch (Exception e) {
+			log.error("Error en getComprasNoRegistradas: {}", e.getMessage(), e);
+			return ResponseEntity.status(500).body(new ArrayList<>());
+		}
+		return ResponseEntity.ok(resultados);
 	}
 
+	@GetMapping("/compras-binancepay/{fecha}")
+	public ResponseEntity<List<BuyDollarsDto>> getComprasPorFecha(@PathVariable String fecha) {
+		LocalDate fechaFiltro = LocalDate.parse(fecha);
+		List<BuyDollarsDto> resultados = new ArrayList<>();
+		try {
+			Set<String> userBinanceValidos = accountBinanceRepository.findAllUserBinances();
+			Set<String> idsRegistrados     = buyDollarsRepository.findAllDepositIds();
 
+			for (String cuenta : binanceService.getAllAccountNames()) {
+				for (Transaction tx : parseTransactions(binanceService.getPaymentHistory(cuenta))) {
+					double monto = tx.getAmount();
+					LocalDateTime fechaTx = tx.getTransactionTime();
+					if (monto <= 0 || idsRegistrados.contains(tx.getOrderId())
+							|| fechaTx == null || !fechaTx.toLocalDate().isEqual(fechaFiltro)) continue;
+					if (tx.getPayerInfo() == null || userBinanceValidos.contains(tx.getPayerInfo().getName())) continue;
+
+					BuyDollarsDto dto = new BuyDollarsDto();
+					dto.setIdDeposit(tx.getOrderId());
+					dto.setNameAccount(cuenta);
+					dto.setDate(fechaTx);
+					dto.setAmount(monto);
+					dto.setTasa(0.0);
+					dto.setPesos(0.0);
+					dto.setCryptoSymbol(tx.getCurrency());
+					resultados.add(dto);
+
+					BuyDollars entidad = new BuyDollars();
+					entidad.setIdDeposit(tx.getOrderId());
+					entidad.setNameAccount(cuenta);
+					entidad.setDate(fechaTx);
+					entidad.setAmount(monto);
+					entidad.setTasa(0.0);
+					entidad.setPesos(0.0);
+					entidad.setCryptoSymbol(tx.getCurrency());
+					buyDollarsRepository.save(entidad);
+				}
+			}
+		} catch (Exception e) {
+			log.error("Error en getComprasPorFecha ({}): {}", fecha, e.getMessage(), e);
+			return ResponseEntity.status(500).body(new ArrayList<>());
+		}
+		return ResponseEntity.ok(resultados);
+	}
 
 	@GetMapping("/ventas-no-registradas-binancepay")
 	public ResponseEntity<List<SellDollarsDto>> getVentasNoRegistradasBinancePay() {
-	    List<SellDollarsDto> resultados = new ArrayList<>();
+		List<SellDollarsDto> resultados = new ArrayList<>();
+		try {
+			LocalDate hoy = LocalDate.now(ZoneId.of("America/Bogota"));
+			Set<String> idsRegistrados    = sellDollarsRepository.findAllWithdrawalIds();
+			Set<String> userBinanceValidos = accountBinanceRepository.findAllUserBinances();
 
-	    try {
-	        LocalDate hoy = LocalDate.now(ZoneId.of("America/Bogota"));
+			Map<Long, Cliente> clientePorBinanceId = clienteRepository.findByBinanceIdNotNull().stream()
+					.collect(Collectors.toMap(Cliente::getBinanceId, Function.identity()));
 
-	        Set<String> idsRegistrados = sellDollarsRepository.findAll().stream()
-	                .map(SellDollars::getIdWithdrawals)
-	                .collect(Collectors.toSet());
+			for (String cuenta : binanceService.getAllAccountNames()) {
+				for (Transaction tx : parseTransactions(binanceService.getPaymentHistory(cuenta))) {
+					double monto = tx.getAmount();
+					LocalDateTime fecha = tx.getTransactionTime();
+					if (monto >= 0 || idsRegistrados.contains(tx.getOrderId())
+							|| fecha == null || !fecha.toLocalDate().isEqual(hoy)) continue;
+					if (tx.getReceiverInfo() == null || userBinanceValidos.contains(tx.getReceiverInfo().getName())) continue;
 
-	        Set<String> userBinanceValidos = accountBinanceRepository.findAll().stream()
-	                .map(AccountBinance::getUserBinance)
-	                .filter(nombre -> nombre != null && !nombre.isBlank())
-	                .collect(Collectors.toSet());
-	        
-	        Set<String> addressesValidas = accountBinanceRepository.findAll().stream()
-	                .map(AccountBinance::getAddress)
-	                .filter(a -> a != null && !a.isBlank())
-	                .map(a -> a.trim().toLowerCase())
-	                .collect(Collectors.toSet());
+					SellDollarsDto dto = new SellDollarsDto();
+					dto.setIdWithdrawals(tx.getOrderId());
+					dto.setNameAccount(cuenta);
+					dto.setDate(fecha);
+					dto.setDollars(Math.abs(monto));
+					dto.setTasa(0.0);
+					dto.setPesos(0.0);
 
+					Long recvBinanceId = tx.getReceiverInfo().getBinanceId();
+					Cliente cliente = clientePorBinanceId.get(recvBinanceId);
+					if (cliente != null) dto.setClienteId(cliente.getId());
 
-	     // 🔍 Mapa rápido para buscar clientes por binanceId
-	        Map<Long, Cliente> clientePorBinanceId = clienteRepository.findAll().stream()
-	            .filter(c -> c.getBinanceId() != null)
-	            .collect(Collectors.toMap(Cliente::getBinanceId, Function.identity()));
-
-	        for (String cuenta : binanceService.getAllAccountNames()) {
-	            String respuesta = binanceService.getPaymentHistory(cuenta);
-	            List<Transaction> transacciones = parseTransactions(respuesta);
-
-	            for (Transaction tx : transacciones) {
-	                double monto = tx.getAmount();
-	                LocalDateTime fecha = tx.getTransactionTime();
-
-	                if (monto < 0 && !idsRegistrados.contains(tx.getOrderId())
-	                        && fecha != null && fecha.toLocalDate().isEqual(hoy)) {
-	                    
-	                	if (tx.getReceiverInfo() != null && !userBinanceValidos.contains(tx.getReceiverInfo().getName())) {
-	                	    SellDollarsDto dto = new SellDollarsDto();
-	                	    dto.setIdWithdrawals(tx.getOrderId());
-	                	    dto.setNameAccount(cuenta);
-	                	    dto.setDate(fecha);
-	                	    dto.setDollars(Math.abs(monto));
-	                	    dto.setTasa(0.0);
-	                	    dto.setPesos(0.0);
-
-	                	    // ✅ Usar binanceId del receiver para encontrar cliente
-	                	    Long recvBinanceId = tx.getReceiverInfo().getBinanceId();
-	                	    Cliente cliente = clientePorBinanceId.get(recvBinanceId);
-	                	    if (cliente != null) {
-	                	        dto.setClienteId(cliente.getId());
-	                	    }
-
-	                	    resultados.add(dto);
-	                	}
-	                }
-	            }
-	        }
-
-	        return ResponseEntity.ok(resultados);
-
-	    } catch (Exception e) {
-	        e.printStackTrace();
-	        return ResponseEntity.status(500).body(new ArrayList<>());
-	    }
+					resultados.add(dto);
+				}
+			}
+			return ResponseEntity.ok(resultados);
+		} catch (Exception e) {
+			log.error("Error en getVentasNoRegistradasBinancePay: {}", e.getMessage(), e);
+			return ResponseEntity.status(500).body(new ArrayList<>());
+		}
 	}
-
 
 	@GetMapping("/transacciones-binacepay")
 	public ResponseEntity<List<TransaccionesDTO>> getTransaccionesNoRegistradas() {
-	    List<TransaccionesDTO> resultados = new ArrayList<>();
+		List<TransaccionesDTO> resultados = new ArrayList<>();
+		try {
+			Set<String> userBinanceValidos = accountBinanceRepository.findAllUserBinances();
+			Set<String> idsRegistrados     = transaccionesRepository.findAllTransaccionIds();
 
-	    try {
-	        // Usuarios válidos desde la base de datos
-	        Set<String> userBinanceValidos = accountBinanceRepository.findAll().stream()
-	                .map(AccountBinance::getUserBinance)
-	                .filter(nombre -> nombre != null && !nombre.isBlank())
-	                .collect(Collectors.toSet());
+			for (String cuenta : binanceService.getAllAccountNames()) {
+				for (Transaction tx : parseTransactions(binanceService.getPaymentHistory(cuenta))) {
+					double monto = tx.getAmount();
+					if (monto >= 0 || idsRegistrados.contains(tx.getOrderId())) continue;
+					if (tx.getReceiverInfo() == null || !userBinanceValidos.contains(tx.getReceiverInfo().getName())) continue;
 
-	        // Transacciones ya registradas
-	        Set<String> idsRegistrados = transaccionesRepository.findAll().stream()
-	                .map(Transacciones::getIdtransaccion)
-	                .collect(Collectors.toSet());
-
-	        for (String cuenta : binanceService.getAllAccountNames()) {
-	            String respuesta = binanceService.getPaymentHistory(cuenta);
-	            List<Transaction> transacciones = parseTransactions(respuesta);
-
-	            for (Transaction tx : transacciones) {
-	                double monto = tx.getAmount();
-
-	                // Filtrar salidas de dinero no registradas con receptor válido
-	                if (monto < 0 && !idsRegistrados.contains(tx.getOrderId())) {
-	                    if (tx.getReceiverInfo() != null && userBinanceValidos.contains(tx.getReceiverInfo().getName())) {
-	                        TransaccionesDTO dto = new TransaccionesDTO();
-	                        dto.setIdtransaccion(tx.getOrderId());
-	                        dto.setCuentaFrom(cuenta);
-	                        dto.setCuentaTo(tx.getReceiverInfo().getName());
-	                        dto.setFecha(tx.getTransactionTime());
-	                        dto.setMonto(Math.abs(monto));
-	                        dto.setTipo("BINANCEPAY");
-
-	                        resultados.add(dto);
-	                    }
-	                }
-	            }
-	        }
-
-	    } catch (Exception e) {
-	        e.printStackTrace();
-	        return ResponseEntity.status(500).body(new ArrayList<>());
-	    }
-
-	    return ResponseEntity.ok(resultados);
+					TransaccionesDTO dto = new TransaccionesDTO();
+					dto.setIdtransaccion(tx.getOrderId());
+					dto.setCuentaFrom(cuenta);
+					dto.setCuentaTo(tx.getReceiverInfo().getName());
+					dto.setFecha(tx.getTransactionTime());
+					dto.setMonto(Math.abs(monto));
+					dto.setTipo("BINANCEPAY");
+					resultados.add(dto);
+				}
+			}
+		} catch (Exception e) {
+			log.error("Error en getTransaccionesNoRegistradas: {}", e.getMessage(), e);
+			return ResponseEntity.status(500).body(new ArrayList<>());
+		}
+		return ResponseEntity.ok(resultados);
 	}
 }

@@ -317,11 +317,11 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
 			totalUsdt += qty * px;
 		}
 
-		// aplica tasa
-		AverageRate rate = averageRateRepository.findTopByOrderByIdDesc()
-				.orElseThrow(() -> new RuntimeException("No purchase rate available"));
-		double tasa = Optional.ofNullable(rate.getAverageRate())
-				.orElseThrow(() -> new RuntimeException("No purchase rate available"));
+		// aplica tasa — si no hay tasa registrada, devuelve el valor en USDT
+		double tasa = averageRateRepository.findTopByOrderByIdDesc()
+				.map(AverageRate::getAverageRate)
+				.filter(r -> r != null && r > 0)
+				.orElse(1.0);
 
 		return BigDecimal.valueOf(totalUsdt).multiply(BigDecimal.valueOf(tasa));
 	}

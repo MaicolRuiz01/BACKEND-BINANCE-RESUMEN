@@ -31,3 +31,18 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Local secrets / runtime artifacts ###
+# application-local.properties may contain DB passwords, API keys, etc.
+src/main/resources/application-local.properties
+
+# Java crash logs
+hs_err_pid*.log
+replay_pid*.log
+
+# Compiled output inside source tree
+bin/
+
+# Log files
+*.log
+logs/

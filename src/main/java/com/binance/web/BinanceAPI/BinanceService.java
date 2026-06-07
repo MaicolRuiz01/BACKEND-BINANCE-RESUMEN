@@ -4,444 +4,418 @@ import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Repository.AccountBinanceRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.gson.Gson;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.http.*;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.math.BigDecimal;
-import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 public class BinanceService {
 
-	private static final String PAYMENTS_API_URL = "https://api.binance.com/sapi/v1/pay/transactions";
+	private static final String PAYMENTS_API_URL   = "https://api.binance.com/sapi/v1/pay/transactions";
 	private static final String P2P_ORDERS_API_URL = "https://api.binance.com/sapi/v1/c2c/orderMatch/listUserOrderHistory";
+	private static final ZoneId ZONE_BOGOTA = ZoneId.of("America/Bogota");
+
+	private final ObjectMapper mapper = new ObjectMapper();
+
+	/** RestTemplate compartido — configura timeouts en HttpClientConfig si lo necesitas */
+	private final RestTemplate restTemplate = new RestTemplate();
+
 	@Autowired
 	private AccountBinanceRepository accountRepo;
 
-	public List<String> getAllAccountNames() {
-		return accountRepo.findByTipo("BINANCE").stream().filter(a -> a.getApiKey() != null && a.getApiSecret() != null)
-				.map(AccountBinance::getName).toList();
-	}
-
-	// metodo para obtener los movimientos de binancepay las que se hacen por correo
-	public String getPaymentHistory(String account) {
-		try {
-			String[] credentials = getApiCredentials(account);
-			if (credentials == null)
-				return "{\"error\": \"Cuenta no válida.\"}";
-
-			String apiKey = credentials[0];
-			String secretKey = credentials[1];
-
-			long timestamp = getServerTime();
-			String query = "timestamp=" + timestamp + "&recvWindow=60000";
-			String signature = hmacSha256(secretKey, query);
-			String url = PAYMENTS_API_URL + "?" + query + "&signature=" + signature;
-
-			return sendBinanceRequestWithProxy(url, apiKey);
-
-		} catch (Exception e) {
-			return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
-		}
-	}
-
-	public String getP2POrdersInRange(String account, long startTime, long endTime) {
-		try {
-			String[] credentials = getApiCredentials(account);
-			if (credentials == null)
-				return "{\"error\": \"Cuenta no válida.\"}";
-
-			String apiKey = credentials[0];
-			String secretKey = credentials[1];
-
-			List<JsonObject> allOrders = new ArrayList<>();
-			int currentPage = 1;
-			int rows = 50;
-
-			while (true) {
-				long timestamp = getServerTime();
-				String query = "tradeType=SELL" + "&startTimestamp=" + startTime + "&endTimestamp=" + endTime + "&page="
-						+ currentPage + "&rows=" + rows + "&recvWindow=60000" + "&timestamp=" + timestamp;
-
-				String signature = hmacSha256(secretKey, query);
-				String url = P2P_ORDERS_API_URL + "?" + query + "&signature=" + signature;
-
-				String response = sendBinanceRequestWithProxy(url, apiKey);
-				JsonObject jsonResponse = JsonParser.parseString(response).getAsJsonObject();
-
-				if (jsonResponse.has("code") && !jsonResponse.get("code").getAsString().equals("000000")) {
-					return "{\"error\": \"" + jsonResponse.get("msg").getAsString() + "\"}";
-				}
-
-				JsonArray dataArray = jsonResponse.getAsJsonArray("data");
-				if (dataArray == null || dataArray.size() == 0)
-					break;
-
-				dataArray.forEach(order -> allOrders.add(order.getAsJsonObject()));
-
-				int totalOrders = jsonResponse.has("total") ? jsonResponse.get("total").getAsInt() : 0;
-				if (allOrders.size() >= totalOrders)
-					break;
-
-				currentPage++;
-			}
-
-			JsonObject finalResponse = new JsonObject();
-			finalResponse.add("data", JsonParser.parseString(allOrders.toString()));
-			return finalResponse.toString();
-
-		} catch (Exception e) {
-			return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
-		}
-	}
-
-	private long getServerTime() throws Exception {
-		String url = "https://api.binance.com/api/v3/time";
-		String response = sendBinanceRequestWithProxy(url, null);
-
-		// Convertir la respuesta en JSON
-		JsonObject jsonResponse = JsonParser.parseString(response).getAsJsonObject();
-
-		if (!jsonResponse.has("serverTime") || jsonResponse.get("serverTime").isJsonNull()) {
-			throw new RuntimeException("No se pudo obtener el timestamp del servidor Binance");
-		}
-
-		return jsonResponse.get("serverTime").getAsLong();
-	}
-
-	private String sendBinanceRequestWithProxy(String url, String apiKey) throws Exception {
-	    HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
-	    connection.setRequestMethod("GET");
-
-	    if (apiKey != null) {
-	        connection.setRequestProperty("X-MBX-APIKEY", apiKey);
-	    }
-
-	    int responseCode = connection.getResponseCode();
-
-	    // ✅ Si es Futures y falla por permisos, NO rompemos: devolvemos vacío
-	    boolean isFutures = url.contains("fapi.binance.com");
-	    if (isFutures && (responseCode == 401 || responseCode == 403)) {
-	        System.out.println("⚠️ Futures sin permiso (" + responseCode + ") para URL: " + url);
-	        return "[]"; // o "{}" según lo que esperes parsear
-	    }
-
-	    // (Opcional) Si quieres también tolerar 429/418 en futures:
-	    // if (isFutures && (responseCode == 429 || responseCode == 418)) return "[]";
-
-	    if (responseCode != 200) {
-	        // lee body de error para más info (muy útil)
-	        String errBody = "";
-	        try (BufferedReader r = new BufferedReader(new InputStreamReader(connection.getErrorStream()))) {
-	            String line;
-	            StringBuilder sb = new StringBuilder();
-	            while ((line = r.readLine()) != null) sb.append(line);
-	            errBody = sb.toString();
-	        } catch (Exception ignore) {}
-
-	        throw new RuntimeException("Error HTTP: " + responseCode + " Body: " + errBody);
-	    }
-
-	    try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()))) {
-	        StringBuilder response = new StringBuilder();
-	        String line;
-	        while ((line = reader.readLine()) != null) response.append(line);
-	        return response.toString();
-	    }
-	}
-
+	// ─────────────────────────────────────────────────────────────
+	// Helpers internos
+	// ─────────────────────────────────────────────────────────────
 
 	private String[] getApiCredentials(String accountName) {
 		AccountBinance account = accountRepo.findByName(accountName);
-		if (account != null && "BINANCE".equalsIgnoreCase(account.getTipo())) {
-			if (account.getApiKey() != null && account.getApiSecret() != null) {
-				return new String[] { account.getApiKey(), account.getApiSecret() };
-			}
+		if (account != null && "BINANCE".equalsIgnoreCase(account.getTipo())
+				&& account.getApiKey() != null && account.getApiSecret() != null) {
+			return new String[]{account.getApiKey(), account.getApiSecret()};
 		}
 		return null;
 	}
 
 	private String hmacSha256(String secretKey, String data) {
 		try {
-			Mac sha256_HMAC = Mac.getInstance("HmacSHA256");
-			SecretKeySpec secretKeySpec = new SecretKeySpec(secretKey.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
-			sha256_HMAC.init(secretKeySpec);
-			byte[] hash = sha256_HMAC.doFinal(data.getBytes(StandardCharsets.UTF_8));
-			return bytesToHex(hash);
+			Mac mac = Mac.getInstance("HmacSHA256");
+			mac.init(new SecretKeySpec(secretKey.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+			byte[] hash = mac.doFinal(data.getBytes(StandardCharsets.UTF_8));
+			StringBuilder sb = new StringBuilder();
+			for (byte b : hash) sb.append(String.format("%02x", b));
+			return sb.toString();
 		} catch (Exception e) {
-			throw new RuntimeException("Error al generar la firma HMAC SHA256", e);
+			throw new RuntimeException("Error generando firma HMAC SHA256", e);
 		}
 	}
 
-	private String bytesToHex(byte[] bytes) {
-		StringBuilder result = new StringBuilder();
-		for (byte b : bytes) {
-			result.append(String.format("%02x", b));
+	/**
+	 * Llamada GET autenticada a Binance (o pública si apiKey == null).
+	 * Reemplaza el antiguo HttpURLConnection manual.
+	 */
+	private String binanceGet(String url, String apiKey) {
+		HttpHeaders headers = new HttpHeaders();
+		if (apiKey != null) headers.set("X-MBX-APIKEY", apiKey);
+		HttpEntity<Void> entity = new HttpEntity<>(headers);
+		try {
+			return restTemplate.exchange(url, HttpMethod.GET, entity, String.class).getBody();
+		} catch (HttpClientErrorException ex) {
+			boolean isFutures = url.contains("fapi.binance.com");
+			if (isFutures && (ex.getStatusCode() == HttpStatus.UNAUTHORIZED || ex.getStatusCode() == HttpStatus.FORBIDDEN)) {
+				log.warn("Futures sin permiso ({}) para URL: {}", ex.getStatusCode(), url);
+				return "[]";
+			}
+			throw new RuntimeException("Error HTTP " + ex.getStatusCode() + " — " + ex.getResponseBodyAsString(), ex);
 		}
-		return result.toString();
 	}
 
+	/**
+	 * Llamada POST autenticada (usada para Funding wallet).
+	 * El body se envía como form-urlencoded.
+	 */
+	private String binancePost(String url, String apiKey, String body) {
+		HttpHeaders headers = new HttpHeaders();
+		headers.set("X-MBX-APIKEY", apiKey);
+		headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+		HttpEntity<String> entity = new HttpEntity<>(body, headers);
+		try {
+			return restTemplate.exchange(url, HttpMethod.POST, entity, String.class).getBody();
+		} catch (HttpClientErrorException ex) {
+			throw new RuntimeException("Error HTTP POST " + ex.getStatusCode() + " — " + ex.getResponseBodyAsString(), ex);
+		}
+	}
+
+	private long getServerTime() throws Exception {
+		String response = binanceGet("https://api.binance.com/api/v3/time", null);
+		JsonNode root = mapper.readTree(response);
+		if (!root.has("serverTime") || root.get("serverTime").isNull()) {
+			throw new RuntimeException("No se pudo obtener el timestamp del servidor Binance");
+		}
+		return root.get("serverTime").asLong();
+	}
+
+	// ─────────────────────────────────────────────────────────────
+	// Cuentas
+	// ─────────────────────────────────────────────────────────────
+
+	public List<String> getAllAccountNames() {
+		return accountRepo.findByTipo("BINANCE").stream()
+				.filter(a -> a.getApiKey() != null && a.getApiSecret() != null)
+				.map(AccountBinance::getName)
+				.toList();
+	}
+
+	// ─────────────────────────────────────────────────────────────
+	// BinancePay
+	// ─────────────────────────────────────────────────────────────
+
+	/** Caché de 120 s por cuenta — BinancePay no cambia en tiempo real */
+	@Cacheable(value = "binancePayHistory", key = "#account")
+	public String getPaymentHistory(String account) {
+		try {
+			String[] creds = getApiCredentials(account);
+			if (creds == null) return "{\"error\": \"Cuenta no válida.\"}";
+			long ts = getServerTime();
+			String query = "timestamp=" + ts + "&recvWindow=60000";
+			String sig   = hmacSha256(creds[1], query);
+			return binanceGet(PAYMENTS_API_URL + "?" + query + "&signature=" + sig, creds[0]);
+		} catch (Exception e) {
+			try {
+				return mapper.writeValueAsString(Map.of("error", e.getMessage() != null ? e.getMessage() : "Error interno"));
+			} catch (Exception ex) {
+				return "{\"error\": \"Error interno\"}";
+			}
+		}
+	}
+
+	// ─────────────────────────────────────────────────────────────
+	// P2P
+	// ─────────────────────────────────────────────────────────────
+
+	/**
+	 * Obtiene órdenes P2P en un rango de fechas.
+	 * tradeType puede ser "BUY", "SELL" o null para todos.
+	 * Reemplaza y elimina el overload antiguo sin tradeType.
+	 */
+	public String getP2POrdersInRange(String account, long startTime, long endTime, String tradeType) {
+		try {
+			String[] creds = getApiCredentials(account);
+			if (creds == null) return "{\"error\": \"Cuenta no válida.\"}";
+
+			ArrayNode allOrders = mapper.createArrayNode();
+			int page = 1;
+			int rows = 50;
+
+			while (true) {
+				long ts = getServerTime();
+				StringBuilder query = new StringBuilder();
+				if (tradeType != null && !tradeType.isBlank()) {
+					query.append("tradeType=").append(tradeType).append("&");
+				}
+				query.append("startTimestamp=").append(startTime)
+					 .append("&endTimestamp=").append(endTime)
+					 .append("&page=").append(page)
+					 .append("&rows=").append(rows)
+					 .append("&recvWindow=60000")
+					 .append("&timestamp=").append(ts);
+
+				String sig      = hmacSha256(creds[1], query.toString());
+				String response = binanceGet(P2P_ORDERS_API_URL + "?" + query + "&signature=" + sig, creds[0]);
+				JsonNode root   = mapper.readTree(response);
+
+				if (root.has("code") && !"000000".equals(root.get("code").asText())) {
+					return "{\"error\": \"" + root.path("msg").asText() + "\"}";
+				}
+
+				JsonNode dataArray = root.path("data");
+				if (!dataArray.isArray() || dataArray.size() == 0) break;
+
+				dataArray.forEach(allOrders::add);
+
+				int total = root.path("total").asInt(0);
+				if (allOrders.size() >= total) break;
+				page++;
+			}
+
+			ObjectNode finalResponse = mapper.createObjectNode();
+			finalResponse.set("data", allOrders);
+			return mapper.writeValueAsString(finalResponse);
+
+		} catch (Exception e) {
+			log.warn("[P2PSync] API error en cuenta '{}': {}", account, e.getMessage());
+			try {
+				return mapper.writeValueAsString(Map.of("error", e.getMessage() != null ? e.getMessage() : "Error interno"));
+			} catch (Exception ex) {
+				return "{\"error\": \"Error interno\"}";
+			}
+		}
+	}
+
+	/** Obtiene órdenes P2P del día actual (ambos tipos). */
 	public String getP2POrderLatest(String account) {
-		LocalDate today = LocalDate.now(ZoneId.of("America/Bogota"));
-		long startTime = today.atStartOfDay(ZoneId.of("America/Bogota")).toInstant().toEpochMilli();
-		long endTime = today.plusDays(1).atStartOfDay(ZoneId.of("America/Bogota")).toInstant().toEpochMilli();
-		return getP2POrdersInRange(account, startTime, endTime);
+		LocalDate today = LocalDate.now(ZONE_BOGOTA);
+		long startTime  = today.atStartOfDay(ZONE_BOGOTA).toInstant().toEpochMilli();
+		long endTime    = today.plusDays(1).atStartOfDay(ZONE_BOGOTA).toInstant().toEpochMilli();
+		return getP2POrdersInRange(account, startTime, endTime, null);
 	}
 
-	// estp es para futures
+	// ─────────────────────────────────────────────────────────────
+	// Futures
+	// ─────────────────────────────────────────────────────────────
+
 	public String getFuturesOrders(String account, String symbol, int limit) {
 		try {
-			String[] credentials = getApiCredentials(account);
-			if (credentials == null)
-				return "{\"error\": \"Cuenta no válida.\"}";
-
-			String apiKey = credentials[0];
-			String secretKey = credentials[1];
-
-			long timestamp = getServerTime();
-			String query = "symbol=" + symbol + "&limit=" + limit + "&timestamp=" + timestamp + "&recvWindow=60000";
-
-			String signature = hmacSha256(secretKey, query);
-			String url = "https://fapi.binance.com/fapi/v1/allOrders?" + query + "&signature=" + signature;
-
-			return sendBinanceRequestWithProxy(url, apiKey);
-
+			String[] creds = getApiCredentials(account);
+			if (creds == null) return "{\"error\": \"Cuenta no válida.\"}";
+			long ts  = getServerTime();
+			String q = "symbol=" + symbol + "&limit=" + limit + "&timestamp=" + ts + "&recvWindow=60000";
+			return binanceGet("https://fapi.binance.com/fapi/v1/allOrders?" + q + "&signature=" + hmacSha256(creds[1], q), creds[0]);
 		} catch (Exception e) {
 			return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
 		}
 	}
 
-	// estp es para futures
 	public String getFuturesPositions(String account) {
 		try {
-			String[] credentials = getApiCredentials(account);
-			if (credentials == null)
-				return "{\"error\": \"Cuenta no válida.\"}";
-
-			String apiKey = credentials[0];
-			String secretKey = credentials[1];
-
-			long timestamp = getServerTime();
-			String query = "timestamp=" + timestamp + "&recvWindow=60000";
-			String signature = hmacSha256(secretKey, query);
-			String url = "https://fapi.binance.com/fapi/v2/positionRisk?" + query + "&signature=" + signature;
-
-			return sendBinanceRequestWithProxy(url, apiKey);
-
+			String[] creds = getApiCredentials(account);
+			if (creds == null) return "{\"error\": \"Cuenta no válida.\"}";
+			long ts  = getServerTime();
+			String q = "timestamp=" + ts + "&recvWindow=60000";
+			return binanceGet("https://fapi.binance.com/fapi/v2/positionRisk?" + q + "&signature=" + hmacSha256(creds[1], q), creds[0]);
 		} catch (Exception e) {
 			return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
 		}
 	}
 
-	// 🔸 Esto trae los depósitos/compras que aparecen en billetera spot
+	// ─────────────────────────────────────────────────────────────
+	// Spot
+	// ─────────────────────────────────────────────────────────────
+
 	public String getSpotDeposits(String account, int limit) {
 		try {
-			String[] credentials = getApiCredentials(account);
-			if (credentials == null)
-				return "{\"error\": \"Cuenta no válida.\"}";
-
-			String apiKey = credentials[0];
-			String secretKey = credentials[1];
-
-			long timestamp = getServerTime();
-			String query = "limit=" + limit + "&timestamp=" + timestamp + "&recvWindow=60000";
-
-			String signature = hmacSha256(secretKey, query);
-			String url = "https://api.binance.com/sapi/v1/capital/deposit/hisrec?" + query + "&signature=" + signature;
-
-			return sendBinanceRequestWithProxy(url, apiKey);
-
+			String[] creds = getApiCredentials(account);
+			if (creds == null) return "{\"error\": \"Cuenta no válida.\"}";
+			long ts  = getServerTime();
+			String q = "limit=" + limit + "&timestamp=" + ts + "&recvWindow=60000";
+			return binanceGet("https://api.binance.com/sapi/v1/capital/deposit/hisrec?" + q + "&signature=" + hmacSha256(creds[1], q), creds[0]);
 		} catch (Exception e) {
 			return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
 		}
 	}
 
-	// 🔸 Esto trae los retiros/ventas que aparecen en billetera spot
 	public String getSpotWithdrawals(String account, int limit) {
 		try {
-			String[] credentials = getApiCredentials(account);
-			if (credentials == null)
-				return "{\"error\": \"Cuenta no válida.\"}";
-
-			String apiKey = credentials[0];
-			String secretKey = credentials[1];
-
-			long timestamp = getServerTime();
-			String query = "limit=" + limit + "&timestamp=" + timestamp + "&recvWindow=60000";
-
-			String signature = hmacSha256(secretKey, query);
-			String url = "https://api.binance.com/sapi/v1/capital/withdraw/history?" + query + "&signature="
-					+ signature;
-
-			return sendBinanceRequestWithProxy(url, apiKey);
-
+			String[] creds = getApiCredentials(account);
+			if (creds == null) return "{\"error\": \"Cuenta no válida.\"}";
+			long ts  = getServerTime();
+			String q = "limit=" + limit + "&timestamp=" + ts + "&recvWindow=60000";
+			return binanceGet("https://api.binance.com/sapi/v1/capital/withdraw/history?" + q + "&signature=" + hmacSha256(creds[1], q), creds[0]);
 		} catch (Exception e) {
 			return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
 		}
+	}
+
+	public Map<String, Double> getSpotBalancesMap(String account) throws Exception {
+		String[] creds = getApiCredentials(account);
+		if (creds == null) throw new RuntimeException("Cuenta no válida");
+		long ts  = getServerTime();
+		String q = "timestamp=" + ts + "&recvWindow=60000";
+		String raw = binanceGet("https://api.binance.com/api/v3/account?" + q + "&signature=" + hmacSha256(creds[1], q), creds[0]);
+
+		Map<String, Double> map = new HashMap<>();
+		for (JsonNode b : mapper.readTree(raw).path("balances")) {
+			double qty = b.path("free").asDouble() + b.path("locked").asDouble();
+			if (qty > 0) map.put(b.path("asset").asText(), qty);
+		}
+		return map;
 	}
 
 	public Double getEstimatedSpotBalance(String account) {
 		try {
-			// 1) Credenciales
-			String[] creds = getApiCredentials(account);
-			if (creds == null)
-				throw new RuntimeException("Cuenta no válida");
-			String apiKey = creds[0], secret = creds[1];
-
-			// 2) Obtengo balances
-			long ts = getServerTime();
-			String q = "timestamp=" + ts + "&recvWindow=60000";
-			String sig = hmacSha256(secret, q);
-			String accUrl = "https://api.binance.com/api/v3/account?" + q + "&signature=" + sig;
-			String rawAcc = sendBinanceRequestWithProxy(accUrl, apiKey);
-			JsonArray balances = JsonParser.parseString(rawAcc).getAsJsonObject().getAsJsonArray("balances");
-
-			// 3) Obtengo todos los precios USDT de golpe
 			Map<String, Double> priceMap = fetchAllPriceUsdt();
-
-			// 4) Sumo solo activos que valgan >= 1 USD
-			double totalUsdt = 0.0;
-			for (JsonElement el : balances) {
-				JsonObject b = el.getAsJsonObject();
-				double free = b.get("free").getAsDouble();
-				double locked = b.get("locked").getAsDouble();
-				double qty = free + locked;
-				if (qty <= 0)
-					continue;
-
-				String asset = b.get("asset").getAsString();
-				Double price = priceMap.get(asset);
-				if (price == null) {
-					// activo sin par USDT
-					continue;
-				}
-				double valUsd = qty * price;
-				if (valUsd < 1.0) {
-					// imita “Ocultar activos inferiores a 1 USD”
-					continue;
-				}
-				totalUsdt += valUsd;
+			double total = 0.0;
+			for (Map.Entry<String, Double> e : getSpotBalancesMap(account).entrySet()) {
+				Double price = priceMap.get(e.getKey());
+				if (price == null) continue;
+				double val = e.getValue() * price;
+				if (val >= 1.0) total += val;
 			}
-
-			return totalUsdt;
+			return total;
 		} catch (Exception e) {
 			throw new RuntimeException("Error al calcular balance estimado: " + e.getMessage(), e);
 		}
 	}
 
-
-	public double getPriceInUsdt(String asset) {
-		if ("USDT".equalsIgnoreCase(asset)) {
-			return 1.0;
-		}
-		String symbol = asset + "USDT";
-		String url = "https://api.binance.com/api/v3/ticker/price?symbol=" + symbol;
+	public String getAllSpotTradesForAllAccounts(String symbol, int limit) {
 		try {
-			String resp = sendBinanceRequestWithProxy(url, null);
-			JsonObject obj = JsonParser.parseString(resp).getAsJsonObject();
-			return obj.get("price").getAsDouble();
-		} catch (RuntimeException re) {
-			// Si devuelve 400 o cualquier fallo, lo atrapamos y retornamos 0 para continuar
-			System.out.println("⚠️ No pude obtener precio de " + symbol + ": " + re.getMessage());
-			return 0.0;
+			ArrayNode allTrades = mapper.createArrayNode();
+			for (AccountBinance account : accountRepo.findByTipo("BINANCE")) {
+				if (account.getApiKey() == null || account.getApiSecret() == null) {
+					log.debug("Saltando cuenta {} por falta de credenciales.", account.getName());
+					continue;
+				}
+				String response = getSpotTrades(account.getName(), symbol, limit);
+				JsonNode parsed = mapper.readTree(response);
+				if (parsed.isArray()) {
+					for (JsonNode trade : parsed) {
+						((ObjectNode) trade).put("account", account.getName());
+						allTrades.add(trade);
+					}
+				} else {
+					log.warn("Error al obtener trades para {} con {}: {}", account.getName(), symbol, response);
+				}
+			}
+			return mapper.writeValueAsString(allTrades);
 		} catch (Exception e) {
-			throw new RuntimeException("Error inesperado al pedir precio " + symbol, e);
+			log.error("Error en getAllSpotTradesForAllAccounts: {}", e.getMessage(), e);
+			return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
 		}
 	}
 
-	/**
-	 * Llama a GET /api/v3/ticker/price (sin symbol) y construye un Map: key =
-	 * símbolo base (ej. "BTC", "LINK", …) value = precio en USDT
-	 */
-	private Map<String, Double> fetchAllPriceUsdt() throws Exception {
-		String url = "https://api.binance.com/api/v3/ticker/price";
-		String resp = sendBinanceRequestWithProxy(url, null);
-		JsonArray tickers = JsonParser.parseString(resp).getAsJsonArray();
+	public String getSpotTrades(String account, String symbol, int limit) {
+		try {
+			String[] creds = getApiCredentials(account);
+			if (creds == null) return "{\"error\": \"Cuenta no válida.\"}";
+			long ts  = getServerTime();
+			String q = "symbol=" + symbol + "&limit=" + limit + "&timestamp=" + ts + "&recvWindow=60000";
+			return binanceGet("https://api.binance.com/api/v3/myTrades?" + q + "&signature=" + hmacSha256(creds[1], q), creds[0]);
+		} catch (Exception e) {
+			return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
+		}
+	}
 
+	public String getOrderHistory(String apiKey, String secretKey, String symbol, int limit) throws Exception {
+		long ts  = getServerTime();
+		String q = "symbol=" + symbol + "&timestamp=" + ts + "&recvWindow=60000&limit=" + limit;
+		return binanceGet("https://api.binance.com/api/v3/allOrders?" + q + "&signature=" + hmacSha256(secretKey, q), apiKey);
+	}
+
+	public String getMyTradesByOrder(String apiKey, String secretKey, String symbol, long orderId) throws Exception {
+		long ts  = getServerTime();
+		String q = "symbol=" + symbol + "&orderId=" + orderId + "&timestamp=" + ts + "&recvWindow=60000";
+		return binanceGet("https://api.binance.com/api/v3/myTrades?" + q + "&signature=" + hmacSha256(secretKey, q), apiKey);
+	}
+
+	// ─────────────────────────────────────────────────────────────
+	// Precios
+	// ─────────────────────────────────────────────────────────────
+
+	public double getPriceInUsdt(String asset) {
+		if ("USDT".equalsIgnoreCase(asset)) return 1.0;
+		String symbol = asset + "USDT";
+		try {
+			String resp = binanceGet("https://api.binance.com/api/v3/ticker/price?symbol=" + symbol, null);
+			return mapper.readTree(resp).path("price").asDouble(0.0);
+		} catch (Exception e) {
+			log.warn("No se pudo obtener precio de {}: {}", symbol, e.getMessage());
+			return 0.0;
+		}
+	}
+
+	public Double getPriceInUSDT(String asset) {
+		if (asset == null) return null;
+		String a = asset.trim().toUpperCase();
+		if ("USDT".equals(a) || "USDC".equals(a)) return 1.0;
+		String symbol = a + "USDT";
+		try {
+			String resp = binanceGet("https://api.binance.com/api/v3/ticker/price?symbol=" + symbol, null);
+			return mapper.readTree(resp).path("price").asDouble(0.0);
+		} catch (Exception e) {
+			log.warn("No se pudo obtener precio de {}: {}", symbol, e.getMessage());
+			return null;
+		}
+	}
+
+	/** Descarga todos los pares USDT de Binance. Resultado cacheado por CacheConfig (binancePrices). */
+	@Cacheable(value = "binancePrices")
+	public Map<String, Double> fetchAllPriceUsdt() throws Exception {
+		String resp    = binanceGet("https://api.binance.com/api/v3/ticker/price", null);
+		JsonNode tickers = mapper.readTree(resp);
 		Map<String, Double> priceMap = new HashMap<>();
-		for (JsonElement el : tickers) {
-			JsonObject o = el.getAsJsonObject();
-			String sym = o.get("symbol").getAsString();
+		for (JsonNode o : tickers) {
+			String sym = o.path("symbol").asText();
 			if (sym.endsWith("USDT")) {
-				String asset = sym.substring(0, sym.length() - 4);
-				double price = o.get("price").getAsDouble();
-				priceMap.put(asset, price);
+				priceMap.put(sym.substring(0, sym.length() - 4), o.path("price").asDouble());
 			}
 		}
-		// Aseguramos que USDT → 1.0
 		priceMap.put("USDT", 1.0);
 		return priceMap;
 	}
 
+	// ─────────────────────────────────────────────────────────────
+	// Funding wallet
+	// ─────────────────────────────────────────────────────────────
+
 	public double getFundingAssetBalance(String account, String asset) {
 		try {
 			String[] creds = getApiCredentials(account);
-			if (creds == null)
-				throw new RuntimeException("Cuenta no válida");
-			String apiKey = creds[0];
-			String secretKey = creds[1];
+			if (creds == null) throw new RuntimeException("Cuenta no válida");
+			long ts     = getServerTime();
+			String body = "asset=" + asset + "&timestamp=" + ts + "&recvWindow=60000&signature=" + hmacSha256(creds[1], "asset=" + asset + "&timestamp=" + ts + "&recvWindow=60000");
+			String resp = binancePost("https://api.binance.com/sapi/v1/asset/get-funding-asset", creds[0], body);
 
-			long ts = getServerTime();
-			String params = "asset=" + asset + "&timestamp=" + ts + "&recvWindow=60000";
-			String signature = hmacSha256(secretKey, params);
-
-			URL url = new URL("https://api.binance.com/sapi/v1/asset/get-funding-asset");
-			HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-			conn.setRequestMethod("POST");
-			conn.setDoOutput(true);
-			conn.setRequestProperty("X-MBX-APIKEY", apiKey);
-			try (OutputStream os = conn.getOutputStream()) {
-				os.write((params + "&signature=" + signature).getBytes(StandardCharsets.UTF_8));
-			}
-
-			if (conn.getResponseCode() != 200) {
-				throw new RuntimeException("Error HTTP Funding Wallet: " + conn.getResponseCode());
-			}
-
-			String resp = new BufferedReader(new InputStreamReader(conn.getInputStream())).lines()
-					.collect(Collectors.joining());
-			JsonArray arr = JsonParser.parseString(resp).getAsJsonArray();
-
-			for (JsonElement el : arr) {
-				JsonObject o = el.getAsJsonObject();
-				if (asset.equalsIgnoreCase(o.get("asset").getAsString())) {
-					double free = o.get("free").getAsDouble();
-					// aquí leo "freeze" en vez de "locked"
-					double freeze = o.has("freeze") ? o.get("freeze").getAsDouble() : 0d;
-					return free + freeze;
+			for (JsonNode o : mapper.readTree(resp)) {
+				if (asset.equalsIgnoreCase(o.path("asset").asText())) {
+					return o.path("free").asDouble(0.0) + o.path("freeze").asDouble(0.0);
 				}
 			}
 			return 0.0;
@@ -450,386 +424,103 @@ public class BinanceService {
 		}
 	}
 
-	private List<AnuncioDto> obtenerAnunciosPorTipo(Map<String, Object> filtros, String tipo, String cuenta) {
-		String url = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search";
-		RestTemplate restTemplate = new RestTemplate();
-
-		HttpHeaders headers = new HttpHeaders();
-		headers.setContentType(MediaType.APPLICATION_JSON);
-		headers.set("Accept-Encoding", "identity");
-
-		Map<String, Object> requestBody = new HashMap<>();
-		requestBody.put("asset", filtros.getOrDefault("asset", "USDT"));
-		requestBody.put("fiat", filtros.getOrDefault("fiat", "COP"));
-		requestBody.put("tradeType", tipo);
-		requestBody.put("payTypes", filtros.getOrDefault("payTypes", List.of()));
-		requestBody.put("page", filtros.getOrDefault("page", 1));
-		requestBody.put("rows", filtros.getOrDefault("rows", 10));
-		requestBody.put("publisherType", filtros.getOrDefault("publisherType", null));
-
-		HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
-		ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
-
-		List<AnuncioDto> anunciosFiltrados = new ArrayList<>();
-
-		try {
-			ObjectMapper objectMapper = new ObjectMapper();
-			JsonNode root = objectMapper.readTree(response.getBody());
-			JsonNode data = root.path("data");
-
-			if (data.isArray()) {
-				for (JsonNode item : data) {
-					JsonNode adv = item.path("adv");
-					JsonNode advertiser = item.path("advertiser");
-
-					AnuncioDto anuncio = new AnuncioDto();
-					anuncio.setCuenta(cuenta);
-					anuncio.setPrecio(adv.path("price").asText(""));
-					anuncio.setMoneda(adv.path("asset").asText(""));
-					anuncio.setFiat(adv.path("fiatUnit").asText(""));
-					anuncio.setMinimo(adv.path("minSingleTransAmount").asText(""));
-					anuncio.setMaximo(adv.path("maxSingleTransAmount").asText(""));
-
-					JsonNode tradeMethods = adv.path("tradeMethods");
-					anuncio.setMetodoPago(tradeMethods.isArray() && tradeMethods.size() > 0
-							? tradeMethods.get(0).path("tradeMethodName").asText("")
-							: "");
-
-					anuncio.setVendedor(advertiser.path("nickName").asText(""));
-					anuncio.setTipo(adv.path("tradeType").asText(""));
-
-					long createTimeMillis = adv.path("createTime").asLong(0);
-					ZonedDateTime dateTime = Instant.ofEpochMilli(createTimeMillis).atZone(ZoneId.of("America/Bogota"));
-					String horaAnuncio = dateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
-					anuncio.setHoraAnuncio(horaAnuncio);
-
-					anunciosFiltrados.add(anuncio);
-				}
-			}
-
-		} catch (Exception e) {
-			e.printStackTrace();
-		}
-
-		return anunciosFiltrados;
-	}
-
-	public List<AnuncioDto> obtenerTodosLosAnuncios(Map<String, Object> filtros) {
-		List<AnuncioDto> anuncios = new ArrayList<>();
-		List<String> cuentas = getAllAccountNames();
-
-		for (String cuenta : cuentas) {
-			anuncios.addAll(obtenerAnunciosPorTipo(filtros, "BUY", cuenta));
-			anuncios.addAll(obtenerAnunciosPorTipo(filtros, "SELL", cuenta));
-		}
-
-		return anuncios;
-	}
-
-	public Double getGeneralBalanceInUSDT(String account) {
-		try {
-			String[] creds = getApiCredentials(account);
-			if (creds == null)
-				throw new RuntimeException("Cuenta no válida");
-			String apiKey = creds[0], secret = creds[1];
-
-			Map<String, Double> priceMap = fetchAllPriceUsdt();
-			double totalUsdt = 0.0;
-
-			long ts = getServerTime();
-			String q = "timestamp=" + ts + "&recvWindow=60000";
-			String sig = hmacSha256(secret, q);
-
-			// 🔸 Spot Wallet
-			try {
-				String spotUrl = "https://api.binance.com/api/v3/account?" + q + "&signature=" + sig;
-				String spotRaw = sendBinanceRequestWithProxy(spotUrl, apiKey);
-				JsonArray spotBalances = JsonParser.parseString(spotRaw).getAsJsonObject().getAsJsonArray("balances");
-
-				for (JsonElement el : spotBalances) {
-					JsonObject b = el.getAsJsonObject();
-					double qty = b.get("free").getAsDouble() + b.get("locked").getAsDouble();
-					if (qty <= 0)
-						continue;
-
-					String asset = b.get("asset").getAsString();
-					Double price = priceMap.get(asset);
-					if (price == null)
-						continue;
-					totalUsdt += qty * price;
-				}
-			} catch (Exception ex) {
-				System.out.println("⚠️ Error Spot: " + ex.getMessage());
-			}
-
-			// 🔸 Futures Wallet
-			try {
-				String futUrl = "https://fapi.binance.com/fapi/v2/balance?" + q + "&signature=" + hmacSha256(secret, q);
-				String futRaw = sendBinanceRequestWithProxy(futUrl, apiKey);
-				JsonArray futArray = JsonParser.parseString(futRaw).getAsJsonArray();
-
-				for (JsonElement el : futArray) {
-					JsonObject b = el.getAsJsonObject();
-					String asset = b.get("asset").getAsString();
-					double qty = b.get("balance").getAsDouble();
-					Double price = priceMap.get(asset);
-					if (price == null)
-						continue;
-					totalUsdt += qty * price;
-				}
-			} catch (Exception ex) {
-				System.out.println("⚠️ Error Futures: " + ex.getMessage());
-				ex.printStackTrace(); 
-			}
-
-			// 🔸 Funding Wallet
-			try {
-				totalUsdt += getFundingAssetBalance(account, "USDT");
-			} catch (Exception ex) {
-				System.out.println("⚠️ Error Funding: " + ex.getMessage());
-			}
-
-			return totalUsdt;
-
-		} catch (Exception e) {
-			throw new RuntimeException("Error general en cálculo de balance USDT: " + e.getMessage(), e);
-		}
-	}
-
-
-	public String getAllSpotTradesForAllAccounts(String symbol, int limit) {
-		try {
-			List<JsonObject> allTrades = new ArrayList<>();
-			List<AccountBinance> accounts = accountRepo.findByTipo("BINANCE");
-
-			for (AccountBinance account : accounts) {
-				String accountName = account.getName();
-				String apiKey = account.getApiKey();
-				String secretKey = account.getApiSecret();
-
-				if (apiKey == null || secretKey == null) {
-					System.err.println("DEBUG: Saltando cuenta " + accountName + " por falta de credenciales.");
-					continue;
-				}
-
-				// Llama al método para obtener los trades de spot para una cuenta específica y
-				// un par
-				String response = getSpotTrades(accountName, symbol, limit);
-
-				// Procesa la respuesta
-				JsonElement parsedResponse = JsonParser.parseString(response);
-				if (parsedResponse.isJsonArray()) {
-					JsonArray tradesArray = parsedResponse.getAsJsonArray();
-					for (JsonElement tradeElement : tradesArray) {
-						JsonObject trade = tradeElement.getAsJsonObject();
-						trade.addProperty("account", accountName);
-						allTrades.add(trade);
-					}
-				} else {
-					System.err.println(
-							"Error al obtener trades para " + accountName + " con " + symbol + ": " + response);
-				}
-			}
-
-			return new Gson().toJson(allTrades);
-
-		} catch (Exception e) {
-			e.printStackTrace();
-			return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
-		}
-	}
-
-	public String getSpotTrades(String account, String symbol, int limit) {
-		try {
-			String[] credentials = getApiCredentials(account);
-			if (credentials == null) {
-				return "{\"error\": \"Cuenta no válida.\"}";
-			}
-
-			String apiKey = credentials[0];
-			String secretKey = credentials[1];
-
-			long timestamp = getServerTime();
-			// La cadena de consulta para la firma debe estar en el orden correcto
-			String query = "symbol=" + symbol + "&limit=" + limit + "&timestamp=" + timestamp + "&recvWindow=60000";
-
-			// Genera la firma usando la cadena de consulta
-			String signature = hmacSha256(secretKey, query);
-
-			// Construye la URL final con la firma
-			String url = "https://api.binance.com/api/v3/myTrades?" + query + "&signature=" + signature;
-
-			return sendBinanceRequestWithProxy(url, apiKey);
-
-		} catch (Exception e) {
-			return "{\"error\": \"Error interno: " + e.getMessage() + "\"}";
-		}
-	}
-
-	// Método para obtener el historial de órdenes completadas o canceladas
-	public String getOrderHistory(String apiKey, String secretKey, String symbol, int limit) throws Exception {
-		long ts = getServerTime();
-		String q = "symbol=" + symbol + "&timestamp=" + ts + "&recvWindow=60000&limit=" + limit;
-		String sig = hmacSha256(secretKey, q);
-		String url = "https://api.binance.com/api/v3/allOrders?" + q + "&signature=" + sig;
-		return sendBinanceRequestWithProxy(url, apiKey);
-	}
-
-	public Double getPriceInUSDT(String asset) {
-		if (asset == null)
-			return null;
-		String a = asset.trim().toUpperCase();
-		if ("USDT".equals(a) || "USDC".equals(a))
-			return 1.0;
-
-		String symbol = a + "USDT";
-		String url = "https://api.binance.com/api/v3/ticker/price?symbol=" + symbol;
-		try {
-			String resp = sendBinanceRequestWithProxy(url, null);
-			JsonObject obj = JsonParser.parseString(resp).getAsJsonObject();
-			return obj.get("price").getAsDouble();
-		} catch (RuntimeException re) {
-			System.out.println("⚠️ No pude obtener precio de " + symbol + ": " + re.getMessage());
-			return null; // el caller lo tratará como 0.0
-		} catch (Exception e) {
-			return null;
-		}
-	}
-
-	// BinanceService.java
-
-	public Map<String, Double> getSpotBalancesMap(String account) throws Exception {
-		String[] creds = getApiCredentials(account);
-		if (creds == null)
-			throw new RuntimeException("Cuenta no válida");
-		String apiKey = creds[0], secret = creds[1];
-
-		long ts = getServerTime();
-		String q = "timestamp=" + ts + "&recvWindow=60000";
-		String sig = hmacSha256(secret, q);
-		String url = "https://api.binance.com/api/v3/account?" + q + "&signature=" + sig;
-
-		String raw = sendBinanceRequestWithProxy(url, apiKey);
-		JsonArray balances = JsonParser.parseString(raw).getAsJsonObject().getAsJsonArray("balances");
-
-		Map<String, Double> map = new HashMap<>();
-		for (JsonElement el : balances) {
-			JsonObject b = el.getAsJsonObject();
-			double qty = b.get("free").getAsDouble() + b.get("locked").getAsDouble();
-			if (qty <= 0)
-				continue;
-			String asset = b.get("asset").getAsString();
-			map.put(asset, qty);
-		}
-		return map;
-	}
-
 	public Map<String, Double> getFundingBalancesMap(String account) throws Exception {
 		String[] creds = getApiCredentials(account);
-		if (creds == null)
-			throw new RuntimeException("Cuenta no válida");
-		String apiKey = creds[0], secret = creds[1];
-
-		long ts = getServerTime();
+		if (creds == null) throw new RuntimeException("Cuenta no válida");
+		long ts     = getServerTime();
 		String params = "timestamp=" + ts + "&recvWindow=60000";
-		String signature = hmacSha256(secret, params);
-
-		URL url = new URL("https://api.binance.com/sapi/v1/asset/get-funding-asset");
-		HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-		conn.setRequestMethod("POST");
-		conn.setDoOutput(true);
-		conn.setRequestProperty("X-MBX-APIKEY", apiKey);
-		try (OutputStream os = conn.getOutputStream()) {
-			os.write((params + "&signature=" + signature).getBytes(StandardCharsets.UTF_8));
-		}
-		if (conn.getResponseCode() != 200) {
-			throw new RuntimeException("HTTP Funding: " + conn.getResponseCode());
-		}
-		String resp = new BufferedReader(new InputStreamReader(conn.getInputStream())).lines()
-				.collect(Collectors.joining());
+		String body   = params + "&signature=" + hmacSha256(creds[1], params);
+		String resp   = binancePost("https://api.binance.com/sapi/v1/asset/get-funding-asset", creds[0], body);
 
 		Map<String, Double> map = new HashMap<>();
-		JsonArray arr = JsonParser.parseString(resp).getAsJsonArray();
-		for (JsonElement el : arr) {
-			JsonObject o = el.getAsJsonObject();
-			String asset = o.get("asset").getAsString();
-			double free = o.has("free") ? o.get("free").getAsDouble() : 0d;
-			double freeze = o.has("freeze") ? o.get("freeze").getAsDouble() : 0d;
-			double qty = free + freeze;
-			if (qty > 0)
-				map.merge(asset, qty, Double::sum);
+		for (JsonNode o : mapper.readTree(resp)) {
+			double qty = o.path("free").asDouble(0.0) + o.path("freeze").asDouble(0.0);
+			if (qty > 0) map.merge(o.path("asset").asText(), qty, Double::sum);
 		}
 		return map;
 	}
 
-	/** Spot + Funding (puedes extender a Futures si lo necesitas) */
+	// ─────────────────────────────────────────────────────────────
+	// Balance general
+	// ─────────────────────────────────────────────────────────────
+
 	public Map<String, Double> getAllBalancesByAsset(String account) {
 		try {
 			Map<String, Double> spot = getSpotBalancesMap(account);
-			Map<String, Double> fund = getFundingBalancesMap(account);
-			// Merge
-			fund.forEach((k, v) -> spot.merge(k, v, Double::sum));
-			return spot; // contiene la suma final por símbolo
+			getFundingBalancesMap(account).forEach((k, v) -> spot.merge(k, v, Double::sum));
+			return spot;
 		} catch (Exception e) {
 			throw new RuntimeException("Error obteniendo balances de " + account + ": " + e.getMessage(), e);
 		}
 	}
 
-	// En BinanceService.java (añade al final)
-
-	public String getMyTradesByOrder(String apiKey, String secretKey, String symbol, long orderId) throws Exception {
-		long ts = getServerTime();
-		String q = "symbol=" + symbol + "&orderId=" + orderId + "&timestamp=" + ts + "&recvWindow=60000";
-		String sig = hmacSha256(secretKey, q);
-		String url = "https://api.binance.com/api/v3/myTrades?" + q + "&signature=" + sig;
-		return sendBinanceRequestWithProxy(url, apiKey);
-	}
-
-	/** Activos con balance > 0 (spot) para inferir símbolos probables. */
-	public Set<String> getNonZeroAssets(String account) {
+	public Double getGeneralBalanceInUSDT(String account) {
 		try {
 			String[] creds = getApiCredentials(account);
-			if (creds == null)
-				throw new RuntimeException("Cuenta no válida");
-			String apiKey = creds[0], secret = creds[1];
+			if (creds == null) throw new RuntimeException("Cuenta no válida");
 
+			Map<String, Double> priceMap = fetchAllPriceUsdt();
+			double total = 0.0;
 			long ts = getServerTime();
 			String q = "timestamp=" + ts + "&recvWindow=60000";
-			String sig = hmacSha256(secret, q);
-			String url = "https://api.binance.com/api/v3/account?" + q + "&signature=" + sig;
 
-			String raw = sendBinanceRequestWithProxy(url, apiKey);
-			JsonArray balances = JsonParser.parseString(raw).getAsJsonObject().getAsJsonArray("balances");
+			// Spot
+			try {
+				String spotRaw = binanceGet("https://api.binance.com/api/v3/account?" + q + "&signature=" + hmacSha256(creds[1], q), creds[0]);
+				for (JsonNode b : mapper.readTree(spotRaw).path("balances")) {
+					double qty = b.path("free").asDouble() + b.path("locked").asDouble();
+					if (qty <= 0) continue;
+					Double price = priceMap.get(b.path("asset").asText());
+					if (price != null) total += qty * price;
+				}
+			} catch (Exception ex) { log.warn("Error Spot balance: {}", ex.getMessage()); }
 
+			// Futures
+			try {
+				String futUrl = "https://fapi.binance.com/fapi/v2/balance?" + q + "&signature=" + hmacSha256(creds[1], q);
+				String futRaw = binanceGet(futUrl, creds[0]);
+				JsonNode futNode = mapper.readTree(futRaw);
+				if (futNode.isArray()) {
+					for (JsonNode b : futNode) {
+						Double price = priceMap.get(b.path("asset").asText());
+						if (price != null) total += b.path("balance").asDouble() * price;
+					}
+				}
+			} catch (Exception ex) { log.warn("Error Futures balance: {}", ex.getMessage()); }
+
+			// Funding
+			try { total += getFundingAssetBalance(account, "USDT"); }
+			catch (Exception ex) { log.warn("Error Funding balance: {}", ex.getMessage()); }
+
+			return total;
+		} catch (Exception e) {
+			throw new RuntimeException("Error general en cálculo de balance USDT: " + e.getMessage(), e);
+		}
+	}
+
+	// ─────────────────────────────────────────────────────────────
+	// Exchange info / assets
+	// ─────────────────────────────────────────────────────────────
+
+	public Set<String> getNonZeroAssets(String account) {
+		try {
 			Set<String> out = new HashSet<>();
-			for (JsonElement el : balances) {
-				JsonObject b = el.getAsJsonObject();
-				double qty = b.get("free").getAsDouble() + b.get("locked").getAsDouble();
-				if (qty > 0.0)
-					out.add(b.get("asset").getAsString());
-			}
+			getSpotBalancesMap(account).forEach((asset, qty) -> { if (qty > 0) out.add(asset); });
 			return out;
 		} catch (Exception e) {
 			throw new RuntimeException("Error al leer balances de " + account + ": " + e.getMessage(), e);
 		}
 	}
 
-	// En BinanceService.java
 	public Set<String> getTradableSymbolsByQuotes(Collection<String> quotes) {
 		try {
-			String url = "https://api.binance.com/api/v3/exchangeInfo";
-			String resp = sendBinanceRequestWithProxy(url, null);
-			JsonObject root = JsonParser.parseString(resp).getAsJsonObject();
-			JsonArray syms = root.getAsJsonArray("symbols");
-
+			String resp = binanceGet("https://api.binance.com/api/v3/exchangeInfo", null);
+			JsonNode syms = mapper.readTree(resp).path("symbols");
 			Set<String> out = new HashSet<>();
-			for (JsonElement el : syms) {
-				JsonObject s = el.getAsJsonObject();
-				if (!"TRADING".equalsIgnoreCase(s.get("status").getAsString()))
-					continue;
-				String quote = s.get("quoteAsset").getAsString();
-				if (quotes.contains(quote)) {
-					out.add(s.get("symbol").getAsString()); // p.ej. TRXUSDT
+			for (JsonNode s : syms) {
+				if ("TRADING".equalsIgnoreCase(s.path("status").asText())
+						&& quotes.contains(s.path("quoteAsset").asText())) {
+					out.add(s.path("symbol").asText());
 				}
 			}
 			return out;
@@ -837,66 +528,67 @@ public class BinanceService {
 			throw new RuntimeException("No pude cargar exchangeInfo: " + e.getMessage(), e);
 		}
 	}
-	
-	public String getP2POrdersInRange(String account, long startTime, long endTime, String tradeType) {
-	    try {
-	        String[] credentials = getApiCredentials(account);
-	        if (credentials == null) return "{\"error\": \"Cuenta no válida.\"}";
 
-	        String apiKey = credentials[0];
-	        String secretKey = credentials[1];
+	// ─────────────────────────────────────────────────────────────
+	// Anuncios P2P (market data público)
+	// ─────────────────────────────────────────────────────────────
 
-	        List<JsonObject> allOrders = new ArrayList<>();
-	        int currentPage = 1;
-	        int rows = 50;
+	private List<AnuncioDto> obtenerAnunciosPorTipo(Map<String, Object> filtros, String tipo, String cuenta) {
+		String url = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search";
 
-	        while (true) {
-	            long timestamp = getServerTime();
+		HttpHeaders headers = new HttpHeaders();
+		headers.setContentType(MediaType.APPLICATION_JSON);
+		headers.set("Accept-Encoding", "identity");
 
-	            StringBuilder query = new StringBuilder();
-	            // ✅ tradeType opcional
-	            if (tradeType != null && !tradeType.isBlank()) {
-	                query.append("tradeType=").append(tradeType).append("&");
-	            }
+		Map<String, Object> body = new HashMap<>();
+		body.put("asset",         filtros.getOrDefault("asset", "USDT"));
+		body.put("fiat",          filtros.getOrDefault("fiat", "COP"));
+		body.put("tradeType",     tipo);
+		body.put("payTypes",      filtros.getOrDefault("payTypes", List.of()));
+		body.put("page",          filtros.getOrDefault("page", 1));
+		body.put("rows",          filtros.getOrDefault("rows", 10));
+		body.put("publisherType", filtros.getOrDefault("publisherType", null));
 
-	            query.append("startTimestamp=").append(startTime)
-	                 .append("&endTimestamp=").append(endTime)
-	                 .append("&page=").append(currentPage)
-	                 .append("&rows=").append(rows)
-	                 .append("&recvWindow=60000")
-	                 .append("&timestamp=").append(timestamp);
+		ResponseEntity<String> response = restTemplate.postForEntity(url, new HttpEntity<>(body, headers), String.class);
 
-	            String signature = hmacSha256(secretKey, query.toString());
-	            String url = P2P_ORDERS_API_URL + "?" + query + "&signature=" + signature;
+		List<AnuncioDto> result = new ArrayList<>();
+		try {
+			JsonNode root = new ObjectMapper().readTree(response.getBody());
+			for (JsonNode item : root.path("data")) {
+				JsonNode adv        = item.path("adv");
+				JsonNode advertiser = item.path("advertiser");
 
-	            String response = sendBinanceRequestWithProxy(url, apiKey);
-	            JsonObject jsonResponse = JsonParser.parseString(response).getAsJsonObject();
+				AnuncioDto anuncio = new AnuncioDto();
+				anuncio.setCuenta(cuenta);
+				anuncio.setPrecio(adv.path("price").asText(""));
+				anuncio.setMoneda(adv.path("asset").asText(""));
+				anuncio.setFiat(adv.path("fiatUnit").asText(""));
+				anuncio.setMinimo(adv.path("minSingleTransAmount").asText(""));
+				anuncio.setMaximo(adv.path("maxSingleTransAmount").asText(""));
+				JsonNode methods = adv.path("tradeMethods");
+				anuncio.setMetodoPago(methods.isArray() && methods.size() > 0
+						? methods.get(0).path("tradeMethodName").asText("") : "");
+				anuncio.setVendedor(advertiser.path("nickName").asText(""));
+				anuncio.setTipo(adv.path("tradeType").asText(""));
 
-	            if (jsonResponse.has("code") && !"000000".equals(jsonResponse.get("code").getAsString())) {
-	                return "{\"error\": \"" + jsonResponse.get("msg").getAsString() + "\"}";
-	            }
+				long ms = adv.path("createTime").asLong(0);
+				ZonedDateTime dt = Instant.ofEpochMilli(ms).atZone(ZONE_BOGOTA);
+				anuncio.setHoraAnuncio(dt.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
 
-	            JsonArray dataArray = jsonResponse.getAsJsonArray("data");
-	            if (dataArray == null || dataArray.size() == 0) break;
-
-	            dataArray.forEach(order -> allOrders.add(order.getAsJsonObject()));
-
-	            int totalOrders = jsonResponse.has("total") ? jsonResponse.get("total").getAsInt() : 0;
-	            if (allOrders.size() >= totalOrders) break;
-
-	            currentPage++;
-	        }
-
-	        JsonObject finalResponse = new JsonObject();
-	        finalResponse.add("data", JsonParser.parseString(allOrders.toString()));
-	        return finalResponse.toString();
-
-	    } catch (Exception e) {
-	        e.printStackTrace(); // 🔥 para ver la excepción real en consola
-	        return "{\"error\": \"Error interno: " + e.getClass().getName() + " - " + e.getMessage() + "\"}";
-	    }
-
+				result.add(anuncio);
+			}
+		} catch (Exception e) {
+			log.error("Error parseando anuncios P2P ({}): {}", tipo, e.getMessage());
+		}
+		return result;
 	}
 
-
+	public List<AnuncioDto> obtenerTodosLosAnuncios(Map<String, Object> filtros) {
+		List<AnuncioDto> anuncios = new ArrayList<>();
+		for (String cuenta : getAllAccountNames()) {
+			anuncios.addAll(obtenerAnunciosPorTipo(filtros, "BUY", cuenta));
+			anuncios.addAll(obtenerAnunciosPorTipo(filtros, "SELL", cuenta));
+		}
+		return anuncios;
+	}
 }

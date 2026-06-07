@@ -11,6 +11,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,13 +21,11 @@ import org.springframework.transaction.annotation.Transactional;
 import com.binance.web.BinanceAPI.BinanceService;
 import com.binance.web.Entity.AccountBinance;
 import com.binance.web.Entity.AccountCop;
-
 import com.binance.web.Entity.SaleP2P;
 import com.binance.web.Entity.SaleP2pAccountCop;
-import com.binance.web.OrderP2P.OrderP2PDto;
 import com.binance.web.OrderP2P.OrderP2PService;
 import com.binance.web.Repository.AccountBinanceRepository;
-
+import com.binance.web.Repository.P2PAssignmentRuleRepository;
 import com.binance.web.Repository.SaleP2PRepository;
 import com.binance.web.Repository.SaleP2pAccountCopRepository;
 import com.binance.web.model.AssignAccountDto;
@@ -32,43 +33,30 @@ import com.binance.web.model.SaleP2PDto;
 import com.binance.web.service.AccountBinanceService;
 import com.binance.web.service.AccountCopService;
 import com.binance.web.service.SaleP2PService;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 
+@Slf4j
 @Service
 public class SaleP2PServiceImpl implements SaleP2PService {
 
-    @Autowired
-    private SaleP2PRepository saleP2PRepository;
+    private final ObjectMapper mapper = new ObjectMapper();
+    private static final ZoneId ZONE_BOGOTA = ZoneId.of("America/Bogota");
 
-    @Autowired
-    private AccountCopService accountCopService;
+    @Autowired private SaleP2PRepository saleP2PRepository;
+    @Autowired private AccountCopService accountCopService;
+    @Autowired private BinanceService binanceService;
+    @Autowired private OrderP2PService orderP2PService;
+    @Autowired private AccountBinanceRepository accountBinanceRepository;
+    @Autowired private AccountBinanceService accountBinanceService;
+    @Autowired private SaleP2pAccountCopRepository saleP2pAccountCopRepository;
+    @Autowired private P2PAssignmentRuleRepository assignmentRuleRepository;
 
-    @Autowired
-    private BinanceService binanceService;
-
-    @Autowired
-	private OrderP2PService orderP2PService;
-
-    @Autowired
-    private AccountBinanceRepository accountBinanceRepository;
-
-	@Autowired
-	private AccountBinanceService accountBinanceService;
-	@Autowired
-	private SaleP2pAccountCopRepository saleP2pAccountCopRepository;
-
-
-    
-	@Override
-	public List<SaleP2PDto> findAllSaleP2P() {
-		return saleP2PRepository.findAll()
-				.stream()
-				.map(this::convertToDto)
-				.collect(Collectors.toList());
-}
+    @Override
+    public List<SaleP2PDto> findAllSaleP2P() {
+        return saleP2PRepository.findAll()
+                .stream()
+                .map(this::convertToDto)
+                .collect(Collectors.toList());
+    }
 
     @Override
     public SaleP2P findByIdSaleP2P(Integer id) {
@@ -80,10 +68,22 @@ public class SaleP2PServiceImpl implements SaleP2PService {
         saleP2PRepository.save(saleP2P);
     }
 
+    /** Bug fix: guardaba el parámetro `sale` en vez de la entidad cargada de la BD. */
     @Override
     public void updateSaleP2P(Integer id, SaleP2P sale) {
-        SaleP2P saleP2P = saleP2PRepository.findById(id).orElse(null);
-        saleP2PRepository.save(sale);
+        SaleP2P existing = saleP2PRepository.findById(id).orElse(null);
+        if (existing == null) {
+            log.warn("updateSaleP2P: no existe venta con id {}", id);
+            return;
+        }
+        existing.setDate(sale.getDate());
+        existing.setPesosCop(sale.getPesosCop());
+        existing.setDollarsUs(sale.getDollarsUs());
+        existing.setCommission(sale.getCommission());
+        existing.setTasa(sale.getTasa());
+        existing.setUtilidad(sale.getUtilidad());
+        existing.setAsignado(sale.getAsignado());
+        saleP2PRepository.save(existing);
     }
 
     @Override
@@ -91,91 +91,71 @@ public class SaleP2PServiceImpl implements SaleP2PService {
         saleP2PRepository.deleteById(id);
     }
 
+    /**
+     * Solo lee de BD. El sync con Binance lo hace P2PSyncScheduler en background.
+     * Para forzar una sync inmediata usar POST /p2p-sync/trigger.
+     */
     @Override
     public List<SaleP2PDto> getLastSaleP2pToday(String account) {
-        LocalDate today = LocalDate.now(ZoneId.of("America/Bogota"));
-        createSaleP2pDirectly(account, today);
-        return convertToDtoList(today, account);
+        return convertToDtoList(LocalDate.now(ZONE_BOGOTA), account);
     }
 
     private void createSaleP2pDirectly(String account, LocalDate today) {
-    String jsonResponse = binanceService.getP2POrderLatest(account);
-    JsonObject jsonObject = JsonParser.parseString(jsonResponse).getAsJsonObject();
+        try {
+            ZoneId zone = ZONE_BOGOTA;
+            long start = today.atStartOfDay(zone).toInstant().toEpochMilli();
+            long end   = today.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli();
 
-    if (jsonObject.has("error")) {
-        System.err.println("Error Binance: " + jsonObject.get("error").getAsString());
-        return;
+            String jsonResponse = binanceService.getP2POrdersInRange(account, start, end, "SELL");
+            JsonNode root = mapper.readTree(jsonResponse);
+
+            if (root.has("error")) {
+                log.error("Error Binance ({}): {}", account, root.get("error").asText());
+                return;
+            }
+
+            LocalDateTime inicio = today.atStartOfDay();
+            LocalDateTime fin    = inicio.plusDays(1);
+
+            for (JsonNode obj : root.path("data")) {
+                String status    = obj.path("orderStatus").asText("");
+                String tradeType = obj.path("tradeType").asText("");
+                String asset     = obj.path("asset").asText("");
+
+                if (!"COMPLETED".equalsIgnoreCase(status))   continue;
+                if (!"SELL".equalsIgnoreCase(tradeType))     continue;
+                if (!"USDT".equalsIgnoreCase(asset))         continue;
+
+                String orderNumber    = obj.path("orderNumber").asText();
+                LocalDateTime fechaOrden = convertTimestamp(obj.path("createTime").asLong());
+
+                if (fechaOrden.isBefore(inicio) || !fechaOrden.isBefore(fin)) continue;
+                if (saleP2PRepository.existsByNumberOrder(orderNumber))        continue;
+
+                SaleP2P sale = new SaleP2P();
+                sale.setNumberOrder(orderNumber);
+                sale.setDate(fechaOrden);
+                sale.setPesosCop(obj.path("totalPrice").asDouble(0.0));
+                sale.setDollarsUs(obj.path("amount").asDouble(0.0));
+
+                double commission = obj.has("takerCommission") && !obj.path("takerCommission").isNull()
+                        ? obj.path("takerCommission").asDouble(0.0)
+                        : obj.path("commission").asDouble(0.0);
+                sale.setCommission(commission);
+                sale.setTasa(calculateTasaVenta(sale));
+                sale = assignAccountBinance(sale, account);
+                sale.setAsignado(false);
+                sale.setUtilidad(0.0);
+                saveSaleP2P(sale);
+                autoAssignIfRuleExists(sale);
+            }
+        } catch (Exception e) {
+            log.error("Error en createSaleP2pDirectly ({}): {}", account, e.getMessage(), e);
+        }
     }
-
-    JsonArray dataArray = jsonObject.getAsJsonArray("data");
-
-    LocalDateTime inicio = today.atStartOfDay();
-    LocalDateTime fin = inicio.plusDays(1); // usamos [inicio, fin)
-
-    for (JsonElement element : dataArray) {
-        JsonObject obj = element.getAsJsonObject();
-
-        // ✅ filtros duros (por seguridad)
-        String status = obj.has("orderStatus") ? obj.get("orderStatus").getAsString() : "";
-        String tradeType = obj.has("tradeType") ? obj.get("tradeType").getAsString() : "";
-        String asset = obj.has("asset") ? obj.get("asset").getAsString() : "";
-
-        if (!"COMPLETED".equalsIgnoreCase(status)) continue;
-        if (!"SELL".equalsIgnoreCase(tradeType)) continue;
-        if (!"USDT".equalsIgnoreCase(asset)) continue;
-
-        String orderNumber = obj.get("orderNumber").getAsString();
-        LocalDateTime fechaOrden = convertTimestamp(obj.get("createTime").getAsLong());
-
-        if (fechaOrden.isBefore(inicio) || !fechaOrden.isBefore(fin)) continue; // fechaOrden >= fin => fuera
-        if (saleP2PRepository.existsByNumberOrder(orderNumber)) continue;
-
-        SaleP2P sale = new SaleP2P();
-        sale.setNumberOrder(orderNumber);
-        sale.setDate(fechaOrden);
-
-        // ✅ COP real viene como totalPrice
-        Double pesosCop = obj.has("totalPrice") && !obj.get("totalPrice").isJsonNull()
-                ? obj.get("totalPrice").getAsDouble()
-                : 0.0;
-
-        // ✅ USDT vendido viene como amount
-        Double dollarsUs = obj.has("amount") && !obj.get("amount").isJsonNull()
-                ? obj.get("amount").getAsDouble()
-                : 0.0;
-
-        // ✅ comisión real suele venir como takerCommission (en tu JSON commission sale "0")
-        Double commission = obj.has("takerCommission") && !obj.get("takerCommission").isJsonNull()
-                ? obj.get("takerCommission").getAsDouble()
-                : (
-                    obj.has("commission") && !obj.get("commission").isJsonNull()
-                        ? obj.get("commission").getAsDouble()
-                        : 0.0
-                );
-
-        sale.setPesosCop(pesosCop);
-        sale.setDollarsUs(dollarsUs);
-        sale.setCommission(commission);
-
-        // Tasa: pesos / usdt (solo amount)
-        sale.setTasa(calculateTasaVenta(sale));
-
-        sale = assignAccountBinance(sale, account);
-
-        // ✅ por defecto no asignada
-        sale.setAsignado(false);
-        sale.setUtilidad(0.0);
-
-        saveSaleP2P(sale);
-    }
-}
-
-
 
     private LocalDateTime convertTimestamp(long timestamp) {
-        return Instant.ofEpochMilli(timestamp)
-                .atZone(ZoneId.of("America/Bogota"))
-                .toLocalDateTime();
+        return Instant.ofEpochMilli(timestamp).atZone(ZONE_BOGOTA).toLocalDateTime();
     }
 
     private Double calculateTasaVenta(SaleP2P sale) {
@@ -183,11 +163,8 @@ public class SaleP2PServiceImpl implements SaleP2PService {
         return sale.getPesosCop() / sale.getDollarsUs();
     }
 
-
-
-
     private Double generateTax(SaleP2P sale) {
-        Double impuesto = 0.0;
+        double impuesto = 0.0;
         List<SaleP2pAccountCop> accountCop = sale.getAccountCopsDetails();
         for (SaleP2pAccountCop account : accountCop) {
             if (account.getAccountCop() == null) {
@@ -199,10 +176,8 @@ public class SaleP2PServiceImpl implements SaleP2PService {
 
     public void saveUtilitydefinitive(List<SaleP2P> rangeSales, Double averageRate) {
         for (SaleP2P sale : rangeSales) {
-            Double pesosUsdtVendidos = sale.getPesosCop();
-            Double usdtVendidos = sale.getDollarsUs() + sale.getCommission();
-            Double utilidad = pesosUsdtVendidos - (usdtVendidos * averageRate);
-            utilidad = utilidad - generateTax(sale);
+            double utilidad = sale.getPesosCop() - ((sale.getDollarsUs() + sale.getCommission()) * averageRate);
+            utilidad -= generateTax(sale);
             sale.setUtilidad(utilidad);
             saleP2PRepository.save(sale);
         }
@@ -211,43 +186,28 @@ public class SaleP2PServiceImpl implements SaleP2PService {
     @Override
     @Transactional
     public String processAssignAccountCop(Integer saleId, List<AssignAccountDto> accounts) {
-
         SaleP2P sale = saleP2PRepository.findById(saleId).orElse(null);
         if (sale == null) return "No se encontró la venta con id " + saleId;
+        if (Boolean.TRUE.equals(sale.getAsignado())) return "Esta venta ya está asignada.";
 
-        if (Boolean.TRUE.equals(sale.getAsignado())) {
-            return "Esta venta ya está asignada.";
-        }
+        if (sale.getAccountCopsDetails() == null) sale.setAccountCopsDetails(new ArrayList<>());
 
-        // ✅ Asegura lista inicializada una sola vez
-        if (sale.getAccountCopsDetails() == null) {
-            sale.setAccountCopsDetails(new ArrayList<>());
-        }
-
-        // ✅ 1) REVERTIR EFECTOS de detalles anteriores (si existían)
+        // Revertir efectos anteriores
         for (SaleP2pAccountCop prev : sale.getAccountCopsDetails()) {
             if (prev.getAccountCop() != null) {
                 AccountCop acc = accountCopService.findByIdAccountCop(prev.getAccountCop().getId());
                 if (acc != null) {
                     double amt = prev.getAmount() != null ? prev.getAmount() : 0.0;
-
-                    if (acc.getBalance() == null) acc.setBalance(0.0);
-                    if (acc.getCupoDisponibleHoy() == null) acc.setCupoDisponibleHoy(0.0);
-
-                    acc.setBalance(acc.getBalance() - amt);
-                    acc.setCupoDisponibleHoy(acc.getCupoDisponibleHoy() + amt);
-
+                    acc.setBalance((acc.getBalance() != null ? acc.getBalance() : 0.0) - amt);
+                    acc.setCupoDisponibleHoy((acc.getCupoDisponibleHoy() != null ? acc.getCupoDisponibleHoy() : 0.0) + amt);
                     accountCopService.saveAccountCopSafe(acc);
                 }
             }
         }
 
-        // ✅ 2) BORRAR detalles anteriores (MISMA lista, NO reasignar)
         sale.getAccountCopsDetails().clear();
 
-        // ✅ 3) APLICAR nuevas asignaciones
         for (AssignAccountDto dto : accounts) {
-
             SaleP2pAccountCop detail = new SaleP2pAccountCop();
             detail.setSaleP2p(sale);
             detail.setAmount(dto.getAmount());
@@ -256,100 +216,57 @@ public class SaleP2PServiceImpl implements SaleP2PService {
             if (dto.getAccountCop() != null) {
                 AccountCop acc = accountCopService.findByIdAccountCop(dto.getAccountCop());
                 detail.setAccountCop(acc);
-
                 double amt = dto.getAmount() != null ? dto.getAmount() : 0.0;
-
-                if (acc.getBalance() == null) acc.setBalance(0.0);
-                if (acc.getCupoDisponibleHoy() == null) acc.setCupoDisponibleHoy(0.0);
-
-                acc.setBalance(acc.getBalance() + amt);
-                acc.setCupoDisponibleHoy(acc.getCupoDisponibleHoy() - amt);
-
+                acc.setBalance((acc.getBalance() != null ? acc.getBalance() : 0.0) + amt);
+                acc.setCupoDisponibleHoy((acc.getCupoDisponibleHoy() != null ? acc.getCupoDisponibleHoy() : 0.0) - amt);
                 accountCopService.saveAccountCopSafe(acc);
             }
-
             sale.getAccountCopsDetails().add(detail);
         }
 
         accountBinanceService.subtractBalance(sale.getBinanceAccount().getName(), sale.getDollarsUs());
-
         if (sale.getUtilidad() == null) sale.setUtilidad(0.0);
         sale.setUtilidad(sale.getUtilidad() + generateTax(sale));
-
         sale.setAsignado(true);
-
-        // ✅ con cascade=ALL se guardan detalles
         saleP2PRepository.save(sale);
-
         return "Asignación realizada con éxito";
     }
 
-
-
-
     @Transactional
     public SaleP2P assignAccountCop(List<AssignAccountDto> accounts, SaleP2P sale) {
-
-        // 1) REVERSAR asignaciones anteriores (si existían)
         if (sale.getAccountCopsDetails() != null && !sale.getAccountCopsDetails().isEmpty()) {
-
             for (SaleP2pAccountCop prev : sale.getAccountCopsDetails()) {
-
                 if (prev.getAccountCop() != null) {
                     AccountCop acc = accountCopService.findByIdAccountCop(prev.getAccountCop().getId());
                     if (acc != null) {
                         double amt = prev.getAmount() != null ? prev.getAmount() : 0.0;
-
-                        if (acc.getBalance() == null) acc.setBalance(0.0);
-                        if (acc.getCupoDisponibleHoy() == null) acc.setCupoDisponibleHoy(0.0);
-
-                        // ✅ REVERSA EFECTOS (porque estás quitando esa asignación)
-                        acc.setBalance(acc.getBalance() - amt);
-                        acc.setCupoDisponibleHoy(acc.getCupoDisponibleHoy() + amt);
-
-                        // ✅ NO uses saveAccountCop() (ese resetea cupos)
+                        acc.setBalance((acc.getBalance() != null ? acc.getBalance() : 0.0) - amt);
+                        acc.setCupoDisponibleHoy((acc.getCupoDisponibleHoy() != null ? acc.getCupoDisponibleHoy() : 0.0) + amt);
                         accountCopService.saveAccountCopSafe(acc);
                     }
                 }
             }
-
-            // limpiar relación
-            for (SaleP2pAccountCop prev : sale.getAccountCopsDetails()) {
-                prev.setSaleP2p(null);
-            }
+            sale.getAccountCopsDetails().forEach(d -> d.setSaleP2p(null));
             sale.getAccountCopsDetails().clear();
-
         } else {
             sale.setAccountCopsDetails(new ArrayList<>());
         }
 
-        // 2) APLICAR nuevas asignaciones
         for (AssignAccountDto dto : accounts) {
-
             SaleP2pAccountCop detail = new SaleP2pAccountCop();
             detail.setSaleP2p(sale);
             detail.setAmount(dto.getAmount());
             detail.setNameAccount(dto.getNameAccount());
-
             if (dto.getAccountCop() != null) {
                 AccountCop acc = accountCopService.findByIdAccountCop(dto.getAccountCop());
                 detail.setAccountCop(acc);
-
                 double amt = dto.getAmount() != null ? dto.getAmount() : 0.0;
-
-                if (acc.getBalance() == null) acc.setBalance(0.0);
-                if (acc.getCupoDisponibleHoy() == null) acc.setCupoDisponibleHoy(0.0);
-
-                // ✅ APLICA EFECTOS
-                acc.setBalance(acc.getBalance() + amt);
-                acc.setCupoDisponibleHoy(acc.getCupoDisponibleHoy() - amt);
-
+                acc.setBalance((acc.getBalance() != null ? acc.getBalance() : 0.0) + amt);
+                acc.setCupoDisponibleHoy((acc.getCupoDisponibleHoy() != null ? acc.getCupoDisponibleHoy() : 0.0) - amt);
                 accountCopService.saveAccountCopSafe(acc);
             }
-
             sale.getAccountCopsDetails().add(detail);
         }
-
         return sale;
     }
 
@@ -373,7 +290,6 @@ public class SaleP2PServiceImpl implements SaleP2PService {
                 .collect(Collectors.toList());
     }
 
-
     private SaleP2PDto convertToDto(SaleP2P sale) {
         SaleP2PDto dto = new SaleP2PDto();
         dto.setId(sale.getId());
@@ -382,247 +298,269 @@ public class SaleP2PServiceImpl implements SaleP2PService {
         dto.setCommission(sale.getCommission());
         dto.setPesosCop(sale.getPesosCop());
         dto.setDollarsUs(sale.getDollarsUs());
-        dto.setTasa(sale.getTasa()); // ✅ ya no queda null si está guardada
-        dto.setNameAccountBinance(getBinanceAccountName(sale));
-
-        // ✅ Si tu DTO tiene campo asignado, actívalo:
-        // dto.setAsignado(Boolean.TRUE.equals(sale.getAsignado()));
-
+        dto.setTasa(sale.getTasa());
+        dto.setAsignado(sale.getAsignado());
+        dto.setNameAccountBinance(sale.getBinanceAccount() != null ? sale.getBinanceAccount().getName() : null);
+        if (sale.getAccountCopsDetails() != null) {
+            dto.setAccountCopsDetails(sale.getAccountCopsDetails().stream()
+                    .map(d -> new com.binance.web.model.SaleP2PDto.AccountCopDetailDto(d.getNameAccount(), d.getAmount()))
+                    .collect(java.util.stream.Collectors.toList()));
+        }
         return dto;
     }
 
-	
-	private String getBinanceAccountName(SaleP2P sale) {
-		return sale.getBinanceAccount() != null ? sale.getBinanceAccount().getName() : null;
-	}
-	
-	@Override
-	public List<SaleP2P> obtenerVentasPorFecha(LocalDate fecha) {
-	    LocalDateTime start = fecha.atStartOfDay();
-	    LocalDateTime end = start.plusDays(1);
-	    return saleP2PRepository.findByDateBetween(start, end);
-	}
-	
-	@Override
-	public Double obtenerComisionesPorFecha(LocalDate fecha) {
-	    LocalDateTime start = fecha.atStartOfDay();
-	    LocalDateTime end = start.plusDays(1);
-	    return saleP2PRepository.findByDateBetween(start, end).stream()
-	        .mapToDouble(SaleP2P::getCommission)
-	        .sum();
-	}
+    @Override
+    public List<SaleP2P> obtenerVentasPorFecha(LocalDate fecha) {
+        LocalDateTime start = fecha.atStartOfDay();
+        return saleP2PRepository.findByDateBetween(start, start.plusDays(1));
+    }
 
-	@Override
-	public List<SaleP2P> obtenerVentasEntreFechas(LocalDateTime inicio, LocalDateTime fin) {
-		// TODO Auto-generated method stub
-		return null;
-	}
-	
-	@Override
-	public String getAllP2PFromBinance(String account, LocalDate from, LocalDate to) {
-	    ZoneId zone = ZoneId.of("America/Bogota");
+    @Override
+    public Double obtenerComisionesPorFecha(LocalDate fecha) {
+        LocalDateTime start = fecha.atStartOfDay();
+        return saleP2PRepository.findByDateBetween(start, start.plusDays(1)).stream()
+                .mapToDouble(SaleP2P::getCommission)
+                .sum();
+    }
 
-	    long start = from.atStartOfDay(zone).toInstant().toEpochMilli();
-	    long end   = to.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli();
+    /** Bug fix: antes devolvía null. Ahora delega al repositorio. */
+    @Override
+    public List<SaleP2P> obtenerVentasEntreFechas(LocalDateTime inicio, LocalDateTime fin) {
+        return saleP2PRepository.findByDateBetween(inicio, fin);
+    }
 
-	    // ✅ ESTE MÉTODO EXISTE
-	    return binanceService.getP2POrdersInRange(account, start, end);
-	}
-	@Override
-	public List<SaleP2PDto> getTodayNoAsignadas(String account) {
-	    LocalDate today = LocalDate.now(ZoneId.of("America/Bogota"));
-	    LocalDateTime start = today.atStartOfDay();
-	    LocalDateTime end = start.plusDays(1);
+    @Override
+    public String getAllP2PFromBinance(String account, LocalDate from, LocalDate to) {
+        ZoneId zone = ZONE_BOGOTA;
+        long start  = from.atStartOfDay(zone).toInstant().toEpochMilli();
+        long end    = to.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli();
+        return binanceService.getP2POrdersInRange(account, start, end, null);
+    }
 
-	    // importa de Binance y guarda nuevas
-	    createSaleP2pDirectly(account, today);
+    /** Solo lee de BD. Sync en background vía P2PSyncScheduler. */
+    @Override
+    public List<SaleP2PDto> getTodayNoAsignadas(String account) {
+        LocalDate today     = LocalDate.now(ZONE_BOGOTA);
+        LocalDateTime start = today.atStartOfDay();
+        LocalDateTime end   = start.plusDays(1);
+        AccountBinance ab   = accountBinanceRepository.findByName(account);
+        if (ab == null) return List.of();
+        return saleP2PRepository.findNoAsignadasByAccountAndDateBetween(ab.getId(), start, end)
+                .stream().map(this::convertToDto).collect(Collectors.toList());
+    }
 
-	    AccountBinance ab = accountBinanceRepository.findByName(account);
-	    List<SaleP2P> sales = saleP2PRepository.findNoAsignadasByAccountAndDateBetween(ab.getId(), start, end);
-	    return sales.stream().map(this::convertToDto).collect(Collectors.toList());
-	}
-	
-	private void importSalesP2PRange(String account, LocalDate from, LocalDate to) {
-	    try {
-	        ZoneId zone = ZoneId.of("America/Bogota");
-	        long start = from.atStartOfDay(zone).toInstant().toEpochMilli();
-	        long end = to.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli();
+    private void importSalesP2PRange(String account, LocalDate from, LocalDate to) {
+        try {
+            ZoneId zone = ZONE_BOGOTA;
+            long start  = from.atStartOfDay(zone).toInstant().toEpochMilli();
+            long end    = to.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli();
 
-	        // ✅ Pide a Binance por rango (por defecto tu método trae SELL fijo o tradeType)
-	        String jsonResponse = binanceService.getP2POrdersInRange(account, start, end);
+            String jsonResponse = binanceService.getP2POrdersInRange(account, start, end, "SELL");
+            JsonNode root = mapper.readTree(jsonResponse);
 
-	        JsonObject jsonObject = JsonParser.parseString(jsonResponse).getAsJsonObject();
-	        if (jsonObject.has("error")) {
-	            System.err.println("❌ Error Binance (" + account + "): " + jsonObject.get("error").getAsString());
-	            return;
-	        }
+            if (root.has("error")) {
+                log.error("Error Binance ({}): {}", account, root.get("error").asText());
+                return;
+            }
 
-	        JsonArray dataArray = jsonObject.getAsJsonArray("data");
-	        if (dataArray == null || dataArray.size() == 0) {
-	            return;
-	        }
+            JsonNode dataArray = root.path("data");
+            if (!dataArray.isArray() || dataArray.isEmpty()) return;
 
-	        for (JsonElement element : dataArray) {
-	            JsonObject obj = element.getAsJsonObject();
+            for (JsonNode obj : dataArray) {
+                String status    = obj.path("orderStatus").asText("");
+                String tradeType = obj.path("tradeType").asText("");
+                String asset     = obj.path("asset").asText("");
 
-	            // ✅ filtros duros
-	            String status = obj.has("orderStatus") ? obj.get("orderStatus").getAsString() : "";
-	            String tradeType = obj.has("tradeType") ? obj.get("tradeType").getAsString() : "";
-	            String asset = obj.has("asset") ? obj.get("asset").getAsString() : "";
+                if (!"COMPLETED".equalsIgnoreCase(status))  continue;
+                if (!"SELL".equalsIgnoreCase(tradeType))    continue;
+                if (!"USDT".equalsIgnoreCase(asset))        continue;
 
-	            if (!"COMPLETED".equalsIgnoreCase(status)) continue;
-	            if (!"SELL".equalsIgnoreCase(tradeType)) continue;
-	            if (!"USDT".equalsIgnoreCase(asset)) continue;
+                String orderNumber = obj.path("orderNumber").asText();
+                if (orderNumber.isBlank())                               continue;
+                if (saleP2PRepository.existsByNumberOrder(orderNumber)) continue;
 
-	            String orderNumber = obj.has("orderNumber") ? obj.get("orderNumber").getAsString() : null;
-	            if (orderNumber == null || orderNumber.isBlank()) continue;
+                LocalDateTime fechaOrden = obj.has("createTime")
+                        ? convertTimestamp(obj.path("createTime").asLong())
+                        : LocalDateTime.now(zone);
 
-	            // ✅ evita duplicados
-	            if (saleP2PRepository.existsByNumberOrder(orderNumber)) continue;
+                SaleP2P sale = new SaleP2P();
+                sale.setNumberOrder(orderNumber);
+                sale.setDate(fechaOrden);
+                sale.setPesosCop(obj.path("totalPrice").asDouble(0.0));
+                sale.setDollarsUs(obj.path("amount").asDouble(0.0));
 
-	            // Fecha
-	            LocalDateTime fechaOrden = obj.has("createTime")
-	                    ? convertTimestamp(obj.get("createTime").getAsLong())
-	                    : LocalDateTime.now(zone);
+                double commission = !obj.path("takerCommission").isNull()
+                        ? obj.path("takerCommission").asDouble(0.0)
+                        : obj.path("commission").asDouble(0.0);
+                sale.setCommission(commission);
+                sale.setTasa(calculateTasaVenta(sale));
+                sale = assignAccountBinance(sale, account);
+                sale.setAsignado(false);
+                sale.setUtilidad(0.0);
+                saveSaleP2P(sale);
+                autoAssignIfRuleExists(sale);
+            }
+        } catch (Exception e) {
+            log.error("Error importando rango P2P ({}): {}", account, e.getMessage(), e);
+        }
+    }
 
-	            // COP real (totalPrice)
-	            Double pesosCop = (obj.has("totalPrice") && !obj.get("totalPrice").isJsonNull())
-	                    ? obj.get("totalPrice").getAsDouble()
-	                    : 0.0;
+    /** Solo lee de BD para todas las cuentas. Sync en background vía P2PSyncScheduler. */
+    @Override
+    public List<SaleP2PDto> getTodayNoAsignadasAllAccounts() {
+        List<SaleP2PDto> out = new ArrayList<>();
+        for (AccountBinance acc : accountBinanceRepository.findByTipo("BINANCE")) {
+            saleP2PRepository.findNoAsignadasGeneralByAccount(acc.getId())
+                    .forEach(s -> out.add(convertToDto(s)));
+        }
+        return out;
+    }
 
-	            // USDT vendido (amount)
-	            Double dollarsUs = (obj.has("amount") && !obj.get("amount").isJsonNull())
-	                    ? obj.get("amount").getAsDouble()
-	                    : 0.0;
+    // ─────────────────────────────────────────────────────────────
+    // Auto-asignación por regla activa
+    // ─────────────────────────────────────────────────────────────
 
-	            // comisión (takerCommission o commission)
-	            Double commission = (obj.has("takerCommission") && !obj.get("takerCommission").isJsonNull())
-	                    ? obj.get("takerCommission").getAsDouble()
-	                    : ((obj.has("commission") && !obj.get("commission").isJsonNull())
-	                            ? obj.get("commission").getAsDouble()
-	                            : 0.0);
+    /**
+     * Si existe una regla activa para la cuenta Binance de esta venta,
+     * la asigna automáticamente a la cuenta COP configurada.
+     * Si no hay regla, la venta queda sin asignar (modo manual).
+     */
+    private void autoAssignIfRuleExists(SaleP2P sale) {
+        if (sale.getBinanceAccount() == null) return;
+        String binanceName = sale.getBinanceAccount().getName();
 
-	            SaleP2P sale = new SaleP2P();
-	            sale.setNumberOrder(orderNumber);
-	            sale.setDate(fechaOrden);
-	            sale.setPesosCop(pesosCop);
-	            sale.setDollarsUs(dollarsUs);
-	            sale.setCommission(commission);
+        assignmentRuleRepository.findByBinanceAccount_Name(binanceName)
+                .filter(r -> Boolean.TRUE.equals(r.getActive()))
+                .ifPresent(rule -> {
+                    AccountCop cop = rule.getCopAccount();
+                    double amount  = sale.getPesosCop() != null ? sale.getPesosCop() : 0.0;
 
-	            // ✅ tasa siempre calculada
-	            sale.setTasa(calculateTasaVenta(sale));
+                    // Detalle de asignación
+                    SaleP2pAccountCop detail = new SaleP2pAccountCop();
+                    detail.setSaleP2p(sale);
+                    detail.setAmount(amount);
+                    detail.setNameAccount(cop.getName());
+                    detail.setAccountCop(cop);
 
-	            // ✅ asigna cuenta binance
-	            sale = assignAccountBinance(sale, account);
+                    // Actualizar saldo COP
+                    cop.setBalance((cop.getBalance() != null ? cop.getBalance() : 0.0) + amount);
+                    cop.setCupoDisponibleHoy(
+                            (cop.getCupoDisponibleHoy() != null ? cop.getCupoDisponibleHoy() : 0.0) - amount);
+                    accountCopService.saveAccountCopSafe(cop);
 
-	            // ✅ no asignada por defecto
-	            sale.setAsignado(false);
-	            sale.setUtilidad(0.0);
+                    // Descontar USDT del saldo Binance
+                    if (sale.getDollarsUs() != null && sale.getDollarsUs() > 0) {
+                        accountBinanceService.subtractBalance(binanceName, sale.getDollarsUs());
+                    }
 
-	            saveSaleP2P(sale);
-	        }
+                    // Marcar venta como asignada
+                    if (sale.getAccountCopsDetails() == null) sale.setAccountCopsDetails(new ArrayList<>());
+                    sale.getAccountCopsDetails().add(detail);
+                    sale.setAsignado(true);
+                    saleP2PRepository.save(sale);
 
-	    } catch (Exception e) {
-	        e.printStackTrace();
-	        System.err.println("❌ Error importando rango P2P (" + account + "): " + e.getMessage());
-	    }
-	}
+                    log.info("Venta {} auto-asignada a {} ({} COP)", sale.getNumberOrder(), cop.getName(), amount);
+                });
+    }
 
+    // ─────────────────────────────────────────────────────────────
+    // Reasignación puntual (con reversión)
+    // ─────────────────────────────────────────────────────────────
 
-	@Override
-	public List<SaleP2PDto> getTodayNoAsignadasAllAccounts() {
-	    ZoneId zone = ZoneId.of("America/Bogota");
+    /**
+     * Cambia la cuenta COP de una venta ya asignada.
+     * Revierte el balance/cupo de la cuenta anterior y aplica en la nueva.
+     * El saldo USDT en Binance NO se vuelve a tocar (ya se descontó al asignar).
+     */
+    @Override
+    @Transactional
+    public String reassignSale(Integer saleId, Integer newCopAccountId) {
+        SaleP2P sale = saleP2PRepository.findById(saleId).orElse(null);
+        if (sale == null)                               return "Venta no encontrada: " + saleId;
+        if (!Boolean.TRUE.equals(sale.getAsignado()))   return "La venta " + saleId + " no está asignada aún.";
 
-	    // ✅ SOLO HOY
-	    LocalDate today = LocalDate.now(zone);
-	    LocalDate from = today;
-	    LocalDate to   = today;
+        AccountCop newCop = accountCopService.findByIdAccountCop(newCopAccountId);
+        if (newCop == null) return "Cuenta COP no encontrada: " + newCopAccountId;
 
-	    List<SaleP2PDto> out = new ArrayList<>();
+        double amount = sale.getPesosCop() != null ? sale.getPesosCop() : 0.0;
 
-	    List<AccountBinance> binanceAccounts = accountBinanceRepository.findAll().stream()
-	            .filter(acc -> "BINANCE".equalsIgnoreCase(acc.getTipo()))
-	            .collect(Collectors.toList());
+        // 1) Revertir asignaciones anteriores
+        if (sale.getAccountCopsDetails() != null) {
+            for (SaleP2pAccountCop prev : sale.getAccountCopsDetails()) {
+                if (prev.getAccountCop() != null) {
+                    AccountCop old = accountCopService.findByIdAccountCop(prev.getAccountCop().getId());
+                    if (old != null) {
+                        double oldAmt = prev.getAmount() != null ? prev.getAmount() : 0.0;
+                        old.setBalance((old.getBalance() != null ? old.getBalance() : 0.0) - oldAmt);
+                        old.setCupoDisponibleHoy(
+                                (old.getCupoDisponibleHoy() != null ? old.getCupoDisponibleHoy() : 0.0) + oldAmt);
+                        accountCopService.saveAccountCopSafe(old);
+                        log.info("Revertido: {} COP de {} en {}", oldAmt, old.getName(), saleId);
+                    }
+                }
+            }
+            sale.getAccountCopsDetails().clear();
+        } else {
+            sale.setAccountCopsDetails(new ArrayList<>());
+        }
 
-	    for (AccountBinance acc : binanceAccounts) {
-	        // 1) Importa SOLO HOY
-	        importSalesP2PRange(acc.getName(), from, to);
+        // 2) Aplicar en nueva cuenta COP
+        SaleP2pAccountCop newDetail = new SaleP2pAccountCop();
+        newDetail.setSaleP2p(sale);
+        newDetail.setAmount(amount);
+        newDetail.setNameAccount(newCop.getName());
+        newDetail.setAccountCop(newCop);
 
-	        // 2) Devuelve NO asignadas de esa cuenta (sin filtrar por fecha)
-	        List<SaleP2P> sales = saleP2PRepository.findNoAsignadasGeneralByAccount(acc.getId());
+        newCop.setBalance((newCop.getBalance() != null ? newCop.getBalance() : 0.0) + amount);
+        newCop.setCupoDisponibleHoy(
+                (newCop.getCupoDisponibleHoy() != null ? newCop.getCupoDisponibleHoy() : 0.0) - amount);
+        accountCopService.saveAccountCopSafe(newCop);
 
-	        out.addAll(sales.stream().map(this::convertToDto).collect(Collectors.toList()));
-	    }
+        sale.getAccountCopsDetails().add(newDetail);
+        saleP2PRepository.save(sale);
 
-	    return out;
-	}
+        log.info("Venta {} reasignada → {} ({} COP)", saleId, newCop.getName(), amount);
+        return "Reasignación exitosa: " + amount + " COP → " + newCop.getName();
+    }
 
-	
-	@Override
-	@Transactional
-	public String fixDuplicateAssignmentsAuto(Integer saleP2pId) {
+    @Override
+    @Transactional
+    public String fixDuplicateAssignmentsAuto(Integer saleP2pId) {
+        List<SaleP2pAccountCop> details = saleP2pAccountCopRepository.findBySaleP2p_Id(saleP2pId);
+        if (details == null || details.size() <= 1) {
+            return "OK: La venta " + saleP2pId + " no tiene duplicados.";
+        }
 
-	    // 1) Traer todos los detalles de esa venta
-	    List<SaleP2pAccountCop> details = saleP2pAccountCopRepository.findBySaleP2p_Id(saleP2pId);
+        Map<String, List<SaleP2pAccountCop>> grouped = new HashMap<>();
+        for (SaleP2pAccountCop d : details) {
+            String accKey = (d.getAccountCop() != null)
+                    ? "ID:" + d.getAccountCop().getId()
+                    : "NAME:" + (d.getNameAccount() == null ? "" : d.getNameAccount().trim().toUpperCase());
+            String key = accKey + "|AMT:" + (d.getAmount() != null ? d.getAmount() : 0.0);
+            grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(d);
+        }
 
-	    if (details == null || details.size() <= 1) {
-	        return "OK: La venta " + saleP2pId + " no tiene duplicados.";
-	    }
+        int removed = 0;
+        for (List<SaleP2pAccountCop> list : grouped.values()) {
+            if (list.size() <= 1) continue;
+            list.sort(Comparator.comparing(SaleP2pAccountCop::getId));
+            for (int i = 1; i < list.size(); i++) {
+                SaleP2pAccountCop dup = list.get(i);
+                if (dup.getAccountCop() != null) {
+                    AccountCop acc = accountCopService.findByIdAccountCop(dup.getAccountCop().getId());
+                    if (acc != null) {
+                        double amt = dup.getAmount() != null ? dup.getAmount() : 0.0;
+                        acc.setBalance((acc.getBalance() != null ? acc.getBalance() : 0.0) - amt);
+                        acc.setCupoDisponibleHoy((acc.getCupoDisponibleHoy() != null ? acc.getCupoDisponibleHoy() : 0.0) + amt);
+                        accountCopService.saveAccountCopSafe(acc);
+                    }
+                }
+                saleP2pAccountCopRepository.deleteById(dup.getId());
+                removed++;
+            }
+        }
 
-	    // 2) Agrupar por "misma cuenta + mismo monto"
-	    // clave: si hay accountCop -> ID, si no -> nameAccount
-	    Map<String, List<SaleP2pAccountCop>> grouped = new HashMap<>();
-
-	    for (SaleP2pAccountCop d : details) {
-	        String accKey = (d.getAccountCop() != null)
-	                ? "ID:" + d.getAccountCop().getId()
-	                : "NAME:" + (d.getNameAccount() == null ? "" : d.getNameAccount().trim().toUpperCase());
-
-	        double amount = d.getAmount() != null ? d.getAmount() : 0.0;
-
-	        String key = accKey + "|AMT:" + amount;
-	        grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(d);
-	    }
-
-	    int removed = 0;
-
-	    // 3) Para cada grupo duplicado, dejamos 1 y borramos el resto
-	    for (List<SaleP2pAccountCop> list : grouped.values()) {
-	        if (list.size() <= 1) continue;
-
-	        // deja el menor id como "bueno" y borra los demás
-	        list.sort(Comparator.comparing(SaleP2pAccountCop::getId));
-
-	        for (int i = 1; i < list.size(); i++) {
-	            SaleP2pAccountCop dup = list.get(i);
-
-	            // 3.1) Revertir balance/cupo SOLO para ese duplicado
-	            if (dup.getAccountCop() != null) {
-	                AccountCop acc = accountCopService.findByIdAccountCop(dup.getAccountCop().getId());
-	                if (acc != null) {
-	                    double amt = dup.getAmount() != null ? dup.getAmount() : 0.0;
-
-	                    if (acc.getBalance() == null) acc.setBalance(0.0);
-	                    acc.setBalance(acc.getBalance() - amt);
-
-	                    if (acc.getCupoDisponibleHoy() == null) acc.setCupoDisponibleHoy(0.0);
-	                    acc.setCupoDisponibleHoy(acc.getCupoDisponibleHoy() + amt);
-
-	                    accountCopService.saveAccountCopSafe(acc);
-	                }
-	            }
-
-	            // 3.2) Borrar el duplicado
-	            saleP2pAccountCopRepository.deleteById(dup.getId());
-	            removed++;
-	        }
-	    }
-
-	    if (removed == 0) {
-	        return "OK: No se detectaron duplicados exactos en la venta " + saleP2pId + ".";
-	    }
-
-	    return "✅ Arreglado: se eliminaron " + removed + " asignación(es) duplicada(s) y se revirtió balance/cupo.";
-	}
-	
+        if (removed == 0) return "OK: No se detectaron duplicados exactos en la venta " + saleP2pId + ".";
+        return "Arreglado: se eliminaron " + removed + " asignación(es) duplicada(s) y se revirtió balance/cupo.";
+    }
 }

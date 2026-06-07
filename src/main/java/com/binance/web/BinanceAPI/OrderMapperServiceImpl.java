@@ -1,46 +1,44 @@
 package com.binance.web.BinanceAPI;
 
-import java.time.*;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 import com.binance.web.OrderP2P.OrderP2PDto;
-import com.google.gson.JsonObject;
+import com.fasterxml.jackson.databind.JsonNode;
 
 public class OrderMapperServiceImpl {
-    public static OrderP2PDto convertToDTO(JsonObject json) {
-    	OrderP2PDto dto = new OrderP2PDto();
-        
-        dto.setOrderNumber(getJsonValue(json, "orderNumber"));
-        dto.setTradeType(getJsonValue(json, "tradeType"));
-        dto.setAmount(getJsonDoubleValue(json, "amount"));
-        dto.setTotalPrice(getJsonDoubleValue(json, "totalPrice"));
-        dto.setUnitPrice(getJsonDoubleValue(json, "unitPrice"));
-        dto.setOrderStatus(getJsonValue(json, "orderStatus"));
-        dto.setCreateTime(getJsonDateValue(json, "createTime"));
-        dto.setCommission(getJsonDoubleValue(json, "commission"));
-        dto.setCounterPartNickName(getJsonValue(json, "counterPartNickName"));
-        dto.setPayMethodName(getJsonValue(json, "payMethodName"));
 
+    public static OrderP2PDto convertToDTO(JsonNode json) {
+        OrderP2PDto dto = new OrderP2PDto();
+        dto.setOrderNumber(textOrNull(json, "orderNumber"));
+        dto.setTradeType(textOrNull(json, "tradeType"));
+        dto.setAmount(doubleOrNull(json, "amount"));
+        dto.setTotalPrice(doubleOrNull(json, "totalPrice"));
+        dto.setUnitPrice(doubleOrNull(json, "unitPrice"));
+        dto.setOrderStatus(textOrNull(json, "orderStatus"));
+        dto.setCreateTime(dateOrNull(json, "createTime"));
+        dto.setCommission(doubleOrNull(json, "commission"));
+        dto.setCounterPartNickName(textOrNull(json, "counterPartNickName"));
+        dto.setPayMethodName(textOrNull(json, "payMethodName"));
         return dto;
     }
 
-    private static String getJsonValue(JsonObject json, String key) {
-        return json.has(key) && !json.get(key).isJsonNull() ? json.get(key).getAsString() : null;
+    private static String textOrNull(JsonNode json, String key) {
+        JsonNode node = json.get(key);
+        return (node != null && !node.isNull()) ? node.asText() : null;
     }
-    
-    private static LocalDateTime getJsonDateValue(JsonObject json, String key) {
-        if (json.has(key) && !json.get(key).isJsonNull()) {
-            long timestamp = json.get(key).getAsLong();
-            return LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp), ZoneId.systemDefault());
-        }
-        return null;
+
+    private static LocalDateTime dateOrNull(JsonNode json, String key) {
+        JsonNode node = json.get(key);
+        if (node == null || node.isNull()) return null;
+        return LocalDateTime.ofInstant(Instant.ofEpochMilli(node.asLong()), ZoneId.systemDefault());
     }
-    
-    private static Double getJsonDoubleValue(JsonObject json, String key) {
+
+    private static Double doubleOrNull(JsonNode json, String key) {
         try {
-            return json.has(key) && !json.get(key).isJsonNull()
-                ? json.get(key).getAsDouble()
-                : null;
+            JsonNode node = json.get(key);
+            return (node != null && !node.isNull()) ? node.asDouble() : null;
         } catch (Exception e) {
             return null;
         }

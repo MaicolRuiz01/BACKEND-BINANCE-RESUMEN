@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
@@ -23,12 +24,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpMethod;
 
+@Slf4j
 @Service
 public class TronScanService {
 
@@ -69,6 +72,8 @@ public class TronScanService {
         return restTemplate.exchange(url, HttpMethod.GET, tronScanEntity(), String.class).getBody();
     }
 
+    /** Caché de 60 s por dirección — evita golpear TronGrid en cada request */
+    @Cacheable(value = "trongridTrc20", key = "#address")
     public String getTRC20TransfersUsingTronGrid(String address) {
         String url = "https://api.trongrid.io/v1/accounts/" + address
                 + "/transactions/trc20?limit=100&only_confirmed=true&order_by=block_timestamp,desc";
@@ -311,7 +316,14 @@ public class TronScanService {
                     String txId      = tx.path("transaction_id").asText();
                     JsonNode tokenInfo = tx.path("token_info");
                     String symbol    = tokenInfo.path("symbol").asText();
-                    double amount    = Double.parseDouble(tx.path("value").asText("0")) / 1_000_000.0;
+
+                    // Leer decimales dinámicamente igual que en parseTRC20OutgoingTransfers
+                    int decimals = 6;
+                    if (tokenInfo.has("decimals")) {
+                        try { decimals = Integer.parseInt(tokenInfo.get("decimals").asText()); } catch (Exception ignore) {}
+                    }
+                    double amount = 0.0;
+                    try { amount = Double.parseDouble(tx.path("value").asText("0")) / Math.pow(10, decimals); } catch (NumberFormatException ignore) {}
 
                     if (toAddress.equalsIgnoreCase(walletAddress) && !assignedIds.contains(txId)) {
                         long timestamp = tx.path("block_timestamp").asLong();
