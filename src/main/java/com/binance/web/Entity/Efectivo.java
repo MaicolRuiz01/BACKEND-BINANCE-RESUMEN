@@ -2,11 +2,7 @@ package com.binance.web.Entity;
 
 import java.time.LocalDate;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
+import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -24,5 +20,9 @@ public class Efectivo {
 	private String name;
 	@Column(name = "saldo_inicial_del_dia")
     private Double saldoInicialDelDia;
+
+	// Relación inversa con Retirador
+	@OneToOne(mappedBy = "efectivo", cascade = CascadeType.ALL, orphanRemoval = true)
+	private Retirador retirador;
 
 }
