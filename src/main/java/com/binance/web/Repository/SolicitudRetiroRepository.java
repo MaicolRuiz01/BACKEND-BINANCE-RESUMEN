@@ -1,0 +1,12 @@
+package com.binance.web.Repository;
+
+import com.binance.web.Entity.SolicitudRetiro;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+
+@Repository
+public interface SolicitudRetiroRepository extends JpaRepository<SolicitudRetiro, Long> {
+    List<SolicitudRetiro> findByRetiradorIdOrderByFechaCreacionDesc(Long retiradorId);
+}
