@@ -20,7 +20,7 @@ public class Retirador {
     private String nombre;
 
     /** Caja (efectivo) a la que ingresa el dinero retirado */
-    @OneToOne(optional = true, cascade = CascadeType.ALL)
+    @OneToOne(optional = true)
     @JoinColumn(name = "efectivo_id", unique = true, nullable = true)
     private Efectivo efectivo;
 

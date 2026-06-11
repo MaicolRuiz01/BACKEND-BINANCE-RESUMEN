@@ -2,6 +2,7 @@ package com.binance.web.serviceImpl;
 
 import com.binance.web.Entity.*;
 import com.binance.web.Repository.*;
+import com.binance.web.dto.PagoRetiradorDto;
 import com.binance.web.dto.SolicitudRetiroRequestDto;
 import com.binance.web.service.RetiradorService;
 import lombok.extern.slf4j.Slf4j;
@@ -175,6 +176,42 @@ public class RetiradorServiceImpl implements RetiradorService {
     @Override
     public List<SolicitudRetiro> historialPorRetirador(Long retiradorId) {
         return solicitudRepository.findByRetiradorIdOrderByFechaCreacionDesc(retiradorId);
+    }
+
+    @Override
+    @Transactional
+    public Retirador pagarRetirador(Long retiradorId, PagoRetiradorDto dto) {
+        Retirador retirador = findById(retiradorId);
+
+        if (dto.getMonto() == null || dto.getMonto() <= 0)
+            throw new IllegalArgumentException("El monto debe ser mayor a 0");
+        if (dto.getMonto() > retirador.getSaldoPendiente())
+            throw new IllegalArgumentException("El monto supera el saldo pendiente del retirador");
+
+        if ("COP".equalsIgnoreCase(dto.getFuente())) {
+            AccountCop cuenta = accountCopRepository.findById(dto.getCuentaCopId())
+                    .orElseThrow(() -> new RuntimeException("Cuenta COP no encontrada: " + dto.getCuentaCopId()));
+            if (cuenta.getBalance() < dto.getMonto())
+                throw new IllegalStateException("Saldo insuficiente en la cuenta COP");
+            cuenta.setBalance(cuenta.getBalance() - dto.getMonto());
+            accountCopRepository.save(cuenta);
+
+        } else if ("CAJA".equalsIgnoreCase(dto.getFuente())) {
+            Efectivo caja = efectivoRepository.findById(dto.getCajaId())
+                    .orElseThrow(() -> new RuntimeException("Caja no encontrada: " + dto.getCajaId()));
+            if (caja.getSaldo() < dto.getMonto())
+                throw new IllegalStateException("Saldo insuficiente en la caja");
+            caja.setSaldo(caja.getSaldo() - dto.getMonto());
+            efectivoRepository.save(caja);
+
+        } else {
+            throw new IllegalArgumentException("Fuente inválida. Use 'COP' o 'CAJA'");
+        }
+
+        retirador.setSaldoPendiente(retirador.getSaldoPendiente() - dto.getMonto());
+        Retirador saved = retiradorRepository.save(retirador);
+        log.info("[Pago retirador] {} pagado: ${} desde {}", retirador.getNombre(), dto.getMonto(), dto.getFuente());
+        return saved;
     }
 
     // ── Helpers ───────────────────────────────────────────────────

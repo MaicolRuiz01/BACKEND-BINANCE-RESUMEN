@@ -2,6 +2,7 @@ package com.binance.web.Entity;
 
 import java.time.LocalDate;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -22,7 +23,8 @@ public class Efectivo {
     private Double saldoInicialDelDia;
 
 	// Relación inversa con Retirador
-	@OneToOne(mappedBy = "efectivo", cascade = CascadeType.ALL, orphanRemoval = true)
+	@JsonIgnore
+	@OneToOne(mappedBy = "efectivo")
 	private Retirador retirador;
 
 }

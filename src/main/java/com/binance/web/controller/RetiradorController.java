@@ -2,6 +2,7 @@ package com.binance.web.controller;
 
 import com.binance.web.Entity.Retirador;
 import com.binance.web.Entity.SolicitudRetiro;
+import com.binance.web.dto.PagoRetiradorDto;
 import com.binance.web.dto.SolicitudRetiroRequestDto;
 import com.binance.web.service.RetiradorService;
 import org.springframework.http.HttpStatus;
@@ -67,5 +68,12 @@ public class RetiradorController {
     @GetMapping("/{id}/solicitudes")
     public List<SolicitudRetiro> historial(@PathVariable Long id) {
         return service.historialPorRetirador(id);
+    }
+
+    // ── Pago al retirador ─────────────────────────────────────────
+
+    @PostMapping("/{id}/pagar")
+    public ResponseEntity<Retirador> pagar(@PathVariable Long id, @RequestBody PagoRetiradorDto dto) {
+        return ResponseEntity.ok(service.pagarRetirador(id, dto));
     }
 }
