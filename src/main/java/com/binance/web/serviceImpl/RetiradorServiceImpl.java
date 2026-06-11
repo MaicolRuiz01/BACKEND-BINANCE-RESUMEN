@@ -62,8 +62,29 @@ public class RetiradorServiceImpl implements RetiradorService {
     }
 
     @Override
+    @Transactional
     public Retirador save(Retirador retirador) {
-        if (retirador.getSaldoPendiente() == null) retirador.setSaldoPendiente(0.0);
+        // ✅ Validar nombre
+        if (retirador.getNombre() == null || retirador.getNombre().trim().isEmpty()) {
+            throw new IllegalArgumentException("El nombre del retirador es requerido");
+        }
+        
+        // ✅ Validar que si tiene efectivo_id, el efectivo exista en la BD
+        if (retirador.getEfectivo() != null && retirador.getEfectivo().getId() != null) {
+            efectivoRepository.findById(retirador.getEfectivo().getId())
+                .orElseThrow(() -> new RuntimeException(
+                    "Caja no encontrada con ID: " + retirador.getEfectivo().getId()
+                ));
+        }
+        
+        if (retirador.getSaldoPendiente() == null) {
+            retirador.setSaldoPendiente(0.0);
+        }
+        
+        log.info("Guardando retirador: {} con caja_id: {}", 
+            retirador.getNombre(), 
+            retirador.getEfectivo() != null ? retirador.getEfectivo().getId() : "null");
+        
         return retiradorRepository.save(retirador);
     }
 
