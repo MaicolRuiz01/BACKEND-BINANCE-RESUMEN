@@ -2,8 +2,7 @@ package com.binance.web.serviceImpl;
 
 import com.binance.web.Entity.*;
 import com.binance.web.Repository.*;
-import com.binance.web.dto.PagoRetiradorDto;
-import com.binance.web.dto.SolicitudRetiroRequestDto;
+import com.binance.web.dto.*;
 import com.binance.web.service.RetiradorService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -14,12 +13,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 
-import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.time.*;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -30,26 +26,31 @@ public class RetiradorServiceImpl implements RetiradorService {
     private static final double PAGO_COMPLETO      = 4_000.0;
     private static final ZoneId ZONE_BOGOTA = ZoneId.of("America/Bogota");
 
-    private final RetiradorRepository retiradorRepository;
+    private final RetiradorRepository      retiradorRepository;
     private final SolicitudRetiroRepository solicitudRepository;
-    private final AccountCopRepository accountCopRepository;
-    private final EfectivoRepository efectivoRepository;
+    private final AccountCopRepository     accountCopRepository;
+    private final EfectivoRepository       efectivoRepository;
     private final RestTemplate restTemplate = new RestTemplate();
 
     public RetiradorServiceImpl(RetiradorRepository retiradorRepository,
                                 SolicitudRetiroRepository solicitudRepository,
                                 AccountCopRepository accountCopRepository,
                                 EfectivoRepository efectivoRepository) {
-        this.retiradorRepository = retiradorRepository;
-        this.solicitudRepository = solicitudRepository;
+        this.retiradorRepository  = retiradorRepository;
+        this.solicitudRepository  = solicitudRepository;
         this.accountCopRepository = accountCopRepository;
-        this.efectivoRepository = efectivoRepository;
+        this.efectivoRepository   = efectivoRepository;
     }
 
     @Value("${app.n8n.webhook-url:}")
     private String n8nWebhookUrl;
 
-    // ── CRUD ──────────────────────────────────────────────────────
+    @Value("${app.n8n.webhook-general-url:}")
+    private String n8nWebhookGeneralUrl;
+
+    // ═══════════════════════════════════════════════════════════════
+    // CRUD retiradores
+    // ═══════════════════════════════════════════════════════════════
 
     @Override
     public List<Retirador> findAll() {
@@ -65,28 +66,38 @@ public class RetiradorServiceImpl implements RetiradorService {
     @Override
     @Transactional
     public Retirador save(Retirador retirador) {
-        // ✅ Validar nombre
         if (retirador.getNombre() == null || retirador.getNombre().trim().isEmpty()) {
             throw new IllegalArgumentException("El nombre del retirador es requerido");
         }
-        
-        // ✅ Validar que si tiene efectivo_id, el efectivo exista en la BD
-        if (retirador.getEfectivo() != null && retirador.getEfectivo().getId() != null) {
-            efectivoRepository.findById(retirador.getEfectivo().getId())
-                .orElseThrow(() -> new RuntimeException(
-                    "Caja no encontrada con ID: " + retirador.getEfectivo().getId()
-                ));
-        }
-        
         if (retirador.getSaldoPendiente() == null) {
             retirador.setSaldoPendiente(0.0);
         }
-        
-        log.info("Guardando retirador: {} con caja_id: {}", 
-            retirador.getNombre(), 
-            retirador.getEfectivo() != null ? retirador.getEfectivo().getId() : "null");
-        
-        return retiradorRepository.save(retirador);
+
+        boolean esNuevo = (retirador.getId() == null);
+
+        // Si tiene efectivo_id, validar que exista
+        if (retirador.getEfectivo() != null && retirador.getEfectivo().getId() != null) {
+            efectivoRepository.findById(retirador.getEfectivo().getId())
+                .orElseThrow(() -> new RuntimeException(
+                    "Caja no encontrada con ID: " + retirador.getEfectivo().getId()));
+        }
+
+        Retirador saved = retiradorRepository.save(retirador);
+
+        // ── Auto-crear caja si es nuevo y no tiene una asignada ──
+        if (esNuevo && saved.getEfectivo() == null) {
+            Efectivo caja = new Efectivo();
+            caja.setName("Caja - " + saved.getNombre());
+            caja.setSaldo(0.0);
+            caja.setSaldoInicialDelDia(0.0);
+            Efectivo cajaSaved = efectivoRepository.save(caja);
+
+            saved.setEfectivo(cajaSaved);
+            saved = retiradorRepository.save(saved);
+            log.info("[Retirador] Caja auto-creada '{}' para {}", cajaSaved.getName(), saved.getNombre());
+        }
+
+        return saved;
     }
 
     @Override
@@ -94,7 +105,9 @@ public class RetiradorServiceImpl implements RetiradorService {
         retiradorRepository.deleteById(id);
     }
 
-    // ── Solicitudes ───────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════
+    // Solicitud con retirador pre-asignado
+    // ═══════════════════════════════════════════════════════════════
 
     @Override
     @Transactional
@@ -106,35 +119,16 @@ public class RetiradorServiceImpl implements RetiradorService {
         solicitud.setFechaCreacion(LocalDateTime.now(ZONE_BOGOTA));
         solicitud.setEstado(EstadoSolicitud.PENDIENTE);
 
-        double totalMonto = 0;
-        double pagoRetirador = 0;
-        List<DetalleRetiro> detalles = new ArrayList<>();
-
-        for (SolicitudRetiroRequestDto.DetalleDto dto : request.getDetalles()) {
-            AccountCop cuenta = accountCopRepository.findById(dto.getCuentaCopId())
-                    .orElseThrow(() -> new RuntimeException("Cuenta COP no encontrada: " + dto.getCuentaCopId()));
-
-            DetalleRetiro detalle = new DetalleRetiro();
-            detalle.setSolicitud(solicitud);
-            detalle.setCuentaCop(cuenta);
-            detalle.setTipoRetiro(dto.getTipoRetiro());
-            detalle.setMontoCajero(dto.getMontoCajero());
-            detalle.setMontoCorresponsal(dto.getMontoCorresponsal());
-
-            totalMonto += detalle.totalDetalle();
-            pagoRetirador += calcularPago(dto.getTipoRetiro());
-            detalles.add(detalle);
-        }
+        List<DetalleRetiro> detalles = buildDetalles(request.getDetalles(), solicitud);
+        double totalMonto    = detalles.stream().mapToDouble(DetalleRetiro::totalDetalle).sum();
+        double pagoRetirador = detalles.stream().mapToDouble(d -> calcularPago(d.getTipoRetiro())).sum();
 
         solicitud.setTotalMonto(totalMonto);
         solicitud.setPagoRetirador(pagoRetirador);
         solicitud.setDetalles(detalles);
 
         SolicitudRetiro saved = solicitudRepository.save(solicitud);
-
-        // Notificación a n8n → Telegram
-        notificarN8n(saved, retirador);
-
+        notificarN8n(saved, retirador, n8nWebhookUrl);
         return saved;
     }
 
@@ -144,19 +138,17 @@ public class RetiradorServiceImpl implements RetiradorService {
         SolicitudRetiro solicitud = solicitudRepository.findById(solicitudId)
                 .orElseThrow(() -> new RuntimeException("Solicitud no encontrada: " + solicitudId));
 
-        if (solicitud.getEstado() == EstadoSolicitud.COMPLETADO) {
+        if (solicitud.getEstado() == EstadoSolicitud.COMPLETADO)
             throw new IllegalStateException("La solicitud ya fue confirmada.");
-        }
+        if (solicitud.getRetirador() == null)
+            throw new IllegalStateException("La solicitud aún no tiene un retirador asignado.");
 
-        // 1. Descontar de cada cuenta COP
         for (DetalleRetiro detalle : solicitud.getDetalles()) {
             AccountCop cuenta = detalle.getCuentaCop();
-            double totalDetalle = detalle.totalDetalle();
-            cuenta.setBalance(cuenta.getBalance() - totalDetalle);
+            cuenta.setBalance(cuenta.getBalance() - detalle.totalDetalle());
             accountCopRepository.save(cuenta);
         }
 
-        // 2. Acreditar total a la caja del retirador
         Retirador retirador = solicitud.getRetirador();
         if (retirador.getEfectivo() != null) {
             Efectivo caja = retirador.getEfectivo();
@@ -164,11 +156,9 @@ public class RetiradorServiceImpl implements RetiradorService {
             efectivoRepository.save(caja);
         }
 
-        // 3. Sumar pago al saldo pendiente del retirador
         retirador.setSaldoPendiente(retirador.getSaldoPendiente() + solicitud.getPagoRetirador());
         retiradorRepository.save(retirador);
 
-        // 4. Marcar como completado
         solicitud.setEstado(EstadoSolicitud.COMPLETADO);
         return solicitudRepository.save(solicitud);
     }
@@ -177,6 +167,85 @@ public class RetiradorServiceImpl implements RetiradorService {
     public List<SolicitudRetiro> historialPorRetirador(Long retiradorId) {
         return solicitudRepository.findByRetiradorIdOrderByFechaCreacionDesc(retiradorId);
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Solicitud general (sin retirador)
+    // ═══════════════════════════════════════════════════════════════
+
+    @Override
+    @Transactional
+    public SolicitudRetiro crearSolicitudGeneral(SolicitudGeneralRequestDto request) {
+        SolicitudRetiro solicitud = new SolicitudRetiro();
+        solicitud.setRetirador(null);
+        solicitud.setFechaCreacion(LocalDateTime.now(ZONE_BOGOTA));
+        solicitud.setEstado(EstadoSolicitud.SIN_ASIGNAR);
+
+        // Convertir DetalleDto de SolicitudGeneralRequestDto al formato interno
+        List<DetalleRetiro> detalles = new ArrayList<>();
+        for (SolicitudGeneralRequestDto.DetalleDto dto : request.getDetalles()) {
+            AccountCop cuenta = accountCopRepository.findById(dto.getCuentaCopId())
+                    .orElseThrow(() -> new RuntimeException("Cuenta COP no encontrada: " + dto.getCuentaCopId()));
+            DetalleRetiro d = new DetalleRetiro();
+            d.setSolicitud(solicitud);
+            d.setCuentaCop(cuenta);
+            d.setTipoRetiro(dto.getTipoRetiro());
+            d.setMontoCajero(dto.getMontoCajero());
+            d.setMontoCorresponsal(dto.getMontoCorresponsal());
+            detalles.add(d);
+        }
+
+        double totalMonto    = detalles.stream().mapToDouble(DetalleRetiro::totalDetalle).sum();
+        double pagoRetirador = detalles.stream().mapToDouble(d -> calcularPago(d.getTipoRetiro())).sum();
+
+        solicitud.setTotalMonto(totalMonto);
+        solicitud.setPagoRetirador(pagoRetirador);
+        solicitud.setDetalles(detalles);
+
+        SolicitudRetiro saved = solicitudRepository.save(solicitud);
+
+        // Notificar al grupo de Telegram con botón inline
+        notificarGeneralN8n(saved);
+        return saved;
+    }
+
+    @Override
+    @Transactional
+    public SolicitudRetiro asignarRetirador(Long solicitudId, AsignarRetiradorDto dto) {
+        SolicitudRetiro solicitud = solicitudRepository.findById(solicitudId)
+                .orElseThrow(() -> new RuntimeException("Solicitud no encontrada: " + solicitudId));
+
+        if (solicitud.getEstado() != EstadoSolicitud.SIN_ASIGNAR)
+            throw new IllegalStateException("La solicitud ya fue asignada o está completada.");
+
+        Retirador retirador = findById(dto.getRetiradorId());
+
+        // Si viene de Telegram, validar que el username coincida (opcional pero seguro)
+        if (dto.getTelegramUsername() != null && !dto.getTelegramUsername().isBlank()) {
+            if (retirador.getTelegramUsername() == null ||
+                !retirador.getTelegramUsername().equalsIgnoreCase(dto.getTelegramUsername())) {
+                throw new IllegalArgumentException(
+                    "El usuario de Telegram '" + dto.getTelegramUsername() + "' no coincide con el retirador.");
+            }
+        }
+
+        solicitud.setRetirador(retirador);
+        solicitud.setEstado(EstadoSolicitud.PENDIENTE);
+        SolicitudRetiro saved = solicitudRepository.save(solicitud);
+
+        log.info("[Solicitud General #{}] Asignada a {}", solicitudId, retirador.getNombre());
+        // Notificar al retirador individualmente (webhook existente)
+        notificarN8n(saved, retirador, n8nWebhookUrl);
+        return saved;
+    }
+
+    @Override
+    public List<SolicitudRetiro> getSolicitudesSinAsignar() {
+        return solicitudRepository.findByEstadoOrderByFechaCreacionDesc(EstadoSolicitud.SIN_ASIGNAR);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Pago al retirador
+    // ═══════════════════════════════════════════════════════════════
 
     @Override
     @Transactional
@@ -214,7 +283,60 @@ public class RetiradorServiceImpl implements RetiradorService {
         return saved;
     }
 
-    // ── Helpers ───────────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════
+    // Ranking semanal
+    // ═══════════════════════════════════════════════════════════════
+
+    @Override
+    public List<RankingRetiradorDto> getRankingSemana() {
+        LocalDateTime[] rango = rangoDeSemana();
+        List<Object[]> rows = solicitudRepository.rankingPorMonto(rango[0], rango[1]);
+
+        Map<Long, Retirador> retiradorMap = retiradorRepository.findAll()
+                .stream().collect(Collectors.toMap(Retirador::getId, r -> r));
+
+        List<RankingRetiradorDto> ranking = new ArrayList<>();
+        for (int i = 0; i < rows.size(); i++) {
+            Long retiradorId = (Long) rows.get(i)[0];
+            Double total     = (Double) rows.get(i)[1];
+            Retirador r      = retiradorMap.get(retiradorId);
+            if (r != null) {
+                ranking.add(new RankingRetiradorDto(retiradorId, r.getNombre(), total, i + 1));
+            }
+        }
+        return ranking;
+    }
+
+    @Override
+    @Transactional
+    public Retirador aplicarBono(Long retiradorId, double monto) {
+        Retirador retirador = findById(retiradorId);
+        retirador.setSaldoPendiente(retirador.getSaldoPendiente() + monto);
+        Retirador saved = retiradorRepository.save(retirador);
+        log.info("[Bono] ${} aplicado a {}", monto, retirador.getNombre());
+        return saved;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Helpers privados
+    // ═══════════════════════════════════════════════════════════════
+
+    private List<DetalleRetiro> buildDetalles(
+            List<SolicitudRetiroRequestDto.DetalleDto> dtos, SolicitudRetiro solicitud) {
+        List<DetalleRetiro> result = new ArrayList<>();
+        for (SolicitudRetiroRequestDto.DetalleDto dto : dtos) {
+            AccountCop cuenta = accountCopRepository.findById(dto.getCuentaCopId())
+                    .orElseThrow(() -> new RuntimeException("Cuenta COP no encontrada: " + dto.getCuentaCopId()));
+            DetalleRetiro d = new DetalleRetiro();
+            d.setSolicitud(solicitud);
+            d.setCuentaCop(cuenta);
+            d.setTipoRetiro(dto.getTipoRetiro());
+            d.setMontoCajero(dto.getMontoCajero());
+            d.setMontoCorresponsal(dto.getMontoCorresponsal());
+            result.add(d);
+        }
+        return result;
+    }
 
     private double calcularPago(TipoRetiro tipo) {
         return switch (tipo) {
@@ -224,8 +346,18 @@ public class RetiradorServiceImpl implements RetiradorService {
         };
     }
 
-    private void notificarN8n(SolicitudRetiro solicitud, Retirador retirador) {
-        if (n8nWebhookUrl == null || n8nWebhookUrl.isBlank()) {
+    private LocalDateTime[] rangoDeSemana() {
+        LocalDate hoy   = LocalDate.now(ZONE_BOGOTA);
+        LocalDate lunes = hoy.with(java.time.DayOfWeek.MONDAY);
+        LocalDate domingo = lunes.plusDays(6);
+        return new LocalDateTime[]{
+            lunes.atStartOfDay(),
+            domingo.atTime(23, 59, 59)
+        };
+    }
+
+    private void notificarN8n(SolicitudRetiro solicitud, Retirador retirador, String url) {
+        if (url == null || url.isBlank()) {
             log.warn("[Retiro] n8n webhook no configurado — notificación omitida.");
             return;
         }
@@ -233,27 +365,58 @@ public class RetiradorServiceImpl implements RetiradorService {
             List<Map<String, Object>> cuentas = new ArrayList<>();
             for (DetalleRetiro d : solicitud.getDetalles()) {
                 Map<String, Object> item = new HashMap<>();
-                item.put("cuenta",       d.getCuentaCop().getName());
-                item.put("banco",        d.getCuentaCop().getBankType().name());
-                item.put("tipo",         d.getTipoRetiro().name());
-                item.put("montoCajero",  d.getMontoCajero());
+                item.put("cuenta",            d.getCuentaCop().getName());
+                item.put("banco",             d.getCuentaCop().getBankType().name());
+                item.put("tipo",              d.getTipoRetiro().name());
+                item.put("montoCajero",       d.getMontoCajero());
                 item.put("montoCorresponsal", d.getMontoCorresponsal());
                 cuentas.add(item);
             }
-
             Map<String, Object> payload = new HashMap<>();
-            payload.put("solicitudId",    solicitud.getId());
-            payload.put("retirador",      retirador.getNombre());
-            payload.put("totalMonto",     solicitud.getTotalMonto());
-            payload.put("pagoRetirador",  solicitud.getPagoRetirador());
-            payload.put("cuentas",        cuentas);
+            payload.put("solicitudId",   solicitud.getId());
+            payload.put("retirador",     retirador.getNombre());
+            payload.put("totalMonto",    solicitud.getTotalMonto());
+            payload.put("pagoRetirador", solicitud.getPagoRetirador());
+            payload.put("cuentas",       cuentas);
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
-            restTemplate.postForObject(n8nWebhookUrl, new HttpEntity<>(payload, headers), String.class);
+            restTemplate.postForObject(url, new HttpEntity<>(payload, headers), String.class);
             log.info("[Retiro] Notificación enviada a n8n — solicitud #{}", solicitud.getId());
         } catch (Exception e) {
             log.error("[Retiro] Error al notificar n8n: {}", e.getMessage());
+        }
+    }
+
+    private void notificarGeneralN8n(SolicitudRetiro solicitud) {
+        if (n8nWebhookGeneralUrl == null || n8nWebhookGeneralUrl.isBlank()) {
+            log.warn("[Retiro General] n8n webhook-general no configurado — notificación omitida.");
+            return;
+        }
+        try {
+            List<Map<String, Object>> cuentas = new ArrayList<>();
+            for (DetalleRetiro d : solicitud.getDetalles()) {
+                Map<String, Object> item = new HashMap<>();
+                item.put("cuenta",            d.getCuentaCop().getName());
+                item.put("banco",             d.getCuentaCop().getBankType().name());
+                item.put("tipo",              d.getTipoRetiro().name());
+                item.put("montoCajero",       d.getMontoCajero());
+                item.put("montoCorresponsal", d.getMontoCorresponsal());
+                cuentas.add(item);
+            }
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("solicitudId",   solicitud.getId());
+            payload.put("totalMonto",    solicitud.getTotalMonto());
+            payload.put("pagoRetirador", solicitud.getPagoRetirador());
+            payload.put("cuentas",       cuentas);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            restTemplate.postForObject(n8nWebhookGeneralUrl,
+                    new HttpEntity<>(payload, headers), String.class);
+            log.info("[Retiro General #{}] Notificación al grupo Telegram enviada", solicitud.getId());
+        } catch (Exception e) {
+            log.error("[Retiro General] Error al notificar n8n: {}", e.getMessage());
         }
     }
 }

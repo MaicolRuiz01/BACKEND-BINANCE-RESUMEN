@@ -141,9 +141,10 @@ public class P2PSyncService {
     }
 
     private SaleP2P buildSale(JsonNode obj, AccountBinance account) {
-        double pesosCop  = obj.path("totalPrice").asDouble(0.0);
-        double dollarsUs = obj.path("amount").asDouble(0.0);
-        double commission = !obj.path("takerCommission").isNull()
+        double pesosCopRaw = obj.path("totalPrice").asDouble(0.0);
+        double pesosCop    = pesosCopRaw / 1_000.0; // convertir a miles de COP
+        double dollarsUs   = obj.path("amount").asDouble(0.0);
+        double commission  = !obj.path("takerCommission").isNull()
                 ? obj.path("takerCommission").asDouble(0.0)
                 : obj.path("commission").asDouble(0.0);
 
@@ -153,7 +154,8 @@ public class P2PSyncService {
         sale.setPesosCop(pesosCop);
         sale.setDollarsUs(dollarsUs);
         sale.setCommission(commission);
-        sale.setTasa(dollarsUs > 0 ? pesosCop / dollarsUs : 0.0);
+        // tasa se calcula sobre el monto real para mantener el tipo de cambio legible (ej. 3.476)
+        sale.setTasa(dollarsUs > 0 ? pesosCopRaw / dollarsUs : 0.0);
         sale.setBinanceAccount(account);
         sale.setAsignado(false);
         sale.setUtilidad(0.0);

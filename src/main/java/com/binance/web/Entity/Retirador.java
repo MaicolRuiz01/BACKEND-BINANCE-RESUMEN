@@ -30,4 +30,11 @@ public class Retirador {
      */
     @Column(name = "saldo_pendiente", nullable = false)
     private Double saldoPendiente = 0.0;
+
+    /**
+     * Username de Telegram del retirador (sin @).
+     * Se usa para mapear callbacks de botones inline.
+     */
+    @Column(name = "telegram_username", nullable = true)
+    private String telegramUsername;
 }

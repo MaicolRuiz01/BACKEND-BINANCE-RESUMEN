@@ -20,8 +20,9 @@ public class SolicitudRetiro {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(optional = false)
-    @JoinColumn(name = "retirador_id")
+    /** Null mientras la solicitud está SIN_ASIGNAR */
+    @ManyToOne(optional = true)
+    @JoinColumn(name = "retirador_id", nullable = true)
     private Retirador retirador;
 
     @Column(name = "fecha_creacion", nullable = false)

@@ -72,17 +72,20 @@ public class BuyP2PServiceImpl implements BuyP2PService {
                 if (fechaOrden.isBefore(inicio) || !fechaOrden.isBefore(fin)) continue;
                 if (buyP2PRepository.existsByNumberOrder(orderNumber))         continue;
 
+                double pesosCopRaw = obj.path("totalPrice").asDouble(0.0);
+
                 BuyP2P buy = new BuyP2P();
                 buy.setNumberOrder(orderNumber);
                 buy.setDate(fechaOrden);
-                buy.setPesosCop(obj.path("totalPrice").asDouble(0.0));
+                buy.setPesosCop(pesosCopRaw / 1_000.0); // convertir a miles de COP
                 buy.setDollarsUs(obj.path("amount").asDouble(0.0));
 
                 double commission = !obj.path("takerCommission").isNull()
                         ? obj.path("takerCommission").asDouble(0.0)
                         : obj.path("commission").asDouble(0.0);
                 buy.setCommission(commission);
-                buy.setTasa(calculateTasa(buy));
+                // tasa calculada sobre monto real para mantener tipo de cambio legible
+                buy.setTasa(buy.getDollarsUs() > 0 ? pesosCopRaw / buy.getDollarsUs() : 0.0);
 
                 AccountBinance ab = accountBinanceRepository.findByName(account);
                 buy.setBinanceAccount(ab);
