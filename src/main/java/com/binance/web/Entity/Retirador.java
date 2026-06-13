@@ -37,4 +37,12 @@ public class Retirador {
      */
     @Column(name = "telegram_username", nullable = true)
     private String telegramUsername;
+
+    /**
+     * Chat ID privado de Telegram del retirador.
+     * Se registra automáticamente cuando el retirador escribe /start al bot,
+     * o cuando hace click en un botón inline por primera vez.
+     */
+    @Column(name = "telegram_chat_id", nullable = true)
+    private Long telegramChatId;
 }
