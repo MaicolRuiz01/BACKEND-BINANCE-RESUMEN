@@ -6,6 +6,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import com.binance.web.Entity.*;
 import com.binance.web.Repository.*;
@@ -41,6 +42,7 @@ public class P2PSyncService {
     @Autowired private AccountBinanceRepository accountBinanceRepository;
     @Autowired private P2PSyncStateRepository syncStateRepository;
     @Autowired private P2PAssignmentRuleRepository assignmentRuleRepository;
+    @Autowired private P2PPreAsignacionRepository preAsignacionRepository;
     @Autowired private AccountCopService accountCopService;
     @Autowired private AccountBinanceService accountBinanceService;
 
@@ -162,38 +164,60 @@ public class P2PSyncService {
         return sale;
     }
 
-    /** Aplica la regla de auto-asignación si está activa para esta cuenta. */
+    /**
+     * Aplica asignación automática a la venta recién importada.
+     * Prioridad:
+     *   1. Pre-asignación manual del operador (tabla p2p_pre_asignacion)
+     *   2. Regla general activa (tabla p2p_assignment_rule)
+     */
     private void autoAssign(SaleP2P sale) {
+        // 1️⃣ Pre-asignación manual — tiene prioridad sobre la regla
+        Optional<P2PPreAsignacion> pre =
+                preAsignacionRepository.findByOrderNumber(sale.getNumberOrder());
+
+        if (pre.isPresent()) {
+            AccountCop cop = pre.get().getCuentaCop();
+            applyAssignment(sale, cop);
+            // Eliminar la pre-asignación: ya cumplió su función
+            preAsignacionRepository.deleteByOrderNumber(sale.getNumberOrder());
+            log.info("[AutoAssign] Venta {} → {} (pre-asignación manual)", sale.getNumberOrder(), cop.getName());
+            return;
+        }
+
+        // 2️⃣ Regla general activa
         assignmentRuleRepository
                 .findByBinanceAccount_Name(sale.getBinanceAccount().getName())
                 .filter(r -> Boolean.TRUE.equals(r.getActive()))
                 .ifPresent(rule -> {
-                    AccountCop cop = rule.getCopAccount();
-                    double amount  = sale.getPesosCop() != null ? sale.getPesosCop() : 0.0;
-
-                    SaleP2pAccountCop detail = new SaleP2pAccountCop();
-                    detail.setSaleP2p(sale);
-                    detail.setAmount(amount);
-                    detail.setNameAccount(cop.getName());
-                    detail.setAccountCop(cop);
-
-                    cop.setBalance((cop.getBalance() != null ? cop.getBalance() : 0.0) + amount);
-                    cop.setCupoDisponibleHoy(
-                            (cop.getCupoDisponibleHoy() != null ? cop.getCupoDisponibleHoy() : 0.0) - amount);
-                    accountCopService.saveAccountCopSafe(cop);
-
-                    if (sale.getDollarsUs() != null && sale.getDollarsUs() > 0) {
-                        accountBinanceService.subtractBalance(sale.getBinanceAccount().getName(), sale.getDollarsUs());
-                    }
-
-                    if (sale.getAccountCopsDetails() == null) sale.setAccountCopsDetails(new ArrayList<>());
-                    sale.getAccountCopsDetails().add(detail);
-                    sale.setAsignado(true);
-                    saleP2PRepository.save(sale);
-
-                    log.info("[AutoAssign] Venta {} → {} ({} COP)",
-                            sale.getNumberOrder(), cop.getName(), amount);
+                    applyAssignment(sale, rule.getCopAccount());
+                    log.info("[AutoAssign] Venta {} → {} (regla general)",
+                            sale.getNumberOrder(), rule.getCopAccount().getName());
                 });
+    }
+
+    /** Aplica el detalle de asignación a la venta y actualiza saldos. */
+    private void applyAssignment(SaleP2P sale, AccountCop cop) {
+        double amount = sale.getPesosCop() != null ? sale.getPesosCop() : 0.0;
+
+        SaleP2pAccountCop detail = new SaleP2pAccountCop();
+        detail.setSaleP2p(sale);
+        detail.setAmount(amount);
+        detail.setNameAccount(cop.getName());
+        detail.setAccountCop(cop);
+
+        cop.setBalance((cop.getBalance() != null ? cop.getBalance() : 0.0) + amount);
+        cop.setCupoDisponibleHoy(
+                (cop.getCupoDisponibleHoy() != null ? cop.getCupoDisponibleHoy() : 0.0) - amount);
+        accountCopService.saveAccountCopSafe(cop);
+
+        if (sale.getDollarsUs() != null && sale.getDollarsUs() > 0) {
+            accountBinanceService.subtractBalance(sale.getBinanceAccount().getName(), sale.getDollarsUs());
+        }
+
+        if (sale.getAccountCopsDetails() == null) sale.setAccountCopsDetails(new ArrayList<>());
+        sale.getAccountCopsDetails().add(detail);
+        sale.setAsignado(true);
+        saleP2PRepository.save(sale);
     }
 
     private void updateSyncState(AccountBinance account, long timestampMs) {

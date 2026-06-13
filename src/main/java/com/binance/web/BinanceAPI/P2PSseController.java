@@ -109,6 +109,36 @@ public class P2PSseController {
     }
 
     /**
+     * Notifica a todos los clientes que hubo cambios en órdenes activas.
+     * Llamado por el scheduler de órdenes activas cuando detecta cambios de estado.
+     */
+    public void broadcastCambioOrdenesActivas(int cantidad) {
+        if (emitters.isEmpty()) return;
+
+        String hora = LocalDateTime.now(ZONE).format(FMT);
+        Map<String, Object> payload = Map.of(
+                "tipo",     "cambio-orden-activa",
+                "cantidad", cantidad,
+                "hora",     hora,
+                "mensaje",  cantidad + " orden(es) cambiaron de estado — " + hora
+        );
+
+        List<SseEmitter> dead = new ArrayList<>();
+        for (SseEmitter emitter : emitters) {
+            try {
+                emitter.send(SseEmitter.event()
+                        .name("cambio-orden-activa")
+                        .data(payload));
+            } catch (Exception e) {
+                dead.add(emitter);
+                try { emitter.complete(); } catch (Exception ignored) {}
+            }
+        }
+        emitters.removeAll(dead);
+        log.info("[SSE] Broadcast cambio órdenes activas ({} cambio(s))", cantidad);
+    }
+
+    /**
      * Heartbeat periódico para mantener la conexión viva
      * (algunos proxies y navegadores cierran conexiones inactivas).
      * Llamado desde P2PSyncScheduler cada 30 segundos.

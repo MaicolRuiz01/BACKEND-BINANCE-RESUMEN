@@ -25,6 +25,7 @@ public class P2PSyncScheduler {
 
     @Autowired private P2PSyncService syncService;
     @Autowired private P2PSseController sseController;
+    @Autowired private P2PActiveOrderService activeOrderService;
 
     // ─────────────────────────────────────────────────────────────
     // Tarea programada
@@ -45,6 +46,25 @@ public class P2PSyncScheduler {
             }
         } catch (Exception e) {
             log.error("[Scheduler] Error en sync automática: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Polling de órdenes activas cada 15 segundos.
+     * Detecta cambios de estado (TRADING → BUYER_PAYED → COMPLETED)
+     * y notifica al frontend via SSE si hay cambios.
+     * Solo corre si hay clientes SSE conectados para no gastar requests.
+     */
+    @Scheduled(fixedDelay = 15_000)
+    public void pollActiveOrders() {
+        try {
+            var changed = activeOrderService.detectStatusChanges();
+            if (!changed.isEmpty()) {
+                sseController.broadcastCambioOrdenesActivas(changed.size());
+                log.info("[ActivePoll] {} orden(es) cambiaron de estado", changed.size());
+            }
+        } catch (Exception e) {
+            log.warn("[ActivePoll] Error en polling de órdenes activas: {}", e.getMessage());
         }
     }
 
