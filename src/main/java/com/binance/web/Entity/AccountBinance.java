@@ -40,4 +40,11 @@ public class AccountBinance {
 	private String apiSecret;
 	@OneToMany(mappedBy = "accountBinance", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<AccountCryptoBalance> cryptoBalances = new ArrayList<>();
+
+	/**
+	 * Si false, esta cuenta NO se consulta en APIs externas (Binance, TronScan, etc.).
+	 * Default true para no romper cuentas existentes al agregar la columna.
+	 */
+	@Column(name = "activa", nullable = false)
+	private Boolean activa = true;
 }

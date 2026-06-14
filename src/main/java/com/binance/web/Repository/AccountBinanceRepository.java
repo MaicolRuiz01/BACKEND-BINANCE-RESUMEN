@@ -22,6 +22,9 @@ public interface AccountBinanceRepository  extends JpaRepository<AccountBinance,
 
 	List<AccountBinance> findByTipo(String tipo);
 
+	/** Solo cuentas activas de un tipo — para no consultar APIs de cuentas desactivadas */
+	List<AccountBinance> findByTipoAndActivaTrue(String tipo);
+
 	AccountBinance findFirstByNameIgnoreCase(String name);
 
 	/** Solo direcciones — evita cargar entidades completas */

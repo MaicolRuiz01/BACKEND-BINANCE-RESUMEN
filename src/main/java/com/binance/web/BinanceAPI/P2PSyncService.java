@@ -55,7 +55,7 @@ public class P2PSyncService {
      * @return número total de ventas P2P nuevas encontradas y guardadas
      */
     public int syncAllAccounts() {
-        List<AccountBinance> accounts = accountBinanceRepository.findByTipo("BINANCE");
+        List<AccountBinance> accounts = accountBinanceRepository.findByTipoAndActivaTrue("BINANCE");
         int totalNew = 0;
 
         for (AccountBinance account : accounts) {

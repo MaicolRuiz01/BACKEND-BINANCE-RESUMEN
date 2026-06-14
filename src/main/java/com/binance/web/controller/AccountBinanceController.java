@@ -16,6 +16,7 @@ import com.binance.web.model.CryptoBalanceDto;
 import com.binance.web.service.AccountBinanceService;
 
 @Slf4j
+@CrossOrigin("*")
 @RestController
 @RequestMapping("/cuenta-binance")
 public class AccountBinanceController {
@@ -70,6 +71,22 @@ public class AccountBinanceController {
 	public ResponseEntity<Void> deleteAccount(@PathVariable Integer id) {
 		accountBinanceService.deleteAccountBinance(id);
 		return ResponseEntity.noContent().build();
+	}
+
+	/**
+	 * PATCH /cuenta-binance/{id}/toggle-activa
+	 * Alterna el flag activa de la cuenta (true → false → true).
+	 * Cuando activa=false, ningún scheduler ni servicio consultará su API externa.
+	 */
+	@PatchMapping("/{id}/toggle-activa")
+	public ResponseEntity<AccountBinance> toggleActiva(@PathVariable Integer id) {
+		AccountBinance cuenta = accountBinanceService.findByIdAccountBinance(id);
+		if (cuenta == null) return ResponseEntity.notFound().build();
+		boolean nuevoEstado = !Boolean.TRUE.equals(cuenta.getActiva());
+		cuenta.setActiva(nuevoEstado);
+		accountBinanceService.updateAccountBinance(id, cuenta);
+		log.info("[AccountBinance] Cuenta '{}' → activa={}", cuenta.getName(), nuevoEstado);
+		return ResponseEntity.ok(cuenta);
 	}
 
 	@GetMapping("/buscar")

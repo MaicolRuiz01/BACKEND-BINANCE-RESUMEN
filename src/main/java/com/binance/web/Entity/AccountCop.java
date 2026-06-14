@@ -59,4 +59,8 @@ public class AccountCop {
 
     @Column(name = "cedula")
     private String cedula;
+
+    /** Si true, esta cuenta aparece en el selector de pre-asignación P2P. */
+    @Column(name = "activa_para_p2p", nullable = false)
+    private Boolean activaParaP2P = false;
 }

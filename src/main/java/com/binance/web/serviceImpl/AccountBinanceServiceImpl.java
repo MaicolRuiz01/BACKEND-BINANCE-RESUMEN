@@ -468,8 +468,7 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
 	@Override
 	@Transactional
 	public void syncAllInternalBalancesFromExchange() {
-		List<AccountBinance> accounts = accountBinanceRepository.findAll().stream()
-				.filter(a -> "BINANCE".equalsIgnoreCase(a.getTipo())).collect(Collectors.toList());
+		List<AccountBinance> accounts = accountBinanceRepository.findByTipoAndActivaTrue("BINANCE");
 		for (AccountBinance a : accounts) {
 			syncInternalBalancesFromExchange(a.getName());
 		}
@@ -531,13 +530,16 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
 	@Override
 	@Transactional
 	public void syncAllInternalBalancesFromExternal() {
-		accountBinanceRepository.findAll().forEach(acc -> {
-			try {
-				syncInternalBalancesFromExternal(acc.getName());
-			} catch (Exception e) {
-				System.out.println("⚠️ No se pudo sincronizar " + acc.getName() + ": " + e.getMessage());
-			}
-		});
+		accountBinanceRepository.findAll()
+			.stream()
+			.filter(acc -> Boolean.TRUE.equals(acc.getActiva()))
+			.forEach(acc -> {
+				try {
+					syncInternalBalancesFromExternal(acc.getName());
+				} catch (Exception e) {
+					System.out.println("⚠️ No se pudo sincronizar " + acc.getName() + ": " + e.getMessage());
+				}
+			});
 	}
 	
 	@Override
@@ -563,7 +565,7 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
 	    String c = cripto.toUpperCase();
 	    double total = 0.0;
 
-	    for (AccountBinance acc : accountBinanceRepository.findByTipo("BINANCE")) {
+	    for (AccountBinance acc : accountBinanceRepository.findByTipoAndActivaTrue("BINANCE")) {
 	        try {
 	            Map<String, Double> snap = getExternalBalancesSnapshot(acc.getName());
 	            total += snap.getOrDefault(c, 0.0);

@@ -4,8 +4,10 @@ import java.util.List;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -20,6 +22,7 @@ import com.binance.web.service.AccountCopService;
 
 @RestController
 @RequestMapping("/cuenta-cop")
+@CrossOrigin("*")
 public class AccountCopController {
 
 	private final AccountCopService AccountCopService;
@@ -70,6 +73,22 @@ public class AccountCopController {
         return ResponseEntity.ok(sales);
     }
 	
+	/**
+	 * PATCH /cuenta-cop/{id}/toggle-p2p
+	 * Alterna el flag activaParaP2P de la cuenta (true → false → true).
+	 * Retorna la cuenta actualizada.
+	 */
+	@PatchMapping("/{id}/toggle-p2p")
+	public ResponseEntity<AccountCop> toggleActivaParaP2P(@PathVariable Integer id) {
+		AccountCop cuenta = AccountCopService.findByIdAccountCop(id);
+		if (cuenta == null) return ResponseEntity.notFound().build();
+
+		boolean nuevoEstado = !Boolean.TRUE.equals(cuenta.getActivaParaP2P());
+		cuenta.setActivaParaP2P(nuevoEstado);
+		AccountCopService.updateAccountCop(id, cuenta);
+		return ResponseEntity.ok(cuenta);
+	}
+
 	@PostMapping("/accountCop/{id}/reconcile")
 	public ResponseEntity<String> reconcile(@PathVariable Integer id){
 	    return ResponseEntity.ok(AccountCopService.reconcileAccountCop(id));

@@ -60,7 +60,7 @@ public class P2PActiveOrderService {
      * enriquecidas con la pre-asignación si existe.
      */
     public List<ActiveP2POrderDto> getAllActiveOrders() {
-        List<AccountBinance> accounts = accountBinanceRepository.findByTipo("BINANCE");
+        List<AccountBinance> accounts = accountBinanceRepository.findByTipoAndActivaTrue("BINANCE");
         List<ActiveP2POrderDto> result = new ArrayList<>();
 
         for (AccountBinance account : accounts) {

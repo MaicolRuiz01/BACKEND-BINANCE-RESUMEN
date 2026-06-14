@@ -118,7 +118,7 @@ public class BinanceService {
 	// ─────────────────────────────────────────────────────────────
 
 	public List<String> getAllAccountNames() {
-		return accountRepo.findByTipo("BINANCE").stream()
+		return accountRepo.findByTipoAndActivaTrue("BINANCE").stream()
 				.filter(a -> a.getApiKey() != null && a.getApiSecret() != null)
 				.map(AccountBinance::getName)
 				.toList();
@@ -308,7 +308,7 @@ public class BinanceService {
 	public String getAllSpotTradesForAllAccounts(String symbol, int limit) {
 		try {
 			ArrayNode allTrades = mapper.createArrayNode();
-			for (AccountBinance account : accountRepo.findByTipo("BINANCE")) {
+			for (AccountBinance account : accountRepo.findByTipoAndActivaTrue("BINANCE")) {
 				if (account.getApiKey() == null || account.getApiSecret() == null) {
 					log.debug("Saltando cuenta {} por falta de credenciales.", account.getName());
 					continue;
