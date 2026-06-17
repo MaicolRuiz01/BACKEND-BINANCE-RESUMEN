@@ -178,9 +178,9 @@ public class P2PActiveOrderService {
         String orderNumber   = obj.path("orderNumber").asText();
         String status        = obj.path("orderStatus").asText("").toUpperCase();
         double pesosCopRaw   = obj.path("totalPrice").asDouble(0.0);
-        double dollarsUs     = obj.path("amount").asDouble(0.0);
         double pesosCop      = pesosCopRaw / 1_000.0;
-        double tasa          = dollarsUs > 0 ? pesosCopRaw / dollarsUs : 0.0;
+        double dollarsUs     = obj.path("amount").asDouble(0.0) / 1_000.0;
+        double tasa          = obj.path("unitPrice").asDouble(0.0);
         long   createTimeLong = obj.path("createTime").asLong(0);
         String createTime    = createTimeLong > 0
                 ? Instant.ofEpochMilli(createTimeLong).atZone(ZONE).format(FMT)
