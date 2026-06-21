@@ -146,11 +146,16 @@ public class P2PSseController {
     public void sendHeartbeat() {
         if (emitters.isEmpty()) return;
         List<SseEmitter> dead = new ArrayList<>();
+        String hora = LocalDateTime.now(ZONE).format(FMT);
         for (SseEmitter emitter : emitters) {
             try {
+                // Comentario SSE (": ping") — más transparente ante proxies que bufferean eventos
+                emitter.send(SseEmitter.event()
+                        .comment("ping " + hora));
+                // Evento nombrado para que el frontend pueda monitorear la conexión
                 emitter.send(SseEmitter.event()
                         .name("heartbeat")
-                        .data(LocalDateTime.now(ZONE).format(FMT)));
+                        .data(hora));
             } catch (Exception e) {
                 dead.add(emitter);
                 try { emitter.complete(); } catch (Exception ignored) {}

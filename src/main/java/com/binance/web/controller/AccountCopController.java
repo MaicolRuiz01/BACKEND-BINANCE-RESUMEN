@@ -1,6 +1,7 @@
 package com.binance.web.controller;
 
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -46,19 +47,29 @@ public class AccountCopController {
 	}
 
 	@PostMapping
-	public ResponseEntity<AccountCop> createAccountCop(@RequestBody AccountCop AccountCop) {
-		AccountCopService.saveAccountCop(AccountCop);
-		return ResponseEntity.status(HttpStatus.CREATED).body(AccountCop);
+	public ResponseEntity<?> createAccountCop(@RequestBody AccountCop AccountCop) {
+		try {
+			AccountCopService.saveAccountCop(AccountCop);
+			return ResponseEntity.status(HttpStatus.CREATED).body(AccountCop);
+		} catch (IllegalArgumentException e) {
+			return ResponseEntity.status(HttpStatus.CONFLICT)
+					.body(Map.of("message", e.getMessage()));
+		}
 	}
 
 	@PutMapping("/{id}")
-	public ResponseEntity<AccountCop> updateAccountCop(@PathVariable Integer id, @RequestBody AccountCop AccountCop) {
+	public ResponseEntity<?> updateAccountCop(@PathVariable Integer id, @RequestBody AccountCop AccountCop) {
 		AccountCop existingAccountCop = AccountCopService.findByIdAccountCop(id);
 		if (existingAccountCop == null) {
 			return ResponseEntity.notFound().build();
 		}
-		AccountCopService.updateAccountCop(id, AccountCop);
-		return ResponseEntity.ok(AccountCop);
+		try {
+			AccountCopService.updateAccountCop(id, AccountCop);
+			return ResponseEntity.ok(AccountCop);
+		} catch (IllegalArgumentException e) {
+			return ResponseEntity.status(HttpStatus.CONFLICT)
+					.body(Map.of("message", e.getMessage()));
+		}
 	}
 
 	@DeleteMapping("/{id}")

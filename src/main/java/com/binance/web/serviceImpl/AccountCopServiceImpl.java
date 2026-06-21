@@ -56,6 +56,16 @@ public class AccountCopServiceImpl implements AccountCopService {
             throw new IllegalArgumentException("bankType es obligatorio.");
         }
 
+        // ✅ validar número de cuenta duplicado
+        String num = accountCop.getNumeroCuenta();
+        if (num != null && !num.isBlank()) {
+            if (AccountCopRepository.existsByNumeroCuenta(num.trim())) {
+                throw new IllegalArgumentException(
+                    "Ya existe una cuenta COP con el número: " + num.trim());
+            }
+            accountCop.setNumeroCuenta(num.trim());
+        }
+
         // ✅ saldo inicial del día
         accountCop.setSaldoInicialDelDia(accountCop.getBalance());
 
@@ -75,9 +85,20 @@ public class AccountCopServiceImpl implements AccountCopService {
 	        throw new IllegalArgumentException("La cuenta con el ID " + id + " no existe.");
 	    }
 
+	    // ✅ validar número de cuenta duplicado al editar
+	    String num = accountCop.getNumeroCuenta();
+	    if (num != null && !num.isBlank()) {
+	        if (AccountCopRepository.existsByNumeroCuentaAndIdNot(num.trim(), id)) {
+	            throw new IllegalArgumentException(
+	                "Ya existe otra cuenta COP con el número: " + num.trim());
+	        }
+	        existing.setNumeroCuenta(num.trim());
+	    } else {
+	        existing.setNumeroCuenta(null);
+	    }
+
 	    existing.setName(accountCop.getName());
 	    existing.setBalance(accountCop.getBalance());
-	    existing.setNumeroCuenta(accountCop.getNumeroCuenta());
 	    existing.setCedula(accountCop.getCedula());
 
 	    // 👇 actualizar bankType si viene

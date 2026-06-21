@@ -13,5 +13,8 @@ public class AnuncioDto {
     private String vendedor;
     private String tipo;
     private String horaAnuncio;
-
+    /** Cantidad disponible para negociar (ej: "150.00 USDT") */
+    private String disponible;
+    /** ID del anuncio en Binance */
+    private String advNo;
 }

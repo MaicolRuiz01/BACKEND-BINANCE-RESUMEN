@@ -178,6 +178,14 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
 
 	@Override
 	public void saveAccountBinance(AccountBinance accountBinance) {
+		String addr = accountBinance.getAddress();
+		if (addr != null && !addr.isBlank()) {
+			if (accountBinanceRepository.existsByAddress(addr.trim())) {
+				throw new IllegalArgumentException(
+					"Ya existe una cuenta con la wallet: " + addr.trim());
+			}
+			accountBinance.setAddress(addr.trim());
+		}
 		accountBinanceRepository.save(accountBinance);
 	}
 
@@ -185,9 +193,22 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
 	public void updateAccountBinance(Integer id, AccountBinance updatedAccountBinance) {
 		AccountBinance existing = accountBinanceRepository.findById(id).orElse(null);
 		if (existing != null) {
+			String addr = updatedAccountBinance.getAddress();
+			if (addr != null && !addr.isBlank()) {
+				if (accountBinanceRepository.existsByAddressAndIdNot(addr.trim(), id)) {
+					throw new IllegalArgumentException(
+						"Ya existe otra cuenta con la wallet: " + addr.trim());
+				}
+				existing.setAddress(addr.trim());
+			} else {
+				existing.setAddress(null);
+			}
 			existing.setName(updatedAccountBinance.getName());
 			existing.setReferenceAccount(updatedAccountBinance.getReferenceAccount());
 			existing.setCorreo(updatedAccountBinance.getCorreo());
+			existing.setUserBinance(updatedAccountBinance.getUserBinance());
+			existing.setTipo(updatedAccountBinance.getTipo());
+			existing.setActiva(updatedAccountBinance.getActiva());
 			accountBinanceRepository.save(existing);
 		}
 	}

@@ -104,13 +104,30 @@ public class BinanceService {
 		}
 	}
 
+	/** Caché del server time: tiempo (ms local) en que se obtuvo + el valor */
+	private volatile long cachedServerTime   = 0L;
+	private volatile long cachedServerTimeAt = 0L;
+	private static final long SERVER_TIME_TTL_MS = 45_000; // 45 segundos
+
+	/**
+	 * Devuelve el server time de Binance.
+	 * Cacheado 45 s para evitar llamar a /api/v3/time en cada página de cada request.
+	 * El recvWindow es 60 s, así que 45 s de caché es más que seguro.
+	 */
 	private long getServerTime() throws Exception {
+		long now = System.currentTimeMillis();
+		if (now - cachedServerTimeAt < SERVER_TIME_TTL_MS && cachedServerTime > 0) {
+			// Ajustamos el valor cacheado con el tiempo transcurrido localmente
+			return cachedServerTime + (now - cachedServerTimeAt);
+		}
 		String response = binanceGet("https://api.binance.com/api/v3/time", null);
 		JsonNode root = mapper.readTree(response);
 		if (!root.has("serverTime") || root.get("serverTime").isNull()) {
 			throw new RuntimeException("No se pudo obtener el timestamp del servidor Binance");
 		}
-		return root.get("serverTime").asLong();
+		cachedServerTime   = root.get("serverTime").asLong();
+		cachedServerTimeAt = System.currentTimeMillis();
+		return cachedServerTime;
 	}
 
 	// ─────────────────────────────────────────────────────────────
@@ -570,6 +587,8 @@ public class BinanceService {
 						? methods.get(0).path("tradeMethodName").asText("") : "");
 				anuncio.setVendedor(advertiser.path("nickName").asText(""));
 				anuncio.setTipo(adv.path("tradeType").asText(""));
+				anuncio.setDisponible(adv.path("tradableQuantity").asText(""));
+				anuncio.setAdvNo(adv.path("advNo").asText(""));
 
 				long ms = adv.path("createTime").asLong(0);
 				ZonedDateTime dt = Instant.ofEpochMilli(ms).atZone(ZONE_BOGOTA);
@@ -590,5 +609,46 @@ public class BinanceService {
 			anuncios.addAll(obtenerAnunciosPorTipo(filtros, "SELL", cuenta));
 		}
 		return anuncios;
+	}
+
+	/**
+	 * Busca los anuncios P2P activos de las propias cuentas del cliente.
+	 * Recorre hasta MAX_PAGES páginas de la API pública y filtra por
+	 * los nicknames (userBinance) de las cuentas registradas.
+	 */
+	public List<AnuncioDto> obtenerMisAnuncios() {
+		// Nicknames propios (campo userBinance de AccountBinance)
+		Set<String> misNicks = accountRepo.findByTipoAndActivaTrue("BINANCE").stream()
+				.filter(a -> a.getUserBinance() != null && !a.getUserBinance().isBlank())
+				.map(AccountBinance::getUserBinance)
+				.collect(Collectors.toSet());
+
+		if (misNicks.isEmpty()) return List.of();
+
+		final int MAX_PAGES = 8;
+		final int ROWS      = 20;
+		List<AnuncioDto> resultado = new ArrayList<>();
+
+		for (String tipo : List.of("SELL", "BUY")) {
+			for (int page = 1; page <= MAX_PAGES; page++) {
+				Map<String, Object> filtros = new HashMap<>();
+				filtros.put("asset",         "USDT");
+				filtros.put("fiat",          "COP");
+				filtros.put("payTypes",      List.of());
+				filtros.put("publisherType", null);
+				filtros.put("rows",          ROWS);
+				filtros.put("page",          page);
+
+				List<AnuncioDto> pagina = obtenerAnunciosPorTipo(filtros, tipo, "");
+				if (pagina.isEmpty()) break; // no hay más resultados
+
+				pagina.stream()
+					  .filter(a -> misNicks.contains(a.getVendedor()))
+					  .forEach(resultado::add);
+
+				if (pagina.size() < ROWS) break; // última página
+			}
+		}
+		return resultado;
 	}
 }

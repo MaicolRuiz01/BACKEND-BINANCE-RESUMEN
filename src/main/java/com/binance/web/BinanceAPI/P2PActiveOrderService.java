@@ -51,6 +51,12 @@ public class P2PActiveOrderService {
      */
     private final Map<String, String> lastKnownStatus = new ConcurrentHashMap<>();
 
+    /** Slow-poll: tras el primer ciclo, si no hay órdenes activas, solo llamamos
+     *  Binance cada MAX_SKIP+1 ticks (efectivamente cada ~60 s con tick=15 s). */
+    private volatile boolean firstPollDone = false;
+    private int pollSkipCount = 0;
+    private static final int MAX_SKIP = 3; // 3 skips → 1 call real cada 4 ticks
+
     // ─────────────────────────────────────────────────────────────
     // Consulta principal
     // ─────────────────────────────────────────────────────────────
@@ -79,9 +85,9 @@ public class P2PActiveOrderService {
      * Retorna órdenes activas de una cuenta específica.
      */
     public List<ActiveP2POrderDto> getActiveOrdersForAccount(String accountName) throws Exception {
-        // Ventana: últimas 48h (suficiente para cualquier orden abierta)
+        // Ventana: últimas 4h (P2P órdenes raramente duran más; reduce llamadas Binance)
         long endMs   = Instant.now().toEpochMilli();
-        long startMs = endMs - (48L * 60 * 60 * 1000);
+        long startMs = endMs - (4L * 60 * 60 * 1000);
 
         String json   = binanceService.getP2POrdersInRange(accountName, startMs, endMs, "SELL");
         JsonNode root = mapper.readTree(json);
@@ -144,8 +150,22 @@ public class P2PActiveOrderService {
      * Consulta órdenes activas de todas las cuentas y devuelve las que
      * cambiaron de estado respecto al último polling.
      * También actualiza el cache interno.
+     *
+     * Optimización: tras el primer ciclo, si no hay órdenes activas conocidas,
+     * salta hasta MAX_SKIP ticks consecutivos para reducir llamadas a Binance
+     * (efectivamente pasa de poll cada 15 s → cada 60 s cuando no hay nada).
      */
     public List<ActiveP2POrderDto> detectStatusChanges() {
+        // Slow-poll: omitir llamada a Binance cuando no hay órdenes activas
+        if (firstPollDone && lastKnownStatus.isEmpty()) {
+            pollSkipCount++;
+            if (pollSkipCount < MAX_SKIP) {
+                log.debug("[ActiveOrders] Sin órdenes activas — omitiendo poll {}/{}", pollSkipCount, MAX_SKIP);
+                return List.of();
+            }
+            pollSkipCount = 0; // llegamos al tick real, hacemos la llamada
+        }
+
         List<ActiveP2POrderDto> allActive = getAllActiveOrders();
         List<ActiveP2POrderDto> changed   = new ArrayList<>();
 
@@ -162,6 +182,12 @@ public class P2PActiveOrderService {
 
         // Limpiar órdenes que ya no están activas del cache
         lastKnownStatus.keySet().retainAll(currentOrderNumbers);
+
+        firstPollDone = true;
+        // Si volvieron a aparecer órdenes, salimos del modo slow
+        if (!allActive.isEmpty()) {
+            pollSkipCount = 0;
+        }
 
         return changed;
     }

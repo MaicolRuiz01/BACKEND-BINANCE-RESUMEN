@@ -1,22 +1,10 @@
 package com.binance.web.BinanceAPI;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.client.RestTemplate;
-
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 @RestController
 @RequestMapping("/api/p2p")
@@ -34,16 +22,15 @@ public class P2PController {
         return ResponseEntity.ok().body(binanceService.getP2POrderLatest(account));
     }
 
+    /** Búsqueda general de anuncios en el marketplace de Binance P2P */
     @PostMapping("/anuncios")
     public ResponseEntity<List<AnuncioDto>> obtenerAnunciosFiltrados(@RequestBody Map<String, Object> filtros) {
-        List<AnuncioDto> anuncios = binanceService.obtenerTodosLosAnuncios(filtros);
-        return ResponseEntity.ok(anuncios);
+        return ResponseEntity.ok(binanceService.obtenerTodosLosAnuncios(filtros));
     }
 
-	/*
-	 * @GetMapping("/anuncios/mis-cuentas") public ResponseEntity<List<AnuncioDto>>
-	 * obtenerAnunciosDeMisCuentas() { List<AnuncioDto> anuncios =
-	 * binanceService.getOwnPublishedAds(); return ResponseEntity.ok(anuncios); }
-	 */
-
+    /** Devuelve únicamente los anuncios activos de las cuentas propias del cliente */
+    @GetMapping("/mis-anuncios")
+    public ResponseEntity<List<AnuncioDto>> obtenerMisAnuncios() {
+        return ResponseEntity.ok(binanceService.obtenerMisAnuncios());
+    }
 }

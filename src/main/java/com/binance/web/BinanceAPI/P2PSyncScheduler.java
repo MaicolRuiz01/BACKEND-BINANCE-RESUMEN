@@ -69,9 +69,10 @@ public class P2PSyncScheduler {
     }
 
     /**
-     * Heartbeat SSE cada 30 segundos para mantener conexiones vivas.
+     * Heartbeat SSE cada 20 segundos para mantener conexiones vivas.
+     * 20 s da margen suficiente ante proxies con timeout de 30-60 s (nginx, Cloudflare, Railway).
      */
-    @Scheduled(fixedDelay = 30_000)
+    @Scheduled(fixedDelay = 20_000)
     public void heartbeat() {
         sseController.sendHeartbeat();
     }

@@ -20,5 +20,11 @@ public interface AccountCopRepository extends JpaRepository<AccountCop, Integer>
     @Query("select a from AccountCop a where a.id = :id")
     Optional<AccountCop> findByIdForUpdate(@Param("id") Integer id);
 	AccountCop findByName(String name);
-	
+
+	/** Verifica si ya existe una cuenta COP con ese número de cuenta (para crear) */
+	boolean existsByNumeroCuenta(String numeroCuenta);
+
+	/** Verifica si ya existe otra cuenta COP con ese número de cuenta (para editar) */
+	boolean existsByNumeroCuentaAndIdNot(String numeroCuenta, Integer id);
+
 }

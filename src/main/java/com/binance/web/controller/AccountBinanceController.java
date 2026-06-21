@@ -48,6 +48,9 @@ public class AccountBinanceController {
 		try {
 			accountBinanceService.saveAccountBinance(accountBinance);
 			return ResponseEntity.status(HttpStatus.CREATED).body(accountBinance);
+		} catch (IllegalArgumentException e) {
+			return ResponseEntity.status(HttpStatus.CONFLICT)
+					.body(Map.of("message", e.getMessage()));
 		} catch (Exception e) {
 			log.error("[AccountBinance] Error al crear cuenta '{}': {}", accountBinance.getName(), e.getMessage(), e);
 			String msg = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
@@ -57,14 +60,19 @@ public class AccountBinanceController {
 	}
 
 	@PutMapping("/{id}")
-	public ResponseEntity<AccountBinance> updateAccount(@PathVariable Integer id,
+	public ResponseEntity<?> updateAccount(@PathVariable Integer id,
 			@RequestBody AccountBinance accountBinance) {
 		AccountBinance existing = accountBinanceService.findByIdAccountBinance(id);
 		if (existing == null) {
 			return ResponseEntity.notFound().build();
 		}
-		accountBinanceService.updateAccountBinance(id, accountBinance);
-		return ResponseEntity.ok(accountBinance);
+		try {
+			accountBinanceService.updateAccountBinance(id, accountBinance);
+			return ResponseEntity.ok(accountBinance);
+		} catch (IllegalArgumentException e) {
+			return ResponseEntity.status(HttpStatus.CONFLICT)
+					.body(Map.of("message", e.getMessage()));
+		}
 	}
 
 	@DeleteMapping("/{id}")

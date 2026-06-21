@@ -27,6 +27,12 @@ public interface AccountBinanceRepository  extends JpaRepository<AccountBinance,
 
 	AccountBinance findFirstByNameIgnoreCase(String name);
 
+	/** Verifica si ya existe una cuenta con esa dirección (para crear) */
+	boolean existsByAddress(String address);
+
+	/** Verifica si ya existe otra cuenta con esa dirección (para editar, excluyendo el propio id) */
+	boolean existsByAddressAndIdNot(String address, Integer id);
+
 	/** Solo direcciones — evita cargar entidades completas */
 	@Query("SELECT a.address FROM AccountBinance a WHERE a.address IS NOT NULL AND a.address <> ''")
 	Set<String> findAllAddresses();
