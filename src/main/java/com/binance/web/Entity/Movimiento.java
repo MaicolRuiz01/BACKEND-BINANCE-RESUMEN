@@ -52,7 +52,7 @@ public class Movimiento {
     private Double  saldoNuevo;
     private Double  diferencia;
 
-    // Polimorfismo “suave” del destino del ajuste (uno de estos tres se completa)
+    // Polimorfismo "suave" del destino del ajuste (uno de estos tres se completa)
     @ManyToOne private Cliente    ajusteCliente;
     @ManyToOne private Supplier   ajusteProveedor;
     @ManyToOne private AccountCop ajusteCuentaCop;

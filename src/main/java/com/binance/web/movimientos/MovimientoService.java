@@ -12,7 +12,10 @@ import com.binance.web.model.PagoProveedorAClienteDto;
 public interface MovimientoService {
 	
 	Movimiento RegistrarTransferencia(Integer idCuentoFrom, Integer idCuentaTo, Double monto);
-	Movimiento RegistrarRetiro(Integer cuentaId, Integer cajaId, Double monto);
+	/**
+	 * @param tipoRetiro "CAJERO" o "CORRESPONSAL"
+	 */
+	Movimiento RegistrarRetiro(Integer cuentaId, Integer cajaId, Double monto, String tipoRetiro);
 	Movimiento RegistrarDeposito(Integer cuentaId,Integer cajaId, Double monto);
 	Movimiento registrarPagoCliente(Integer cuentaId, Integer clienteId, Double monto);
 	List<Movimiento> listar();

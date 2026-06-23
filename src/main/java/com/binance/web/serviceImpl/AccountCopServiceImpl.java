@@ -35,15 +35,32 @@ public class AccountCopServiceImpl implements AccountCopService {
 	}
 
 	@Override
+	@Transactional
 	public List<AccountCop> findAllAccountCop() {
 		List<AccountCop> cuentasCop = AccountCopRepository.findAll();
+		LocalDate hoy = LocalDate.now(ZONE_BOGOTA);
+		boolean alguienActualizado = false;
+		for (AccountCop acc : cuentasCop) {
+			if (acc.getBankType() == null) continue;
+			boolean diaDistinto = acc.getCupoFecha() == null || !hoy.equals(acc.getCupoFecha());
+			if (diaDistinto || acc.getCupoCajeroDisponibleHoy() == null || acc.getCupoCorresponsalDisponibleHoy() == null) {
+				double cajero       = CupoDiarioRules.maxCajeroPorBanco(acc.getBankType());
+				double corresponsal = CupoDiarioRules.maxCorresponsalPorBanco(acc.getBankType());
+				acc.setCupoFecha(hoy);
+				acc.setCupoCajeroDisponibleHoy(cajero);
+				acc.setCupoCorresponsalDisponibleHoy(corresponsal);
+				acc.setCupoDiarioMax(cajero + corresponsal);
+				acc.setCupoDisponibleHoy(cajero + corresponsal);
+				AccountCopRepository.save(acc);
+				alguienActualizado = true;
+			}
+		}
 		return cuentasCop;
 	}
 
 	@Override
 	public AccountCop findByIdAccountCop(Integer id) {
 		return AccountCopRepository.findById(id).orElse(null);
-
 	}
 
 
@@ -70,9 +87,12 @@ public class AccountCopServiceImpl implements AccountCopService {
         accountCop.setSaldoInicialDelDia(accountCop.getBalance());
 
         // ✅ inicializar cupos al crear
-        double max = CupoDiarioRules.maxPorBanco(accountCop.getBankType());
-        accountCop.setCupoDiarioMax(max);
-        accountCop.setCupoDisponibleHoy(max);
+        double cajero       = CupoDiarioRules.maxCajeroPorBanco(accountCop.getBankType());
+        double corresponsal = CupoDiarioRules.maxCorresponsalPorBanco(accountCop.getBankType());
+        accountCop.setCupoCajeroDisponibleHoy(cajero);
+        accountCop.setCupoCorresponsalDisponibleHoy(corresponsal);
+        accountCop.setCupoDiarioMax(cajero + corresponsal);
+        accountCop.setCupoDisponibleHoy(cajero + corresponsal);
         accountCop.setCupoFecha(LocalDate.now(ZONE_BOGOTA));
 
         AccountCopRepository.save(accountCop);
@@ -163,8 +183,12 @@ public class AccountCopServiceImpl implements AccountCopService {
 	    double totalAll = saleP2pAccountCopRepository.sumAllByAccount(accId);
 	    double totalToday = saleP2pAccountCopRepository.sumByAccountBetween(accId, start, end);
 
-	    if (acc.getCupoDiarioMax() == null) acc.setCupoDiarioMax(CupoDiarioRules.maxPorBanco(acc.getBankType()));
-	    double cupoMax = acc.getCupoDiarioMax();
+	    if (acc.getCupoDiarioMax() == null && acc.getBankType() != null) {
+	        double c = CupoDiarioRules.maxCajeroPorBanco(acc.getBankType());
+	        double r = CupoDiarioRules.maxCorresponsalPorBanco(acc.getBankType());
+	        acc.setCupoDiarioMax(c + r);
+	    }
+	    double cupoMax = acc.getCupoDiarioMax() != null ? acc.getCupoDiarioMax() : 0.0;
 
 	    double newBalance = baseBalance + totalAll;
 	    double newCupoHoy = cupoMax - totalToday;

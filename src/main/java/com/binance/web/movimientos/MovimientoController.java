@@ -52,8 +52,16 @@ public class MovimientoController {
 	}
 
 	@PostMapping("/retiro")
-	public Movimiento retiro(@RequestParam Integer cuentaId, @RequestParam Integer cajaId, @RequestParam Double monto) {
-		return movimientoService.RegistrarRetiro(cuentaId, cajaId, monto);
+	public ResponseEntity<?> retiro(
+	        @RequestParam Integer cuentaId,
+	        @RequestParam Integer cajaId,
+	        @RequestParam Double monto,
+	        @RequestParam String tipoRetiro) {
+	    try {
+	        return ResponseEntity.ok(movimientoService.RegistrarRetiro(cuentaId, cajaId, monto, tipoRetiro));
+	    } catch (IllegalArgumentException e) {
+	        return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+	    }
 	}
 
 	@PostMapping("/transferencia")
@@ -260,7 +268,7 @@ public class MovimientoController {
         dto.setFecha(movimiento.getFecha());
         dto.setMonto(movimiento.getMonto());
 
-        // Campos “normales”
+        // Campos "normales"
         dto.setCuentaOrigen(
                 movimiento.getCuentaOrigen() != null
                         ? movimiento.getCuentaOrigen().getName()

@@ -2,6 +2,7 @@ package com.binance.web.controller;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -96,6 +97,24 @@ public class AccountCopController {
 
 		boolean nuevoEstado = !Boolean.TRUE.equals(cuenta.getActivaParaP2P());
 		cuenta.setActivaParaP2P(nuevoEstado);
+		AccountCopService.updateAccountCop(id, cuenta);
+		return ResponseEntity.ok(cuenta);
+	}
+
+	/**
+	 * PATCH /cuenta-cop/{id}/cupo-tipo
+	 * Cambia el tipo de cupo que se respeta al asignar esta cuenta en P2P.
+	 * Body: { "cupoTipoP2P": "CAJERO" | "CORRESPONSAL" | "AMBOS" }
+	 */
+	@PatchMapping("/{id}/cupo-tipo")
+	public ResponseEntity<?> setCupoTipoP2P(@PathVariable Integer id, @RequestBody Map<String, String> body) {
+		AccountCop cuenta = AccountCopService.findByIdAccountCop(id);
+		if (cuenta == null) return ResponseEntity.notFound().build();
+		String tipo = body.get("cupoTipoP2P");
+		if (!Set.of("CAJERO", "CORRESPONSAL", "AMBOS").contains(tipo)) {
+			return ResponseEntity.badRequest().body(Map.of("error", "cupoTipoP2P debe ser CAJERO, CORRESPONSAL o AMBOS"));
+		}
+		cuenta.setCupoTipoP2P(tipo);
 		AccountCopService.updateAccountCop(id, cuenta);
 		return ResponseEntity.ok(cuenta);
 	}

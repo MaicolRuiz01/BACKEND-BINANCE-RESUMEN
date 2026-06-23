@@ -65,13 +65,18 @@ public class BalanceSnapshotService {
         for (AccountCop acc : cuentas) {
             acc.setSaldoInicialDelDia(acc.getBalance());
 
-            // ✅ cupo max según banco (TU clase)
-            double cupoMax = CupoDiarioRules.maxPorBanco(acc.getBankType());
-            acc.setCupoDiarioMax(cupoMax);
+            if (acc.getBankType() == null) continue;
 
-            // ✅ reset diario
+            double cajero       = CupoDiarioRules.maxCajeroPorBanco(acc.getBankType());
+            double corresponsal = CupoDiarioRules.maxCorresponsalPorBanco(acc.getBankType());
+
+            // Reset diario de ambos cupos
             acc.setCupoFecha(hoy);
-            acc.setCupoDisponibleHoy(cupoMax);
+            acc.setCupoCajeroDisponibleHoy(cajero);
+            acc.setCupoCorresponsalDisponibleHoy(corresponsal);
+            // legacy
+            acc.setCupoDiarioMax(cajero + corresponsal);
+            acc.setCupoDisponibleHoy(cajero + corresponsal);
         }
         accountCopRepo.saveAll(cuentas);
 

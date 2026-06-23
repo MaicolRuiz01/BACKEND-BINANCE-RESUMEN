@@ -209,7 +209,7 @@ public class SolscanService {
 				String sig = tx.path("signature").asText(null);
 				long ts = tx.path("timestamp").asLong(0L);
 
-				// tokenTransfers → generamos una “fila” por cada transferencia SPL
+				// tokenTransfers → generamos una "fila" por cada transferencia SPL
 				JsonNode tokenTransfers = tx.path("tokenTransfers");
 				if (tokenTransfers.isArray()) {
 					for (JsonNode t : tokenTransfers) {

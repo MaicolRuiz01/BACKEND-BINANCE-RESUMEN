@@ -56,7 +56,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 		Movimiento mov = Movimiento.builder().tipo("TRANSFERENCIA").fecha(LocalDateTime.now()).monto(monto)
 				.cuentaOrigen(cuentaFrom) // ✅ origen correcto
 				.cuentaDestino(cuentaTo) // ✅ destino correcto
-				.comision(comision) // ✅ sólo la comisión, no “monto+comisión”
+				.comision(comision) // ✅ sólo la comisión, no "monto+comisión"
 				.build();
 
 		cuentaFrom.setBalance(cuentaFrom.getBalance() - montoConComision);
@@ -73,57 +73,78 @@ public class MovimientoServiceImplement implements MovimientoService {
 	    }
 
 	    LocalDate hoy = LocalDate.now(ZONE_BOGOTA);
+	    boolean diaDistinto = acc.getCupoFecha() == null || !hoy.equals(acc.getCupoFecha());
 
-	    // 1) cupo máximo según banco (tu clase)
-	    double cupoMax = CupoDiarioRules.maxPorBanco(acc.getBankType());
-	    acc.setCupoDiarioMax(cupoMax);
-
-	    // 2) si es nuevo día o nunca se inicializó, reset
-	    if (acc.getCupoFecha() == null || !hoy.equals(acc.getCupoFecha()) || acc.getCupoDisponibleHoy() == null) {
+	    // Si es día nuevo o cualquier cupo no está inicializado → resetear ambos
+	    if (diaDistinto
+	            || acc.getCupoCajeroDisponibleHoy() == null
+	            || acc.getCupoCorresponsalDisponibleHoy() == null) {
+	        double cajero      = CupoDiarioRules.maxCajeroPorBanco(acc.getBankType());
+	        double corresponsal = CupoDiarioRules.maxCorresponsalPorBanco(acc.getBankType());
 	        acc.setCupoFecha(hoy);
-	        acc.setCupoDisponibleHoy(cupoMax);
+	        acc.setCupoCajeroDisponibleHoy(cajero);
+	        acc.setCupoCorresponsalDisponibleHoy(corresponsal);
+	        // legacy
+	        acc.setCupoDiarioMax(cajero + corresponsal);
+	        acc.setCupoDisponibleHoy(cajero + corresponsal);
 	    }
 	}
 
 	@Override
 	@Transactional
-	public Movimiento RegistrarRetiro(Integer cuentaId, Integer cajaId, Double monto) {
+	public Movimiento RegistrarRetiro(Integer cuentaId, Integer cajaId, Double monto, String tipoRetiro) {
 
 	    if (monto == null || monto <= 0) {
 	        throw new IllegalArgumentException("Monto debe ser > 0");
 	    }
 
-	    // 🔒 lock para que retiros simultáneos no se “salten” el cupo
+	    boolean esCajero = "CAJERO".equalsIgnoreCase(tipoRetiro);
+	    boolean esCorresponsal = "CORRESPONSAL".equalsIgnoreCase(tipoRetiro);
+	    if (!esCajero && !esCorresponsal) {
+	        throw new IllegalArgumentException("tipoRetiro debe ser CAJERO o CORRESPONSAL");
+	    }
+
+	    // 🔒 lock para que retiros simultáneos no se "salten" el cupo
 	    AccountCop cuentaOrigen = accountCopRepository.findByIdForUpdate(cuentaId)
 	            .orElseThrow(() -> new RuntimeException("Cuenta de Origen no encontrada"));
 
 	    Efectivo caja = efectivoRepository.findById(cajaId)
 	            .orElseThrow(() -> new RuntimeException("Caja no encontrada"));
 
-	    // ✅ inicializar/resetear cupo diario (USANDO TU CLASE)
+	    // Inicializar/resetear cupos del día
 	    asegurarCupoHoy(cuentaOrigen);
 
-	    double disponible = cuentaOrigen.getCupoDisponibleHoy() != null ? cuentaOrigen.getCupoDisponibleHoy() : 0.0;
-
-	    // ✅ validar cupo (se descuenta por MONTO, no por comisión)
-	    if (monto > disponible) {
-	        throw new IllegalArgumentException("Cupo diario insuficiente. Disponible: " + disponible + " requerido: " + monto);
+	    // Validar y descontar el cupo correspondiente al tipo elegido
+	    if (esCajero) {
+	        double disponible = cuentaOrigen.getCupoCajeroDisponibleHoy() != null ? cuentaOrigen.getCupoCajeroDisponibleHoy() : 0.0;
+	        if (monto > disponible) {
+	            throw new IllegalArgumentException(
+	                "Cupo de cajero diario insuficiente. Disponible: $" + String.format("%,.0f", disponible) + " · Requerido: $" + String.format("%,.0f", monto));
+	        }
+	        cuentaOrigen.setCupoCajeroDisponibleHoy(round2(disponible - monto));
+	    } else {
+	        double disponible = cuentaOrigen.getCupoCorresponsalDisponibleHoy() != null ? cuentaOrigen.getCupoCorresponsalDisponibleHoy() : 0.0;
+	        if (monto > disponible) {
+	            throw new IllegalArgumentException(
+	                "Cupo de corresponsal diario insuficiente. Disponible: $" + String.format("%,.0f", disponible) + " · Requerido: $" + String.format("%,.0f", monto));
+	        }
+	        cuentaOrigen.setCupoCorresponsalDisponibleHoy(round2(disponible - monto));
 	    }
+	    // Mantener el campo legacy sincronizado
+	    double cajeroRest      = cuentaOrigen.getCupoCajeroDisponibleHoy()      != null ? cuentaOrigen.getCupoCajeroDisponibleHoy()      : 0.0;
+	    double corresponsalRest = cuentaOrigen.getCupoCorresponsalDisponibleHoy() != null ? cuentaOrigen.getCupoCorresponsalDisponibleHoy() : 0.0;
+	    cuentaOrigen.setCupoDisponibleHoy(round2(cajeroRest + corresponsalRest));
 
-	    // ✅ comisión 4x1000
+	    // Validar saldo (con comisión 4x1000)
 	    double comision = monto * 0.004;
 	    double montoConComision = monto + comision;
-
 	    double saldoCuenta = cuentaOrigen.getBalance() != null ? cuentaOrigen.getBalance() : 0.0;
 	    if (montoConComision > saldoCuenta) {
-	        throw new IllegalArgumentException("Saldo insuficiente. Disponible: " + saldoCuenta + " requerido: " + montoConComision);
+	        throw new IllegalArgumentException("Saldo insuficiente. Disponible: $" + String.format("%,.0f", saldoCuenta) + " · Requerido: $" + String.format("%,.0f", montoConComision));
 	    }
 
-	    // ✅ descontar cupo
-	    cuentaOrigen.setCupoDisponibleHoy(round2(disponible - monto));
-
 	    Movimiento mov = Movimiento.builder()
-	            .tipo("RETIRO")
+	            .tipo("RETIRO " + tipoRetiro.toUpperCase())
 	            .fecha(LocalDateTime.now())
 	            .monto(monto)
 	            .cuentaOrigen(cuentaOrigen)
@@ -131,7 +152,6 @@ public class MovimientoServiceImplement implements MovimientoService {
 	            .comision(comision)
 	            .build();
 
-	    // ✅ actualizar saldos
 	    cuentaOrigen.setBalance(round2(saldoCuenta - montoConComision));
 
 	    double saldoCaja = caja.getSaldo() != null ? caja.getSaldo() : 0.0;
@@ -399,8 +419,8 @@ public class MovimientoServiceImplement implements MovimientoService {
 		m.setPesosDestino(pesosDestino);
 
 		// Participantes
-		m.setClienteOrigen(origen); // el que “paga” (aumenta su saldo)
-		m.setPagoCliente(destino); // usamos este como “cliente destino” (disminuye su saldo)
+		m.setClienteOrigen(origen); // el que "paga" (aumenta su saldo)
+		m.setPagoCliente(destino); // usamos este como "cliente destino" (disminuye su saldo)
 
 		// Si agregaste 'nota/descripcion' en el DTO y la entidad, guarda aquí
 		// m.setDescripcion(dto.getNota());
@@ -555,8 +575,8 @@ public class MovimientoServiceImplement implements MovimientoService {
 	    m.setTipo("PAGO C2C COP");        // ← nuevo tipo
 	    m.setFecha(LocalDateTime.now());
 	    m.setMonto(montoCop);
-	    m.setClienteOrigen(origen);       // quién “paga” (aumenta su saldo)
-	    m.setPagoCliente(destino);        // quién “recibe” (disminuye su saldo)
+	    m.setClienteOrigen(origen);       // quién "paga" (aumenta su saldo)
+	    m.setPagoCliente(destino);        // quién "recibe" (disminuye su saldo)
 	    m.setComision(0.0);               // no hay comisión
 
 	    // Campos USDT/tasas NO se tocan (quedan null)

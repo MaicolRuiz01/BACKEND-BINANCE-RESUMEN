@@ -123,7 +123,7 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
 		});
 	}
 
-	// Versión “cruda” (sin tratar como stable) – solo para detectar stables
+	// Versión "cruda" (sin tratar como stable) – solo para detectar stables
 	private double usdtPriceRaw(String symbol, Map<String, Double> cache) {
 		if (symbol == null)
 			return 0.0;

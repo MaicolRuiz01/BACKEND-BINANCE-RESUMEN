@@ -338,7 +338,7 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 		  }
 		  // Fallback determinístico
 		  String base = String.join("|",
-		      // Si tienes dto.getFuente() úsalo, si no “GEN”
+		      // Si tienes dto.getFuente() úsalo, si no "GEN"
 		      "GEN",
 		      String.valueOf(dto.getNameAccount()).trim().toUpperCase(),
 		      String.valueOf(dto.getCryptoSymbol()).trim().toUpperCase(),
