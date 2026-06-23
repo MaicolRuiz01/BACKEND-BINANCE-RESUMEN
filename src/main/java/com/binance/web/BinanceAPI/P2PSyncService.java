@@ -125,14 +125,18 @@ public class P2PSyncService {
     // ─────────────────────────────────────────────────────────────
 
     /**
-     * Devuelve el timestamp de inicio del siguiente query a Binance.
-     * - Si hay estado guardado → usa ese timestamp (delta real)
-     * - Si es la primera vez → usa el inicio del día actual en Bogotá
+     * Siempre devuelve el inicio del día actual en Bogotá.
+     *
+     * IMPORTANTE: No usar lastSyncAtMs como límite inferior del query.
+     * Una orden puede ser creada en estado TRADING (T1) y completarse
+     * después del último sync (T2). Si usáramos T2 como startMs,
+     * Binance filtraría por createTime >= T2 y nunca devolvería esa
+     * orden porque su createTime es T1 < T2.
+     *
+     * El duplicate-check (existsByNumberOrder) previene doble guardado.
      */
     private long resolveStartMs(AccountBinance account) {
-        return syncStateRepository.findByBinanceAccount_Name(account.getName())
-                .map(P2PSyncState::getLastSyncAtMs)
-                .orElseGet(() -> LocalDate.now(ZONE).atStartOfDay(ZONE).toInstant().toEpochMilli());
+        return LocalDate.now(ZONE).atStartOfDay(ZONE).toInstant().toEpochMilli();
     }
 
     /** Filtra: solo ventas USDT completadas. */
