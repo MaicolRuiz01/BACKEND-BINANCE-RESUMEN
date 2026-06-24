@@ -31,7 +31,7 @@
 		<java.version>17</java.version>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
-		<lombok.version>1.18.36</lombok.version>
+		<lombok.version>1.18.38</lombok.version>
 	</properties>
 	<dependencies>
 
@@ -148,7 +148,7 @@
 							<artifactId>lombok</artifactId>
 						</path>
 					</annotationProcessorPaths>
-				</configuration>
+	</configuration>
 			</plugin>
 			<plugin>
 				<groupId>org.springframework.boot</groupId>

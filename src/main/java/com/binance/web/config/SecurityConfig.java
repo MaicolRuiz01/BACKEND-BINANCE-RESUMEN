@@ -45,6 +45,8 @@ public class SecurityConfig {
                         // Endpoints públicos
                         .requestMatchers("/auth/login").permitAll()
                         .requestMatchers("/actuator/**").permitAll()
+                        // Telegram llama a este endpoint sin token JWT — debe ser público
+                        .requestMatchers("/telegram/webhook").permitAll()
                         // Todo lo demás requiere autenticación
                         .anyRequest().authenticated()
                 )
