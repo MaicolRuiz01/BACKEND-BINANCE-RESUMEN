@@ -4,14 +4,11 @@ import com.binance.web.Entity.*;
 import com.binance.web.Repository.*;
 import com.binance.web.dto.*;
 import com.binance.web.service.RetiradorService;
+import com.binance.web.service.TelegramService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.client.RestTemplate;
 
 import java.time.*;
 import java.util.*;
@@ -21,32 +18,36 @@ import java.util.stream.Collectors;
 @Service
 public class RetiradorServiceImpl implements RetiradorService {
 
-    private static final double PAGO_CAJERO       = 2_000.0;
-    private static final double PAGO_CORRESPONSAL  = 3_000.0;
-    private static final double PAGO_COMPLETO      = 4_000.0;
+    // Pagos en la misma unidad del sistema: 1 unidad = 1.000 pesos
+    // CAJERO = $2.000 pesos = 2 unidades, CORRESPONSAL = $3.000 = 3, COMPLETO = $4.000 = 4
+    private static final double PAGO_CAJERO       = 2.0;
+    private static final double PAGO_CORRESPONSAL  = 3.0;
+    private static final double PAGO_COMPLETO      = 4.0;
     private static final ZoneId ZONE_BOGOTA = ZoneId.of("America/Bogota");
 
     private final RetiradorRepository      retiradorRepository;
     private final SolicitudRetiroRepository solicitudRepository;
     private final AccountCopRepository     accountCopRepository;
     private final EfectivoRepository       efectivoRepository;
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final TelegramService          telegramService;
 
     public RetiradorServiceImpl(RetiradorRepository retiradorRepository,
                                 SolicitudRetiroRepository solicitudRepository,
                                 AccountCopRepository accountCopRepository,
-                                EfectivoRepository efectivoRepository) {
+                                EfectivoRepository efectivoRepository,
+                                TelegramService telegramService) {
         this.retiradorRepository  = retiradorRepository;
         this.solicitudRepository  = solicitudRepository;
         this.accountCopRepository = accountCopRepository;
         this.efectivoRepository   = efectivoRepository;
+        this.telegramService      = telegramService;
     }
 
-    @Value("${app.n8n.webhook-url:}")
-    private String n8nWebhookUrl;
+    @Value("${app.telegram.chat-id:}")
+    private String telegramChatId;
 
-    @Value("${app.n8n.webhook-general-url:}")
-    private String n8nWebhookGeneralUrl;
+    @Value("${app.telegram.group-chat-id:}")
+    private String telegramGroupChatId;
 
     // ═══════════════════════════════════════════════════════════════
     // CRUD retiradores
@@ -101,8 +102,24 @@ public class RetiradorServiceImpl implements RetiradorService {
     }
 
     @Override
+    @Transactional
     public void delete(Long id) {
+        Retirador retirador = retiradorRepository.findById(id)
+            .orElseThrow(() -> new RuntimeException("Retirador no encontrado: " + id));
+
+        // Desvincular todas sus solicitudes (el historial se mantiene con retirador=null)
+        solicitudRepository.findByRetiradorIdOrderByFechaCreacionDesc(id)
+            .forEach(s -> {
+                s.setRetirador(null);
+                solicitudRepository.save(s);
+            });
+
+        // Desvincular la caja (la caja queda intacta para eliminar por separado)
+        retirador.setEfectivo(null);
+        retiradorRepository.save(retirador);
+
         retiradorRepository.deleteById(id);
+        log.info("[Retirador] Retirador #{} eliminado.", id);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -118,6 +135,7 @@ public class RetiradorServiceImpl implements RetiradorService {
         solicitud.setRetirador(retirador);
         solicitud.setFechaCreacion(LocalDateTime.now(ZONE_BOGOTA));
         solicitud.setEstado(EstadoSolicitud.PENDIENTE);
+        solicitud.setFechaAsignacion(LocalDateTime.now(ZONE_BOGOTA));
 
         List<DetalleRetiro> detalles = buildDetalles(request.getDetalles(), solicitud);
         double totalMonto    = detalles.stream().mapToDouble(DetalleRetiro::totalDetalle).sum();
@@ -128,7 +146,7 @@ public class RetiradorServiceImpl implements RetiradorService {
         solicitud.setDetalles(detalles);
 
         SolicitudRetiro saved = solicitudRepository.save(solicitud);
-        notificarN8n(saved, retirador, n8nWebhookUrl);
+        notificarTelegram(saved, retirador);
         return saved;
     }
 
@@ -203,8 +221,8 @@ public class RetiradorServiceImpl implements RetiradorService {
 
         SolicitudRetiro saved = solicitudRepository.save(solicitud);
 
-        // Notificar al grupo de Telegram con botón inline
-        notificarGeneralN8n(saved);
+        // Notificar al grupo de Telegram con botón inline "✅ Aceptar"
+        notificarGeneralTelegram(saved);
         return saved;
     }
 
@@ -230,11 +248,12 @@ public class RetiradorServiceImpl implements RetiradorService {
 
         solicitud.setRetirador(retirador);
         solicitud.setEstado(EstadoSolicitud.PENDIENTE);
+        solicitud.setFechaAsignacion(LocalDateTime.now(ZONE_BOGOTA));
         SolicitudRetiro saved = solicitudRepository.save(solicitud);
 
         log.info("[Solicitud General #{}] Asignada a {}", solicitudId, retirador.getNombre());
-        // Notificar al retirador individualmente (webhook existente)
-        notificarN8n(saved, retirador, n8nWebhookUrl);
+        // Notificar al retirador individualmente por DM de Telegram
+        notificarTelegram(saved, retirador);
         return saved;
     }
 
@@ -356,67 +375,94 @@ public class RetiradorServiceImpl implements RetiradorService {
         };
     }
 
-    private void notificarN8n(SolicitudRetiro solicitud, Retirador retirador, String url) {
-        if (url == null || url.isBlank()) {
-            log.warn("[Retiro] n8n webhook no configurado — notificación omitida.");
+    /**
+     * Envía un DM directo AL RETIRADOR específico con los detalles del retiro asignado.
+     * Usa el telegramChatId guardado en el retirador (requiere que haya hecho /start al bot).
+     */
+    private void notificarTelegram(SolicitudRetiro solicitud, Retirador retirador) {
+        if (retirador.getTelegramChatId() == null) {
+            log.warn("[Telegram] {} no tiene chat_id registrado — debe enviar /start al bot",
+                retirador.getNombre());
             return;
         }
         try {
-            List<Map<String, Object>> cuentas = new ArrayList<>();
+            StringBuilder sb = new StringBuilder();
+            sb.append("*🎯 Retiro Asignado #").append(solicitud.getId()).append("*\n");
             for (DetalleRetiro d : solicitud.getDetalles()) {
-                Map<String, Object> item = new HashMap<>();
-                item.put("cuenta",            d.getCuentaCop().getName());
-                item.put("banco",             d.getCuentaCop().getBankType().name());
-                item.put("tipo",              d.getTipoRetiro().name());
-                item.put("montoCajero",       d.getMontoCajero());
-                item.put("montoCorresponsal", d.getMontoCorresponsal());
-                cuentas.add(item);
+                sb.append("\n").append(tipoLabel(d.getTipoRetiro())).append("\n");
+                appendMontosTelegram(sb, d);
+                sb.append("Cuenta: ").append(d.getCuentaCop().getName()).append("\n");
             }
-            Map<String, Object> payload = new HashMap<>();
-            payload.put("solicitudId",   solicitud.getId());
-            payload.put("retirador",     retirador.getNombre());
-            payload.put("totalMonto",    solicitud.getTotalMonto());
-            payload.put("pagoRetirador", solicitud.getPagoRetirador());
-            payload.put("cuentas",       cuentas);
+            sb.append("\nCuando termines, presiona el botón para confirmar el retiro.");
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            restTemplate.postForObject(url, new HttpEntity<>(payload, headers), String.class);
-            log.info("[Retiro] Notificación enviada a n8n — solicitud #{}", solicitud.getId());
+            telegramService.sendMessageWithTwoButtons(
+                String.valueOf(retirador.getTelegramChatId()),
+                sb.toString(),
+                "✅ Ya hice el retiro", "confirm:" + solicitud.getId(),
+                "❌ Cancelar", "cancel:" + solicitud.getId()
+            );
+            log.info("[Retiro] DM con botón enviado a {} (chatId={}) — solicitud #{}",
+                retirador.getNombre(), retirador.getTelegramChatId(), solicitud.getId());
         } catch (Exception e) {
-            log.error("[Retiro] Error al notificar n8n: {}", e.getMessage());
+            log.error("[Retiro] Error al notificar a {}: {}", retirador.getNombre(), e.getMessage());
         }
     }
 
-    private void notificarGeneralN8n(SolicitudRetiro solicitud) {
-        if (n8nWebhookGeneralUrl == null || n8nWebhookGeneralUrl.isBlank()) {
-            log.warn("[Retiro General] n8n webhook-general no configurado — notificación omitida.");
+    /**
+     * Envía al GRUPO de retiradores un mensaje con botón inline "✅ Aceptar".
+     * El primer retirador que pulse el botón quedará asignado.
+     * Guarda el message_id para poder editar el mensaje cuando alguien acepte.
+     */
+    private void notificarGeneralTelegram(SolicitudRetiro solicitud) {
+        if (telegramGroupChatId == null || telegramGroupChatId.isBlank()) {
+            log.warn("[Retiro General] group-chat-id no configurado — notificación omitida.");
             return;
         }
         try {
-            List<Map<String, Object>> cuentas = new ArrayList<>();
-            for (DetalleRetiro d : solicitud.getDetalles()) {
-                Map<String, Object> item = new HashMap<>();
-                item.put("cuenta",            d.getCuentaCop().getName());
-                item.put("banco",             d.getCuentaCop().getBankType().name());
-                item.put("tipo",              d.getTipoRetiro().name());
-                item.put("montoCajero",       d.getMontoCajero());
-                item.put("montoCorresponsal", d.getMontoCorresponsal());
-                cuentas.add(item);
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < solicitud.getDetalles().size(); i++) {
+                DetalleRetiro d = solicitud.getDetalles().get(i);
+                if (i > 0) sb.append("\n\n");
+                sb.append("*RETIRO*\n");
+                sb.append(tipoLabel(d.getTipoRetiro())).append("\n");
+                appendMontosTelegram(sb, d);
+                sb.append("Cuenta: ").append(d.getCuentaCop().getName());
             }
-            Map<String, Object> payload = new HashMap<>();
-            payload.put("solicitudId",   solicitud.getId());
-            payload.put("totalMonto",    solicitud.getTotalMonto());
-            payload.put("pagoRetirador", solicitud.getPagoRetirador());
-            payload.put("cuentas",       cuentas);
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            restTemplate.postForObject(n8nWebhookGeneralUrl,
-                    new HttpEntity<>(payload, headers), String.class);
-            log.info("[Retiro General #{}] Notificación al grupo Telegram enviada", solicitud.getId());
+            Integer messageId = telegramService.sendMessageWithButton(
+                telegramGroupChatId, sb.toString(), "✅ Aceptar", "accept:" + solicitud.getId()
+            );
+
+            if (messageId != null) {
+                solicitud.setTelegramMessageId(messageId);
+                solicitudRepository.save(solicitud);
+            }
+            log.info("[Retiro General #{}] Mensaje con botón enviado al grupo (message_id={})",
+                solicitud.getId(), messageId);
         } catch (Exception e) {
-            log.error("[Retiro General] Error al notificar n8n: {}", e.getMessage());
+            log.error("[Retiro General] Error al notificar Telegram: {}", e.getMessage());
         }
     }
-}
+
+    private String tipoLabel(TipoRetiro tipo) {
+        return switch (tipo) {
+            case CAJERO       -> "Cajero";
+            case CORRESPONSAL -> "Corresponsal";
+            case COMPLETO     -> "Completo";
+        };
+    }
+
+    private void appendMontosTelegram(StringBuilder sb, DetalleRetiro d) {
+        switch (d.getTipoRetiro()) {
+            case CAJERO ->
+                sb.append("Monto: $").append(fmtTelegram(d.getMontoCajero())).append("\n");
+            case CORRESPONSAL ->
+                sb.append("Monto: $").append(fmtTelegram(d.getMontoCorresponsal())).append("\n");
+            case COMPLETO ->
+                sb.append("Cajero: $").append(fmtTelegram(d.getMontoCajero()))
+                  .append(" | Corresponsal: $").append(fmtTelegram(d.getMontoCorresponsal())).append("\n");
+        }
+    }
+
+    private String fmtTelegram(Double value) {
+        if (value =
