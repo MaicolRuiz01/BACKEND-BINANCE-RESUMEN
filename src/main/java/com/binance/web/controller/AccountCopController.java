@@ -18,7 +18,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.binance.web.Entity.AccountCop;
+import com.binance.web.Entity.BrebeKey;
 import com.binance.web.Entity.SaleP2P;
+import com.binance.web.Repository.BrebeKeyRepository;
 import com.binance.web.service.AccountCopExcelService;
 import com.binance.web.service.AccountCopService;
 
@@ -29,10 +31,14 @@ public class AccountCopController {
 
 	private final AccountCopService AccountCopService;
 	private final AccountCopExcelService accountCopExcelService;
+	private final BrebeKeyRepository brebeKeyRepository;
 
-	public AccountCopController(AccountCopService AccountCopService, AccountCopExcelService accountCopExcelService) {
+	public AccountCopController(AccountCopService AccountCopService,
+			AccountCopExcelService accountCopExcelService,
+			BrebeKeyRepository brebeKeyRepository) {
 		this.AccountCopService = AccountCopService;
 		this.accountCopExcelService = accountCopExcelService;
+		this.brebeKeyRepository = brebeKeyRepository;
 	}
 
 	@GetMapping(produces = "application/json")
@@ -117,6 +123,49 @@ public class AccountCopController {
 		cuenta.setCupoTipoP2P(tipo);
 		AccountCopService.updateAccountCop(id, cuenta);
 		return ResponseEntity.ok(cuenta);
+	}
+
+	// ══════════════════════════════════════════════════════════════
+	// LLAVES BREBE
+	// ══════════════════════════════════════════════════════════════
+
+	/**
+	 * POST /cuenta-cop/{id}/brebe-keys
+	 * Agrega una nueva llave Brebe a la cuenta.
+	 * Body: { "llave": "...", "descripcion": "..." }
+	 */
+	@PostMapping("/{id}/brebe-keys")
+	public ResponseEntity<?> addBrebeKey(@PathVariable Integer id, @RequestBody Map<String, String> body) {
+		AccountCop cuenta = AccountCopService.findByIdAccountCop(id);
+		if (cuenta == null) return ResponseEntity.notFound().build();
+
+		String llave = body.get("llave");
+		if (llave == null || llave.trim().isEmpty()) {
+			return ResponseEntity.badRequest().body(Map.of("error", "El campo 'llave' es requerido"));
+		}
+
+		BrebeKey key = new BrebeKey();
+		key.setLlave(llave.trim());
+		String desc = body.get("descripcion");
+		if (desc != null && !desc.trim().isEmpty()) key.setDescripcion(desc.trim());
+		key.setAccountCop(cuenta);
+		brebeKeyRepository.save(key);
+
+		return ResponseEntity.ok(key);
+	}
+
+	/**
+	 * DELETE /cuenta-cop/{id}/brebe-keys/{keyId}
+	 * Elimina una llave Brebe de la cuenta.
+	 * Verifica pertenencia via query para evitar lazy-load fuera de transacción.
+	 */
+	@DeleteMapping("/{id}/brebe-keys/{keyId}")
+	public ResponseEntity<Void> deleteBrebeKey(@PathVariable Integer id, @PathVariable Integer keyId) {
+		boolean belongs = brebeKeyRepository.findByAccountCopId(id)
+				.stream().anyMatch(k -> k.getId().equals(keyId));
+		if (!belongs) return ResponseEntity.notFound().build();
+		brebeKeyRepository.deleteById(keyId);
+		return ResponseEntity.noContent().build();
 	}
 
 	@PostMapping("/accountCop/{id}/reconcile")

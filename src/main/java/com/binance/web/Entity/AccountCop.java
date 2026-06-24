@@ -1,6 +1,7 @@
 package com.binance.web.Entity;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
@@ -11,6 +12,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -76,6 +78,10 @@ public class AccountCop {
     @Column(name = "cupo_tipo_p2p")
     private String cupoTipoP2P = "AMBOS";
 
+    /** Llaves de Brebe asociadas a esta cuenta. Se serializan en el JSON. */
+    @OneToMany(mappedBy = "accountCop", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
+    private List<BrebeKey> brebeKeys = new ArrayList<>();
+
     // ==================== CONSTRUCTORS ====================
 
     public AccountCop() {}
@@ -120,6 +126,7 @@ public class AccountCop {
     public String getCedula() { return cedula; }
     public Boolean getActivaParaP2P() { return activaParaP2P; }
     public String getCupoTipoP2P() { return cupoTipoP2P; }
+    public List<BrebeKey> getBrebeKeys() { return brebeKeys; }
 
     // ==================== SETTERS ====================
 
@@ -139,6 +146,7 @@ public class AccountCop {
     public void setCedula(String cedula) { this.cedula = cedula; }
     public void setActivaParaP2P(Boolean activaParaP2P) { this.activaParaP2P = activaParaP2P; }
     public void setCupoTipoP2P(String cupoTipoP2P) { this.cupoTipoP2P = cupoTipoP2P; }
+    public void setBrebeKeys(List<BrebeKey> brebeKeys) { this.brebeKeys = brebeKeys; }
 
     // ==================== equals / hashCode / toString ====================
 
