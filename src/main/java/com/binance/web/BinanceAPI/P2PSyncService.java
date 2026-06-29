@@ -41,7 +41,6 @@ public class P2PSyncService {
     @Autowired private SaleP2PRepository saleP2PRepository;
     @Autowired private AccountBinanceRepository accountBinanceRepository;
     @Autowired private P2PSyncStateRepository syncStateRepository;
-    @Autowired private P2PAssignmentRuleRepository assignmentRuleRepository;
     @Autowired private P2PPreAsignacionRepository preAsignacionRepository;
     @Autowired private AccountCopService accountCopService;
     @Autowired private AccountBinanceService accountBinanceService;
@@ -169,13 +168,11 @@ public class P2PSyncService {
     }
 
     /**
-     * Aplica asignación automática a la venta recién importada.
-     * Prioridad:
-     *   1. Pre-asignación manual del operador (tabla p2p_pre_asignacion)
-     *   2. Regla general activa (tabla p2p_assignment_rule)
+     * Aplica la pre-asignación manual del operador a la venta recién importada
+     * (tabla p2p_pre_asignacion). Si no hay pre-asignación, la venta queda sin asignar
+     * y se asigna manualmente después.
      */
     private void autoAssign(SaleP2P sale) {
-        // 1️⃣ Pre-asignación manual — tiene prioridad sobre la regla
         Optional<P2PPreAsignacion> pre =
                 preAsignacionRepository.findByOrderNumber(sale.getNumberOrder());
 
@@ -184,19 +181,8 @@ public class P2PSyncService {
             applyAssignment(sale, cop);
             // Eliminar la pre-asignación: ya cumplió su función
             preAsignacionRepository.deleteByOrderNumber(sale.getNumberOrder());
-            log.info("[AutoAssign] Venta {} → {} (pre-asignación manual)", sale.getNumberOrder(), cop.getName());
-            return;
+            log.info("[PreAsign] Venta {} → {} (pre-asignación manual)", sale.getNumberOrder(), cop.getName());
         }
-
-        // 2️⃣ Regla general activa
-        assignmentRuleRepository
-                .findByBinanceAccount_Name(sale.getBinanceAccount().getName())
-                .filter(r -> Boolean.TRUE.equals(r.getActive()))
-                .ifPresent(rule -> {
-                    applyAssignment(sale, rule.getCopAccount());
-                    log.info("[AutoAssign] Venta {} → {} (regla general)",
-                            sale.getNumberOrder(), rule.getCopAccount().getName());
-                });
     }
 
     /** Aplica el detalle de asignación a la venta y actualiza saldos. */

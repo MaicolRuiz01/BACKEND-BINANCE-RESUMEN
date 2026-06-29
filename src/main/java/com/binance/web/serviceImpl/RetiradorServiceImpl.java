@@ -48,9 +48,6 @@ public class RetiradorServiceImpl implements RetiradorService {
     @Value("${app.n8n.webhook-general-url:}")
     private String n8nWebhookGeneralUrl;
 
-    // ═══════════════════════════════════════════════════════════════
-    // CRUD retiradores
-    // ═══════════════════════════════════════════════════════════════
 
     @Override
     public List<Retirador> findAll() {
@@ -105,9 +102,6 @@ public class RetiradorServiceImpl implements RetiradorService {
         retiradorRepository.deleteById(id);
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // Solicitud con retirador pre-asignado
-    // ═══════════════════════════════════════════════════════════════
 
     @Override
     @Transactional

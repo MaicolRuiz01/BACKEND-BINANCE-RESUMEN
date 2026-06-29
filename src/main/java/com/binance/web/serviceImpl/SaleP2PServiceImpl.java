@@ -25,7 +25,6 @@ import com.binance.web.Entity.SaleP2P;
 import com.binance.web.Entity.SaleP2pAccountCop;
 import com.binance.web.OrderP2P.OrderP2PService;
 import com.binance.web.Repository.AccountBinanceRepository;
-import com.binance.web.Repository.P2PAssignmentRuleRepository;
 import com.binance.web.Repository.SaleP2PRepository;
 import com.binance.web.Repository.SaleP2pAccountCopRepository;
 import com.binance.web.model.AssignAccountDto;
@@ -48,7 +47,6 @@ public class SaleP2PServiceImpl implements SaleP2PService {
     @Autowired private AccountBinanceRepository accountBinanceRepository;
     @Autowired private AccountBinanceService accountBinanceService;
     @Autowired private SaleP2pAccountCopRepository saleP2pAccountCopRepository;
-    @Autowired private P2PAssignmentRuleRepository assignmentRuleRepository;
 
     @Override
     public List<SaleP2PDto> findAllSaleP2P() {
@@ -147,7 +145,6 @@ public class SaleP2PServiceImpl implements SaleP2PService {
                 sale.setAsignado(false);
                 sale.setUtilidad(0.0);
                 saveSaleP2P(sale);
-                autoAssignIfRuleExists(sale);
             }
         } catch (Exception e) {
             log.error("Error en createSaleP2pDirectly ({}): {}", account, e.getMessage(), e);
@@ -398,7 +395,6 @@ public class SaleP2PServiceImpl implements SaleP2PService {
                 sale.setAsignado(false);
                 sale.setUtilidad(0.0);
                 saveSaleP2P(sale);
-                autoAssignIfRuleExists(sale);
             }
         } catch (Exception e) {
             log.error("Error importando rango P2P ({}): {}", account, e.getMessage(), e);
@@ -414,53 +410,6 @@ public class SaleP2PServiceImpl implements SaleP2PService {
                     .forEach(s -> out.add(convertToDto(s)));
         }
         return out;
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // Auto-asignación por regla activa
-    // ─────────────────────────────────────────────────────────────
-
-    /**
-     * Si existe una regla activa para la cuenta Binance de esta venta,
-     * la asigna automáticamente a la cuenta COP configurada.
-     * Si no hay regla, la venta queda sin asignar (modo manual).
-     */
-    private void autoAssignIfRuleExists(SaleP2P sale) {
-        if (sale.getBinanceAccount() == null) return;
-        String binanceName = sale.getBinanceAccount().getName();
-
-        assignmentRuleRepository.findByBinanceAccount_Name(binanceName)
-                .filter(r -> Boolean.TRUE.equals(r.getActive()))
-                .ifPresent(rule -> {
-                    AccountCop cop = rule.getCopAccount();
-                    double amount  = sale.getPesosCop() != null ? sale.getPesosCop() : 0.0;
-
-                    // Detalle de asignación
-                    SaleP2pAccountCop detail = new SaleP2pAccountCop();
-                    detail.setSaleP2p(sale);
-                    detail.setAmount(amount);
-                    detail.setNameAccount(cop.getName());
-                    detail.setAccountCop(cop);
-
-                    // Actualizar saldo COP
-                    cop.setBalance((cop.getBalance() != null ? cop.getBalance() : 0.0) + amount);
-                    cop.setCupoDisponibleHoy(
-                            (cop.getCupoDisponibleHoy() != null ? cop.getCupoDisponibleHoy() : 0.0) - amount);
-                    accountCopService.saveAccountCopSafe(cop);
-
-                    // Descontar USDT del saldo Binance
-                    if (sale.getDollarsUs() != null && sale.getDollarsUs() > 0) {
-                        accountBinanceService.subtractBalance(binanceName, sale.getDollarsUs());
-                    }
-
-                    // Marcar venta como asignada
-                    if (sale.getAccountCopsDetails() == null) sale.setAccountCopsDetails(new ArrayList<>());
-                    sale.getAccountCopsDetails().add(detail);
-                    sale.setAsignado(true);
-                    saleP2PRepository.save(sale);
-
-                    log.info("Venta {} auto-asignada a {} ({} COP)", sale.getNumberOrder(), cop.getName(), amount);
-                });
     }
 
     // ─────────────────────────────────────────────────────────────
