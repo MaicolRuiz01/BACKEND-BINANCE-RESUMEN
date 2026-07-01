@@ -63,6 +63,15 @@ public class P2PSyncScheduler {
                 sseController.broadcastCambioOrdenesActivas(changed.size());
                 log.info("[ActivePoll] {} orden(es) cambiaron de estado", changed.size());
             }
+            // Si alguna orden se completó (salió del listado activo), importar YA
+            // para sumar el saldo a la cuenta COP sin esperar el sync de 3 min.
+            if (activeOrderService.huboCompletadasEnUltimoPoll()) {
+                int nuevas = syncService.syncAllAccounts();
+                if (nuevas > 0) {
+                    sseController.broadcastNuevasVentas(nuevas);
+                    log.info("[ActivePoll] Import inmediato tras completar: {} venta(s) nueva(s)", nuevas);
+                }
+            }
         } catch (Exception e) {
             log.warn("[ActivePoll] Error en polling de órdenes activas: {}", e.getMessage());
         }

@@ -57,6 +57,11 @@ public class P2PActiveOrderService {
     private int pollSkipCount = 0;
     private static final int MAX_SKIP = 3; // 3 skips → 1 call real cada 4 ticks
 
+    /** true si en el último poll alguna orden salió del listado activo (se completó/canceló).
+     *  Lo usa el scheduler para importar de inmediato y sumar el saldo sin esperar 3 min. */
+    private volatile boolean completadasUltimoPoll = false;
+    public boolean huboCompletadasEnUltimoPoll() { return completadasUltimoPoll; }
+
     // ─────────────────────────────────────────────────────────────
     // Consulta principal
     // ─────────────────────────────────────────────────────────────
@@ -179,6 +184,11 @@ public class P2PActiveOrderService {
                 lastKnownStatus.put(dto.getOrderNumber(), dto.getStatus());
             }
         }
+
+        // Órdenes que estaban activas y ya no aparecen → se completaron o cancelaron.
+        Set<String> desaparecidas = new HashSet<>(lastKnownStatus.keySet());
+        desaparecidas.removeAll(currentOrderNumbers);
+        this.completadasUltimoPoll = !desaparecidas.isEmpty();
 
         // Limpiar órdenes que ya no están activas del cache
         lastKnownStatus.keySet().retainAll(currentOrderNumbers);

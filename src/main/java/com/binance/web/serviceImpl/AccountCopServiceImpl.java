@@ -37,7 +37,7 @@ public class AccountCopServiceImpl implements AccountCopService {
 	@Override
 	@Transactional
 	public List<AccountCop> findAllAccountCop() {
-		List<AccountCop> cuentasCop = AccountCopRepository.findAll();
+		List<AccountCop> cuentasCop = AccountCopRepository.findAllWithBrebeKeys();
 		LocalDate hoy = LocalDate.now(ZONE_BOGOTA);
 		boolean alguienActualizado = false;
 		for (AccountCop acc : cuentasCop) {
@@ -61,6 +61,11 @@ public class AccountCopServiceImpl implements AccountCopService {
 	@Override
 	public AccountCop findByIdAccountCop(Integer id) {
 		return AccountCopRepository.findById(id).orElse(null);
+	}
+
+	@Override
+	public List<AccountCopRepository.SaldoView> findAllSaldos() {
+		return AccountCopRepository.findAllSaldos();
 	}
 
 

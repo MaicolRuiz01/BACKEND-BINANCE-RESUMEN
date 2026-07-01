@@ -47,6 +47,12 @@ public class AccountCopController {
 		return ResponseEntity.ok(cuentasCop);
 	}
 
+	/** Consulta liviana: solo id + saldo de cada cuenta COP. Rápida, para refrescar el saldo. */
+	@GetMapping(value = "/saldos", produces = "application/json")
+	public ResponseEntity<List<com.binance.web.Repository.AccountCopRepository.SaldoView>> getSaldos() {
+		return ResponseEntity.ok(AccountCopService.findAllSaldos());
+	}
+
 	@GetMapping("/{id}")
 	public ResponseEntity<AccountCop> getAccountCopById(@PathVariable Integer id) {
 		AccountCop AccountCop = AccountCopService.findByIdAccountCop(id);

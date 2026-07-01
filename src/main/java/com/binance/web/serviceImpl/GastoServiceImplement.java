@@ -11,6 +11,7 @@ import com.binance.web.Repository.AccountCopRepository;
 import com.binance.web.Repository.EfectivoRepository;
 import com.binance.web.Repository.GastoRepository;
 import com.binance.web.service.GastoService;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -45,19 +46,17 @@ public class GastoServiceImplement implements GastoService{
     }
 
     @Override
+    @Transactional
     public Gasto saveGasto(Gasto nuevoGasto) {
         Double monto = nuevoGasto.getMonto();
-        Double montoComision = monto * 1.004;
+        double montoComision = monto * 1.004;
 
         // Siempre asigna la fecha del sistema
         nuevoGasto.setFecha(LocalDateTime.now());
 
         if (nuevoGasto.getCuentaPago() != null) {
-            AccountCop cuentaPago = accountCopRepository.findById(nuevoGasto.getCuentaPago().getId())
-                .orElseThrow(() -> new RuntimeException("Cuenta no encontrada"));
-
-            cuentaPago.setBalance(cuentaPago.getBalance() - montoComision);
-            accountCopRepository.save(cuentaPago);
+            // Resta ATÓMICA en la BD: no se pierde aunque el sync P2P actualice el saldo a la vez.
+            accountCopRepository.restarSaldo(nuevoGasto.getCuentaPago().getId(), montoComision);
         }
 
         if (nuevoGasto.getPagoEfectivo() != null) {

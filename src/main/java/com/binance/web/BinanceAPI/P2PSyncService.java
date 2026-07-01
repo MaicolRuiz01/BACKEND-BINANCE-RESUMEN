@@ -16,6 +16,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -45,6 +46,10 @@ public class P2PSyncService {
     @Autowired private AccountCopService accountCopService;
     @Autowired private AccountBinanceService accountBinanceService;
 
+    /** Referencia a sí mismo (vía proxy) para que @Transactional de syncAccount SÍ aplique
+     *  cuando se llama desde syncAllAccounts (evita el problema de auto-invocación de Spring). */
+    @Autowired @Lazy private P2PSyncService self;
+
     // ─────────────────────────────────────────────────────────────
     // Punto de entrada principal
     // ─────────────────────────────────────────────────────────────
@@ -60,7 +65,7 @@ public class P2PSyncService {
         for (AccountBinance account : accounts) {
             if (account.getApiKey() == null || account.getApiSecret() == null) continue;
             try {
-                int newForAccount = syncAccount(account);
+                int newForAccount = self.syncAccount(account);
                 if (newForAccount > 0) {
                     log.info("[Sync] {} → {} venta(s) P2P nueva(s)", account.getName(), newForAccount);
                 }
