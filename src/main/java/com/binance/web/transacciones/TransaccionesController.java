@@ -17,9 +17,12 @@ import com.binance.web.Entity.Transacciones;
 @RequestMapping("/transacciones")
 public class TransaccionesController {
 	private final TransaccionesService transaccionesService;
+	private final TraspasoReconciliacionService reconciliacionService;
 
-    public TransaccionesController(TransaccionesService transaccionesService) {
+    public TransaccionesController(TransaccionesService transaccionesService,
+                                  TraspasoReconciliacionService reconciliacionService) {
         this.transaccionesService = transaccionesService;
+        this.reconciliacionService = reconciliacionService;
     }
 
     @PostMapping("/guardar")
@@ -36,8 +39,18 @@ public class TransaccionesController {
     
     @GetMapping("/hoy")
     public ResponseEntity<List<TransaccionesDTO>> saveAndFetchToday() {
+        // Convierte compras/ventas sin asignar que son traspasos internos (Binance↔TRON)
+        // antes de devolver la lista, para que aparezcan como traspasos.
+        try { reconciliacionService.reconciliarTraspasos(); } catch (Exception ignore) {}
         List<TransaccionesDTO> result = transaccionesService.saveAndFetchTodayTraspasos();
         return ResponseEntity.ok(result);
+    }
+
+    /** Reconciliación manual de traspasos internos (compra+venta del mismo monto y hora). */
+    @PostMapping("/reconciliar-traspasos")
+    public ResponseEntity<?> reconciliarTraspasos() {
+        int n = reconciliacionService.reconciliarTraspasos();
+        return ResponseEntity.ok(Map.of("emparejados", n));
     }
 
 }

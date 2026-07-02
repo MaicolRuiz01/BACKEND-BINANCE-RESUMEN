@@ -20,6 +20,7 @@ import org.springframework.stereotype.Component;
 public class TraspasosScheduler {
 
     private final TransaccionesService transaccionesService;
+    private final TraspasoReconciliacionService reconciliacionService;
 
     @Scheduled(fixedDelayString = "${traspasos.sync.interval-ms:180000}")
     public void registrarTraspasosAutomaticamente() {
@@ -30,6 +31,12 @@ public class TraspasosScheduler {
             }
         } catch (Exception e) {
             log.warn("[TraspasosScheduler] Error registrando traspasos: {}", e.getMessage());
+        }
+        try {
+            // Emparejar compras/ventas sin asignar que en realidad son traspasos internos (Binance↔TRON).
+            reconciliacionService.reconciliarTraspasos();
+        } catch (Exception e) {
+            log.warn("[TraspasosScheduler] Error reconciliando traspasos: {}", e.getMessage());
         }
     }
 }
