@@ -110,7 +110,8 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 	            supplierRepository.save(oldSupplier);
 	        }
 	        if (oldAccount != null) {
-	            accountBinanceService.subtractCryptoBalance(oldAccount.getId(), oldCryptoSymbol, oldAmount);
+	            accountBinanceService.subtractCryptoBalance(oldAccount.getId(), oldCryptoSymbol,
+	            oldAmount == null ? null : oldAmount * 1000.0);
 	        }
 
 	        // 2. Actualizar la entidad BuyDollars
@@ -134,7 +135,8 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 	        newSupplier.setBalance(currentNewSupplierBalance + newPesos);
 	        supplierRepository.save(newSupplier);
 	        
-	        accountBinanceService.updateOrCreateCryptoBalance(newAccount.getId(), newCryptoSymbol, newAmount);
+	        accountBinanceService.updateOrCreateCryptoBalance(newAccount.getId(), newCryptoSymbol,
+	            newAmount == null ? null : newAmount * 1000.0);
 	        
 	        // Se guarda la compra con los nuevos datos
 	        return buyDollarsRepository.save(existing);
@@ -181,7 +183,8 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
                 nueva.setIdDeposit(dto.getIdDeposit());
                 nueva.setNameAccount(dto.getNameAccount());
                 nueva.setDate(dto.getDate());
-                nueva.setAmount(dto.getAmount());
+                // Guardar en escala "miles" (/1000); el saldo cripto de arriba ya usó el monto crudo.
+                nueva.setAmount(dto.getAmount() == null ? null : dto.getAmount() / 1000.0);
                 nueva.setCryptoSymbol(dto.getCryptoSymbol());
                 nueva.setTasa(0.0);
                 nueva.setPesos(0.0);

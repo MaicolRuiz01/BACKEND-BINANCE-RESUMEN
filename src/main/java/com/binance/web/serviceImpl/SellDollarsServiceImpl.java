@@ -330,7 +330,7 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 				SellDollars venta = new SellDollars();
 				venta.setIdWithdrawals(tx.getOrderId());
 				venta.setDate(tx.getTransactionTime());
-				venta.setDollars(Math.abs(tx.getAmount()));
+				venta.setDollars(Math.abs(tx.getAmount()) / 1000.0); // escala miles
 				venta.setTasa(0.0);
 				venta.setPesos(0.0);
 				venta.setNameAccount(nameAccount); // ✅ Aquí va el nombre correcto de la cuenta Binance
@@ -588,7 +588,7 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 	      nueva.setIdWithdrawals(dto.getIdWithdrawals()); // puede venir null
 	      nueva.setNameAccount(dto.getNameAccount());
 	      nueva.setDate(dto.getDate());
-	      nueva.setDollars(dollars);
+	      nueva.setDollars(dollars / 1000.0); // escala miles; el ajuste de saldo cripto de arriba usó el monto crudo
 	      nueva.setEquivalenteciaTRX(eqTRX);
 	      nueva.setTasa(0.0);
 	      nueva.setPesos(0.0);

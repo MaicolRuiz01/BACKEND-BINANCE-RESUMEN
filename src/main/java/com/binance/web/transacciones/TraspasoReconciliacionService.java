@@ -47,8 +47,9 @@ public class TraspasoReconciliacionService {
     private final TransaccionesRepository transRepo;
 
     private static final ZoneId ZONE = ZoneId.of("America/Bogota");
-    /** Diferencia máxima de monto entre las dos patas (comisión de red / redondeo). */
-    private static final double TOLERANCIA_MONTO = 2.0;
+    /** Diferencia máxima de monto entre las dos patas (comisión de red / redondeo).
+     *  Los montos están en escala "miles" (÷1000), así que 0.005 ≈ 5 USDT reales. */
+    private static final double TOLERANCIA_MONTO = 0.005;
     /** Ventana de tiempo máxima entre la salida y la entrada. */
     private static final long VENTANA_MINUTOS = 60;
 
@@ -92,7 +93,8 @@ public class TraspasoReconciliacionService {
 
             // La compra ya sumó el cripto en destino al importarse. Falta restarlo en origen.
             if (origen != null) {
-                accountBinanceService.subtractCryptoBalance(origen.getId(), symbol, sell.getDollars());
+                // dollars está en miles; el saldo cripto va en USDT reales → ×1000.
+                accountBinanceService.subtractCryptoBalance(origen.getId(), symbol, sell.getDollars() * 1000.0);
             }
 
             // Registrar la transacción (traspaso) para el historial.
@@ -102,7 +104,8 @@ public class TraspasoReconciliacionService {
             if (!idsRegistrados.contains(idTx)) {
                 Transacciones t = new Transacciones();
                 t.setIdtransaccion(idTx);
-                t.setCantidad(match.getAmount());
+                // Los traspasos existentes guardan cantidad en crudo (USDT reales) → ×1000.
+                t.setCantidad(match.getAmount() == null ? null : match.getAmount() * 1000.0);
                 t.setFecha(match.getDate());
                 t.setTipo(symbol);
                 t.setCuentaFrom(origen);
