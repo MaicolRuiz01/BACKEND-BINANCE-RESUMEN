@@ -8,7 +8,9 @@ import com.binance.web.Entity.Gasto;
 import com.binance.web.Repository.GastoRepository;
 import com.binance.web.service.GastoService;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/gastos")
@@ -20,8 +22,19 @@ public class GastoController {
     private GastoRepository gastoRepository;
 
     @GetMapping
-    public List<Gasto> getAllGastos() {
-        return gastoRepository.findAll();
+    public List<Map<String, Object>> getAllGastos() {
+        // Listado liviano: solo ids de las relaciones → evita serializar la cuenta COP
+        // completa (con sus brebeKeys) por cada gasto. Mucho más rápido.
+        return gastoRepository.findAllLite().stream().map(v -> {
+            Map<String, Object> m = new HashMap<>();
+            m.put("id", v.getId());
+            m.put("descripcion", v.getDescripcion());
+            m.put("fecha", v.getFecha());
+            m.put("monto", v.getMonto());
+            m.put("cuentaPago", v.getCuentaPagoId() != null ? Map.of("id", v.getCuentaPagoId()) : null);
+            m.put("pagoEfectivo", v.getPagoEfectivoId() != null ? Map.of("id", v.getPagoEfectivoId()) : null);
+            return m;
+        }).toList();
     }
 
     @GetMapping("/{id}")

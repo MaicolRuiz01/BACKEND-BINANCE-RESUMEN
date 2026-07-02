@@ -103,6 +103,7 @@ public class TronScanController {
 	@GetMapping("/usdt-entradas")
 	public ResponseEntity<List<BuyDollarsDto>> getUSDTIncomingTransfers() {
 		Set<String> assignedIds = buyDollarsRepository.findAllDepositIds();
+		Set<String> ownAddresses = accountBinanceRepository.findAllAddresses();
 
 		List<com.binance.web.Entity.AccountBinance> trustWallets = accountBinanceRepository.findByTipo("TRUST").stream()
 				.filter(a -> a.getAddress() != null && !a.getAddress().isBlank())
@@ -113,7 +114,7 @@ public class TronScanController {
 			String walletAddress = trustAccount.getAddress();
 			String accountName = trustAccount.getName();
 			String response = tronScanService.getTRC20TransfersUsingTronGrid(walletAddress);
-			result.addAll(tronScanService.parseTRC20IncomingTransfers(response, walletAddress, accountName, assignedIds));
+			result.addAll(tronScanService.parseTRC20IncomingTransfers(response, walletAddress, accountName, assignedIds, ownAddresses));
 		}
 
 		return ResponseEntity.ok(result);
@@ -123,6 +124,7 @@ public class TronScanController {
 	@GetMapping("/usdt-salidas")
 	public ResponseEntity<List<SellDollarsDto>> getUSDTOutgoingTransfers() {
 		Set<String> assignedIds = sellDollarsRepository.findAllWithdrawalIds();
+		Set<String> ownAddresses = accountBinanceRepository.findAllAddresses();
 
 		Map<String, Cliente> clientePorWallet = clienteRepository.findByWalletNotNull().stream()
 				.collect(Collectors.toMap(c -> c.getWallet().trim().toLowerCase(), c -> c, (a, b) -> a));
@@ -136,7 +138,7 @@ public class TronScanController {
 			String walletAddress = trustAccount.getAddress();
 			String accountName = trustAccount.getName();
 			String response = tronScanService.getTRC20TransfersUsingTronGrid(walletAddress);
-			result.addAll(tronScanService.parseTRC20OutgoingTransfers(response, walletAddress, accountName, assignedIds, clientePorWallet));
+			result.addAll(tronScanService.parseTRC20OutgoingTransfers(response, walletAddress, accountName, assignedIds, clientePorWallet, ownAddresses));
 		}
 
 		return ResponseEntity.ok(result);

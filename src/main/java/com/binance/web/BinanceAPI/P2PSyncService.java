@@ -38,6 +38,11 @@ public class P2PSyncService {
 
     private final ObjectMapper mapper = new ObjectMapper();
 
+    /** Evita que dos sincronizaciones corran a la vez (scheduler de 3min + trigger al completar),
+     *  lo que causaba el error de "Duplicate entry" en number_order por carrera. */
+    private final java.util.concurrent.atomic.AtomicBoolean syncEnCurso =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+
     @Autowired private BinanceService binanceService;
     @Autowired private SaleP2PRepository saleP2PRepository;
     @Autowired private AccountBinanceRepository accountBinanceRepository;
@@ -59,6 +64,13 @@ public class P2PSyncService {
      * @return número total de ventas P2P nuevas encontradas y guardadas
      */
     public int syncAllAccounts() {
+        // Si ya hay una sincronización en curso, no arrancamos otra (evita la carrera
+        // que producía "Duplicate entry" al insertar la misma orden dos veces).
+        if (!syncEnCurso.compareAndSet(false, true)) {
+            log.debug("[Sync] Ya hay una sincronización en curso; se omite esta ejecución.");
+            return 0;
+        }
+        try {
         List<AccountBinance> accounts = accountBinanceRepository.findByTipoAndActivaTrue("BINANCE");
         int totalNew = 0;
 
@@ -76,6 +88,9 @@ public class P2PSyncService {
         }
 
         return totalNew;
+        } finally {
+            syncEnCurso.set(false);
+        }
     }
 
     // ─────────────────────────────────────────────────────────────

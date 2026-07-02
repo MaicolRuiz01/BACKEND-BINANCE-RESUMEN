@@ -81,9 +81,9 @@ public class AccountCopServiceImpl implements AccountCopService {
         // ✅ validar número de cuenta duplicado
         String num = accountCop.getNumeroCuenta();
         if (num != null && !num.isBlank()) {
-            if (AccountCopRepository.existsByNumeroCuenta(num.trim())) {
+            if (AccountCopRepository.existsByNumeroCuentaAndBankType(num.trim(), accountCop.getBankType())) {
                 throw new IllegalArgumentException(
-                    "Ya existe una cuenta COP con el número: " + num.trim());
+                    "Ya existe una cuenta " + accountCop.getBankType() + " con el número: " + num.trim());
             }
             accountCop.setNumeroCuenta(num.trim());
         }
@@ -113,9 +113,10 @@ public class AccountCopServiceImpl implements AccountCopService {
 	    // ✅ validar número de cuenta duplicado al editar
 	    String num = accountCop.getNumeroCuenta();
 	    if (num != null && !num.isBlank()) {
-	        if (AccountCopRepository.existsByNumeroCuentaAndIdNot(num.trim(), id)) {
+	        BankType banco = accountCop.getBankType() != null ? accountCop.getBankType() : existing.getBankType();
+	        if (AccountCopRepository.existsByNumeroCuentaAndBankTypeAndIdNot(num.trim(), banco, id)) {
 	            throw new IllegalArgumentException(
-	                "Ya existe otra cuenta COP con el número: " + num.trim());
+	                "Ya existe otra cuenta " + banco + " con el número: " + num.trim());
 	        }
 	        existing.setNumeroCuenta(num.trim());
 	    } else {

@@ -221,10 +221,17 @@ public class TronScanService {
             String walletAddress,
             String accountName,
             Set<String> assignedIds,
-            Map<String, Cliente> clientePorWallet) {
+            Map<String, Cliente> clientePorWallet,
+            Set<String> ownAddresses) {
 
         List<SellDollarsDto> result = new ArrayList<>();
         LocalDate hoy = LocalDate.now(ZoneId.of("America/Bogota"));
+
+        // Direcciones propias (normalizadas) para EXCLUIR transferencias internas.
+        Set<String> propias = new java.util.HashSet<>();
+        if (ownAddresses != null) {
+            for (String a : ownAddresses) if (a != null) propias.add(a.trim().toLowerCase());
+        }
 
         try {
             JsonNode root = objectMapper.readTree(jsonResponse);
@@ -256,6 +263,8 @@ public class TronScanService {
                 if (fromAddress == null || txId == null || symbol == null) continue;
                 if (!fromAddress.equalsIgnoreCase(walletAddress)) continue;
                 if (assignedIds.contains(txId)) continue;
+                // Transferencia interna (va a una cuenta propia) → NO es venta.
+                if (toAddress != null && propias.contains(toAddress.trim().toLowerCase())) continue;
 
                 LocalDate fechaTx = LocalDateTime.ofInstant(
                         Instant.ofEpochMilli(ts), ZoneId.of("America/Bogota")).toLocalDate();
@@ -302,10 +311,17 @@ public class TronScanService {
             String jsonResponse,
             String walletAddress,
             String accountName,
-            Set<String> assignedIds) {
+            Set<String> assignedIds,
+            Set<String> ownAddresses) {
 
         List<BuyDollarsDto> result = new ArrayList<>();
         LocalDate hoy = LocalDate.now(ZoneId.of("America/Bogota"));
+
+        // Direcciones propias (normalizadas) para EXCLUIR transferencias internas.
+        Set<String> propias = new java.util.HashSet<>();
+        if (ownAddresses != null) {
+            for (String a : ownAddresses) if (a != null) propias.add(a.trim().toLowerCase());
+        }
 
         try {
             JsonNode root = objectMapper.readTree(jsonResponse);
@@ -313,7 +329,11 @@ public class TronScanService {
             if (data.isArray()) {
                 for (JsonNode tx : data) {
                     String toAddress = tx.path("to").asText();
+                    String fromAddress = tx.path("from").asText("");
                     String txId      = tx.path("transaction_id").asText();
+
+                    // Transferencia interna (viene de una cuenta propia) → NO es compra.
+                    if (!fromAddress.isBlank() && propias.contains(fromAddress.trim().toLowerCase())) continue;
                     JsonNode tokenInfo = tx.path("token_info");
                     String symbol    = tokenInfo.path("symbol").asText();
 

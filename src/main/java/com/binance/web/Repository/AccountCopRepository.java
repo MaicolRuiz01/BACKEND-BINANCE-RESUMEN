@@ -14,6 +14,7 @@ import com.binance.web.Entity.SaleP2P;
 import jakarta.persistence.LockModeType;
 
 import com.binance.web.Entity.AccountCop;
+import com.binance.web.Entity.BankType;
 
 public interface AccountCopRepository extends JpaRepository<AccountCop, Integer>{
 	
@@ -22,11 +23,11 @@ public interface AccountCopRepository extends JpaRepository<AccountCop, Integer>
     Optional<AccountCop> findByIdForUpdate(@Param("id") Integer id);
 	AccountCop findByName(String name);
 
-	/** Verifica si ya existe una cuenta COP con ese número de cuenta (para crear) */
-	boolean existsByNumeroCuenta(String numeroCuenta);
+	/** ¿Existe una cuenta con ese número EN EL MISMO BANCO? (para crear) */
+	boolean existsByNumeroCuentaAndBankType(String numeroCuenta, BankType bankType);
 
-	/** Verifica si ya existe otra cuenta COP con ese número de cuenta (para editar) */
-	boolean existsByNumeroCuentaAndIdNot(String numeroCuenta, Integer id);
+	/** ¿Existe OTRA cuenta con ese número EN EL MISMO BANCO? (para editar) */
+	boolean existsByNumeroCuentaAndBankTypeAndIdNot(String numeroCuenta, BankType bankType, Integer id);
 
 	/** Resta atómica del saldo (no pierde la resta aunque otro proceso actualice el saldo a la vez). */
 	@Modifying
