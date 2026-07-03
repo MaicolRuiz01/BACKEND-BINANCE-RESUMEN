@@ -170,6 +170,15 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 	        throw new RuntimeException("Venta ya fue asignada");
 	    }
 
+	    // === "Monto verdadero" (opcional) ===
+	    // Por temas de comisiones de red a veces se registra p.ej. 29.998 en vez de 30.
+	    // Si el operario informa el monto real vendido, se guarda ese monto (misma escala
+	    // "miles" que dollars) para que el cálculo de pesos sea exacto. El saldo cripto NO
+	    // se ajusta: refleja el USDT realmente movido.
+	    if (dto.getMontoVerdadero() != null && dto.getMontoVerdadero() > 0) {
+	        existing.setDollars(dto.getMontoVerdadero());
+	    }
+
 	    // Asegura colección de detalles
 	    if (existing.getSellDollarsAccounts() == null) {
 	        existing.setSellDollarsAccounts(new ArrayList<>());

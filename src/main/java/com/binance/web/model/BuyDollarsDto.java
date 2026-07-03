@@ -27,4 +27,8 @@ public class BuyDollarsDto {
     private Integer clienteId;
 	private Boolean asignada;
 	private String txId;
+	// Monto real que el cliente compró (en escala "miles", igual que amount).
+	// Si viene informado al asignar, se usa en vez del monto importado para calcular
+	// los pesos y se guarda como amount. El saldo cripto NO se toca (queda el real recibido).
+	private Double montoVerdadero;
 }

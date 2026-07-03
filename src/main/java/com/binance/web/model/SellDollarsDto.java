@@ -38,4 +38,8 @@ public class SellDollarsDto {
     private String cryptoSymbol; // Ej: "USDT", "TRX"
     private String tipoCuenta;
     private String txId;
+    // Monto real que el cliente vendió (en escala "miles", igual que dollars).
+    // Si viene informado al asignar, se usa en vez del monto importado para calcular
+    // los pesos y se guarda como dollars. El saldo cripto NO se toca (queda el real).
+    private Double montoVerdadero;
 }
