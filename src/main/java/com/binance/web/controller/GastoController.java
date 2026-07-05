@@ -65,12 +65,12 @@ public class GastoController {
 
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteGasto(@PathVariable Integer id) {
-        return gastoRepository.findById(id)
-            .map(gasto -> {
-            	gastoRepository.deleteById(id);
-                return ResponseEntity.ok().<Void>build();
-            })
-            .orElseGet(() -> ResponseEntity.notFound().build());
+        if (!gastoRepository.existsById(id)) {
+            return ResponseEntity.notFound().build();
+        }
+        // Elimina Y devuelve el saldo restado a la cuenta COP o caja afectada.
+        gastoService.eliminarGasto(id);
+        return ResponseEntity.ok().<Void>build();
     }
     
     @GetMapping("/total-hoy/cuenta-cop/{id}")

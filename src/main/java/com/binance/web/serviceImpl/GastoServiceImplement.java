@@ -48,6 +48,18 @@ public class GastoServiceImplement implements GastoService{
     @Override
     @Transactional
     public Gasto saveGasto(Gasto nuevoGasto) {
+        // === Candado anti-duplicado ===
+        // Si el gasto trae una clave de idempotencia y ya existe uno con esa clave,
+        // NO se crea otro ni se vuelve a restar el saldo: se devuelve el ya guardado.
+        // Esto neutraliza los clics repetidos cuando la app parece no responder.
+        String key = nuevoGasto.getIdempotencyKey();
+        if (key != null && !key.isBlank()) {
+            Optional<Gasto> existente = gastoRepository.findByIdempotencyKey(key);
+            if (existente.isPresent()) {
+                return existente.get();
+            }
+        }
+
         Double monto = nuevoGasto.getMonto();
         double montoComision = monto * 1.004;
 
@@ -68,6 +80,32 @@ public class GastoServiceImplement implements GastoService{
         }
 
         return gastoRepository.save(nuevoGasto);
+    }
+
+    @Override
+    @Transactional
+    public void eliminarGasto(Integer id) {
+        Gasto gasto = gastoRepository.findById(id)
+            .orElseThrow(() -> new RuntimeException("Gasto no encontrado"));
+
+        Double monto = gasto.getMonto() != null ? gasto.getMonto() : 0.0;
+
+        // Devuelve EXACTAMENTE lo que se había restado al crear el gasto:
+        //  - Cuenta COP: monto * 1.004 (incluye la comisión del 0.4%).
+        //  - Caja efectivo: monto (sin comisión).
+        if (gasto.getCuentaPago() != null) {
+            accountCopRepository.sumarSaldo(gasto.getCuentaPago().getId(), monto * 1.004);
+        }
+
+        if (gasto.getPagoEfectivo() != null) {
+            Efectivo caja = efectivoRepository.findById(gasto.getPagoEfectivo().getId())
+                .orElseThrow(() -> new RuntimeException("Caja no encontrada"));
+
+            caja.setSaldo(caja.getSaldo() + monto);
+            efectivoRepository.save(caja);
+        }
+
+        gastoRepository.delete(gasto);
     }
     
     @Override

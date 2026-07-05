@@ -34,6 +34,11 @@ public interface AccountCopRepository extends JpaRepository<AccountCop, Integer>
 	@Query("UPDATE AccountCop a SET a.balance = a.balance - :monto WHERE a.id = :id")
 	int restarSaldo(@Param("id") Integer id, @Param("monto") double monto);
 
+	/** Suma atómica del saldo (para devolver el dinero al eliminar un gasto). */
+	@Modifying
+	@Query("UPDATE AccountCop a SET a.balance = a.balance + :monto WHERE a.id = :id")
+	int sumarSaldo(@Param("id") Integer id, @Param("monto") double monto);
+
 	/** Trae todas las cuentas con sus brebeKeys en UNA sola consulta (evita el N+1 del EAGER). */
 	@Query("SELECT DISTINCT a FROM AccountCop a LEFT JOIN FETCH a.brebeKeys")
 	List<AccountCop> findAllWithBrebeKeys();
