@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -88,5 +89,19 @@ public class SupplierController {
     public ResponseEntity<List<BuyDollarsDto>> listarComprasPorProveedor(@PathVariable Integer proveedorId) {
         return ResponseEntity.ok(buyDollarsService.listarComprasPorProveedor(proveedorId));
     }
-    
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<?> eliminarSupplier(@PathVariable Integer id) {
+        if (supplierService.getSupplierById(id) == null) {
+            return ResponseEntity.notFound().build();
+        }
+        try {
+            supplierService.deleteSupplier(id);
+            return ResponseEntity.noContent().build();
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(java.util.Map.of(
+                "error", "El proveedor tiene compras, pagos o movimientos asociados y no se puede eliminar."));
+        }
+    }
+
 }

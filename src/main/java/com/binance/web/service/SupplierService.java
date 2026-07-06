@@ -17,5 +17,6 @@ public interface SupplierService {
 	void addBuyDollars(BuyDollars buyDollars);
 	Supplier updateSupplierBalance(Integer id, Supplier supplier);
 	void transferFromClientToSupplier(Integer clientId, Integer supplierId, Double amount);
+	void deleteSupplier(Integer id);
 
 }

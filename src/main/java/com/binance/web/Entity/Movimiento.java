@@ -36,7 +36,8 @@ public class Movimiento {
 
     @ManyToOne private AccountCop cuentaOrigen;
     @ManyToOne private AccountCop cuentaDestino;
-    @ManyToOne private Efectivo   caja;
+    @ManyToOne private Efectivo   caja;          // caja origen (en traspasos entre cajas)
+    @ManyToOne private Efectivo   cajaDestino;   // caja destino (traspaso entre cajas)
 
     private Double  comision;
 
