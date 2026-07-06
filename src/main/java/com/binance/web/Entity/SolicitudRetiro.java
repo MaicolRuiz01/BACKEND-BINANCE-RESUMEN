@@ -42,4 +42,11 @@ public class SolicitudRetiro {
 
     @OneToMany(mappedBy = "solicitud", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<DetalleRetiro> detalles = new ArrayList<>();
+
+    /**
+     * message_id del mensaje de Telegram enviado al grupo para esta solicitud,
+     * usado para poder editarlo o borrarlo después.
+     */
+    @Column(name = "telegram_message_id", nullable = true)
+    private Integer telegramMessageId;
 }

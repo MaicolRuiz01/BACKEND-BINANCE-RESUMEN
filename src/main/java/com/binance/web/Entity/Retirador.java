@@ -37,4 +37,11 @@ public class Retirador {
      */
     @Column(name = "telegram_username", nullable = true)
     private String telegramUsername;
+
+    /**
+     * Chat ID de Telegram del retirador (id numérico del usuario).
+     * Se guarda cuando el retirador acepta una solicitud desde el bot.
+     */
+    @Column(name = "telegram_chat_id", nullable = true)
+    private Long telegramChatId;
 }
