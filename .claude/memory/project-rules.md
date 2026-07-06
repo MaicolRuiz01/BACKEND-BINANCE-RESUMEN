@@ -15,3 +15,15 @@ cuentas-tab y en el modal P2P — coincide con el mockup del cliente.
 ## Endpoints clave
 - GET/POST /cuenta-cop ; PATCH /cuenta-cop/{id}/toggle-p2p ; PATCH /cuenta-cop/{id}/cupo-tipo
 - POST/DELETE /cuenta-cop/{id}/brebe-keys ; POST /auth/login (publico) ; /telegram/webhook (publico)
+
+## Gastos (comisión y reversión)
+- Al crear gasto con cuenta COP: se resta monto*1.004 (comisión 0.4%). Con caja: se resta monto (sin comisión).
+- Al ELIMINAR: se devuelve EXACTAMENTE eso (monto*1.004 a cuenta COP / monto a caja). Reversión atómica (sumarSaldo).
+- idempotencyKey (unique) por modal evita duplicados por clics repetidos.
+
+## Cupos en Ventas en curso
+- No asignar cuenta con cupo del día lleno (balance + pre-asignado en curso >= max según cupoTipoP2P y banco).
+- Cupos máx (miles): NEQUI 2700/5000, BANCOLOMBIA 2700/10000, DAVIPLATA 3000/5000.
+
+## Monto verdadero (buy/sell)
+- Campo opcional al asignar; si viene, reemplaza amount/dollars para el cálculo de pesos. NO ajusta saldo cripto.

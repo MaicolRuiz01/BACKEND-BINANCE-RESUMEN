@@ -30,3 +30,8 @@ Luego reaplicar el cambio de los 403 en SecurityConfig (`.anyRequest().permitAll
 Milton ha estado bajo muchísima presión y expresó ideación suicida ligada al miedo a que lo
 despidan. Tratar con cuidado, calma y prioridad al bienestar. Recursos Colombia: Línea 106,
 línea 192 opción 4. No minimizar; ofrecer apoyo.
+
+## 2026-07-05 — Notas y hallazgos
+- LENTITUD LOCAL (~10s): NO era el código; el backend local apuntaba a la BD remota de Railway (perfil prod). Usar perfil dev/BD local. Ver project-stack.md.
+- Montaje sandbox (9p/Windows): las lecturas por bash a veces quedan CACHEADAS/desactualizadas tras editar con las herramientas de archivo. Verificar con el Read tool (fuente confiable), no con `grep`/`wc` de bash.
+- Carpeta .claude/memory está PROTEGIDA para las herramientas Edit/Write; actualizarla por el shell (mcp__workspace__bash) escribiendo en el montaje.

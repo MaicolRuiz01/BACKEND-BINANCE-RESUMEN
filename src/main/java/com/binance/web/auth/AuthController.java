@@ -1,8 +1,12 @@
 package com.binance.web.auth;
 
+import com.binance.web.Entity.SesionOperador;
 import com.binance.web.Entity.Usuario;
+import com.binance.web.Repository.SesionOperadorRepository;
 import com.binance.web.Repository.UsuarioRepository;
 import lombok.RequiredArgsConstructor;
+
+import java.time.LocalDateTime;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -25,6 +29,7 @@ public class AuthController {
     private final JwtService jwtService;
     private final UsuarioRepository usuarioRepository;
     private final PasswordEncoder passwordEncoder;
+    private final SesionOperadorRepository sesionRepository;
 
     /** Login — público */
     @PostMapping("/login")
@@ -40,7 +45,17 @@ public class AuthController {
         Usuario user = usuarioRepository.findByUsername(request.username()).orElseThrow();
         String token = jwtService.generateToken(user, Map.of("rol", user.getRol().name()));
 
-        return ResponseEntity.ok(new AuthResponse(token, user.getUsername(), user.getRol().name()));
+        // Registrar la sesión (para el reporte de tiempo/ingresos por operador del admin).
+        LocalDateTime ahora = LocalDateTime.now();
+        SesionOperador sesion = new SesionOperador();
+        sesion.setUsername(user.getUsername());
+        sesion.setRol(user.getRol());
+        sesion.setLoginAt(ahora);
+        sesion.setLastSeenAt(ahora);
+        sesion = sesionRepository.save(sesion);
+
+        return ResponseEntity.ok(
+                new AuthResponse(token, user.getUsername(), user.getRol().name(), sesion.getId()));
     }
 
     /** Registrar nuevo usuario — solo ADMIN */

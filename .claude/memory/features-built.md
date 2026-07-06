@@ -39,3 +39,31 @@ Construido esta sesión (2026-06-28):
 ## Backend fix 403 (esta sesión)
 - Tras implementar llaves Brebe + seguridad, crear cuentas COP daba 403 (JWT rechazado, interceptor no
   hace logout en 403). Fix pragmatico pedido por Milton: SecurityConfig `.anyRequest().permitAll()`.
+
+## ── Sesión 2026-07-05 ──
+
+## "Monto verdadero" en asignación de compras y ventas
+- Problema: a veces compra 30.000 USDT pero por comisión de red llegan 29.998; los pesos con la tasa no cuadran.
+- BuyDollarsDto/SellDollarsDto: campo `montoVerdadero` (misma escala MILES que amount/dollars).
+- asignarCompra: si montoVerdadero>0 → existing.setAmount(montoVerdadero) antes de pesos.
+- asignarVenta: si montoVerdadero>0 → existing.setDollars(montoVerdadero). NO toca saldo cripto (queda el real recibido).
+- Front (asignaciones-compras / asignaciones-ventas): checkbox "Usar monto verdadero" + input prellenado con el monto (escala miles, ej "30"). montoEfectivo alimenta pesos y se envía al backend.
+
+## Gastos — anti-duplicado + eliminar con reversión + velocidad
+- Doble-registro (clics repetidos sin feedback): (a) front bloquea botón mientras el POST va (guardando); (b) backend Gasto.idempotencyKey @Column(unique) + findByIdempotencyKey; saveGasto devuelve el existente si la key ya está (sin re-restar). Front genera UUID por modal (openNew).
+- Eliminar gasto: GastoService.eliminarGasto + AccountCopRepository.sumarSaldo (atómico). Devuelve EXACTO lo restado: cuenta COP = monto*1.004 (con comisión 0.4%), caja = monto. Controller DELETE usa el service. Front: botón basura en la tabla + modal de confirmación.
+- Velocidad: crear NO re-consulta la lista (usa la respuesta del POST y arma la fila local); eliminar es OPTIMISTA (quita la fila ya, revierte si el backend falla). Se quitó el getAll() pesado de cuentas tras cada operación; se ajusta el saldo local.
+
+## Ventas en curso — cupos
+- REGLA: NO se puede asignar a una orden una cuenta COP cuyo cupo del día ya está lleno.
+  cupoMaxDeCuenta según cupoTipoP2P (CAJERO/CORRESPONSAL/AMBOS) y banco; lleno = balance + pesos en curso pre-asignados >= max.
+  Dropdown deshabilita esas cuentas ("— cupo lleno") y dropdownChanged las bloquea (cubre botón "=").
+- Modal AUTOMÁTICO al llenarse el cupo (antes solo salía al click de un badge en p2p-wrapper): aparece solo al asignar la que llena o en refrescos; opciones "Cambiar por otra" (libera) / "Desactivar". Set cupoLlenoAvisado evita repetir.
+
+## Vista Operadores (solo ADMIN) — tiempo de sesión e ingresos
+- Backend: entidad SesionOperador (username, rol, loginAt, lastSeenAt, logoutAt) + SesionOperadorRepository.
+  AuthResponse +sessionId; AuthController.login crea la sesión. SesionController: POST /auth/sesion/heartbeat, /logout, GET /auth/sesion/resumen?fecha=YYYY-MM-DD (@PreAuthorize ADMIN; agrupa por operador: ingresos + tiempoTotalSegundos + sesionAbierta).
+  Duración = (logoutAt | lastSeenAt) - loginAt. "En línea" = sin logout y lastSeenAt < 3 min.
+- Front: AuthService guarda sessionId (poch_sid) y hace heartbeat cada 60s (reanuda tras refresh); logout avisa al backend. sesion.service.ts (getResumen), admin.guard.ts, pages/operadores/*, ruta /operadores (adminGuard) e ítem de menú OPERADORES solo-admin.
+- Tabla sesion_operador la crea Hibernate (ddl-auto=update).
+- NOTA: se decidió heartbeat (no beforeunload/sendBeacon, porque disparaba en refresh y cerraba la sesión antes de tiempo).
