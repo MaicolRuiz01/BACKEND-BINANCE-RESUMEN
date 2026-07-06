@@ -66,6 +66,47 @@ public class MovimientoServiceImplement implements MovimientoService {
 
 		return movimientoRepository.save(mov);
 	}
+
+	@Override
+	@Transactional
+	public Movimiento RegistrarTransferenciaCaja(Integer cajaFromId, Integer cajaToId, Double monto) {
+		if (cajaFromId == null || cajaToId == null) {
+			throw new IllegalArgumentException("Debe indicar caja origen y caja destino.");
+		}
+		if (cajaFromId.equals(cajaToId)) {
+			throw new IllegalArgumentException("La caja origen y destino no pueden ser la misma.");
+		}
+		if (monto == null || monto <= 0) {
+			throw new IllegalArgumentException("El monto debe ser mayor a 0.");
+		}
+
+		Efectivo origen = efectivoRepository.findById(cajaFromId)
+				.orElseThrow(() -> new RuntimeException("Caja origen no encontrada"));
+		Efectivo destino = efectivoRepository.findById(cajaToId)
+				.orElseThrow(() -> new RuntimeException("Caja destino no encontrada"));
+
+		double saldoOrigen = origen.getSaldo() != null ? origen.getSaldo() : 0.0;
+		if (saldoOrigen < monto) {
+			throw new IllegalArgumentException("Saldo insuficiente en la caja origen.");
+		}
+
+		// SIN 4x1000: se mueve el monto exacto.
+		origen.setSaldo(saldoOrigen - monto);
+		destino.setSaldo((destino.getSaldo() != null ? destino.getSaldo() : 0.0) + monto);
+		efectivoRepository.save(origen);
+		efectivoRepository.save(destino);
+
+		Movimiento mov = Movimiento.builder()
+				.tipo("TRANSFERENCIA CAJA")
+				.fecha(LocalDateTime.now())
+				.monto(monto)
+				.caja(origen)          // caja origen
+				.cajaDestino(destino)  // caja destino
+				.comision(0.0)
+				.build();
+
+		return movimientoRepository.save(mov);
+	}
 	
 	private void asegurarCupoHoy(AccountCop acc) {
 	    if (acc.getBankType() == null) {
@@ -436,7 +477,9 @@ public class MovimientoServiceImplement implements MovimientoService {
 	public List<Movimiento> listarMovimientosPorCaja(Integer cajaId) {
 		if (cajaId == null)
 			throw new IllegalArgumentException("cajaId no puede ser nulo");
-		return movimientoRepository.findByCaja_IdOrderByFechaDesc(cajaId);
+		// Incluye tanto los movimientos donde la caja es origen como aquellos
+		// donde es destino (para que los traspasos entre cajas aparezcan en ambas).
+		return movimientoRepository.findByCaja_IdOrCajaDestino_IdOrderByFechaDesc(cajaId, cajaId);
 	}
 	
 	@Override
@@ -780,6 +823,53 @@ public class MovimientoServiceImplement implements MovimientoService {
 	public List<Movimiento> listarAjustesCaja(Integer cajaId) {
 	    if (cajaId == null) throw new IllegalArgumentException("cajaId no puede ser nulo");
 	    return movimientoRepository.findByCaja_IdAndTipoOrderByFechaDesc(cajaId, "AJUSTE_SALDO_CAJA");
+	}
+
+	@Override
+	@Transactional
+	public void eliminarMovimiento(Integer id) {
+	    Movimiento m = movimientoRepository.findById(id)
+	            .orElseThrow(() -> new IllegalArgumentException("Movimiento no encontrado"));
+
+	    String tipo = m.getTipo() != null ? m.getTipo() : "";
+	    double monto = m.getMonto() != null ? m.getMonto() : 0.0;
+
+	    if ("PAGO PROVEEDOR".equals(tipo)) {
+	        // Revertir EXACTO lo que hizo registrarPagoProveedor:
+	        // 1) el proveedor destino recupera lo que se le restó.
+	        Supplier destino = m.getPagoProveedor();
+	        if (destino != null) {
+	            destino.setBalance((destino.getBalance() != null ? destino.getBalance() : 0.0) + monto);
+	            supplierRepository.save(destino);
+	        }
+	        // 2) revertir el origen (uno solo de estos se usó al crear).
+	        if (m.getCuentaOrigen() != null) {
+	            double comision = m.getComision() != null ? m.getComision() : 0.0;
+	            AccountCop c = m.getCuentaOrigen();
+	            c.setBalance((c.getBalance() != null ? c.getBalance() : 0.0) + monto + comision);
+	            accountCopRepository.save(c);
+	        } else if (m.getCaja() != null) {
+	            Efectivo caja = m.getCaja();
+	            caja.setSaldo((caja.getSaldo() != null ? caja.getSaldo() : 0.0) + monto);
+	            efectivoRepository.save(caja);
+	        } else if (m.getProveedorOrigen() != null) {
+	            Supplier po = m.getProveedorOrigen();
+	            po.setBalance((po.getBalance() != null ? po.getBalance() : 0.0) - monto);
+	            supplierRepository.save(po);
+	        } else if (m.getPagoCliente() != null) {
+	            Cliente cl = m.getPagoCliente();
+	            cl.setSaldo((cl.getSaldo() != null ? cl.getSaldo() : 0.0) - monto);
+	            clienteRepository.save(cl);
+	        }
+
+	        movimientoRepository.delete(m);
+	        return;
+	    }
+
+	    // Otros tipos (transferencias, retiros, ajustes, C2C, etc.) todavía no tienen reversa
+	    // implementada: se rechaza para NO dejar saldos descuadrados.
+	    throw new IllegalStateException(
+	            "Por ahora solo se pueden eliminar movimientos de tipo 'PAGO PROVEEDOR'.");
 	}
 
 }

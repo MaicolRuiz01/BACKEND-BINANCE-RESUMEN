@@ -124,4 +124,11 @@ public class SupplierServiceImpl implements SupplierService {
 		supplier.setLastPaymentDate(LocalDateTime.now());
 		supplierRepository.save(supplier);
 	}
+
+	@Override
+	public void deleteSupplier(Integer id) {
+		// Si el proveedor tiene compras/pagos/movimientos, la FK lanza
+		// DataIntegrityViolationException y el controller lo traduce a un 409.
+		supplierRepository.deleteById(id);
+	}
 }

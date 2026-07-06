@@ -12,6 +12,8 @@ import com.binance.web.model.PagoProveedorAClienteDto;
 public interface MovimientoService {
 	
 	Movimiento RegistrarTransferencia(Integer idCuentoFrom, Integer idCuentaTo, Double monto);
+	/** Traspaso entre cajas (efectivo). SIN comisión 4x1000. */
+	Movimiento RegistrarTransferenciaCaja(Integer cajaFromId, Integer cajaToId, Double monto);
 	/**
 	 * @param tipoRetiro "CAJERO" o "CORRESPONSAL"
 	 */
@@ -41,5 +43,8 @@ public interface MovimientoService {
 	List<Movimiento> listarAjustesProveedor(Integer proveedorId);
 	List<Movimiento> listarAjustesCuentaCop(Integer cuentaId);
 	List<Movimiento> listarAjustesCaja(Integer cajaId);
+
+	/** Elimina un movimiento revirtiendo sus efectos de saldo (solo PAGO PROVEEDOR por ahora). */
+	void eliminarMovimiento(Integer id);
 
 }

@@ -7,4 +7,6 @@ public interface EfectivoService {
 
 	Efectivo crearCaja(Efectivo caja);
 
+	void eliminarCaja(Integer id);
+
 }

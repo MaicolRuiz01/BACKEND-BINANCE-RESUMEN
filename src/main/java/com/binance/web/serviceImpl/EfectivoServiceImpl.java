@@ -26,7 +26,12 @@ public class EfectivoServiceImpl implements EfectivoService{
 
         return efectivoRepo.save(caja);
     }
-	
-	
+
+    @Override
+    public void eliminarCaja(Integer id) {
+        // Si la caja tiene movimientos/gastos asociados, la FK lanzará
+        // DataIntegrityViolationException y el controller lo traduce a un 409.
+        efectivoRepo.deleteById(id);
+    }
 
 }
