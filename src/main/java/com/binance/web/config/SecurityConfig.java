@@ -45,6 +45,7 @@ public class SecurityConfig {
                         // Endpoints públicos
                         .requestMatchers("/auth/login").permitAll()
                         .requestMatchers("/actuator/**").permitAll()
+                        .requestMatchers("/telegram/webhook").permitAll()
                         // Todo lo demás requiere autenticación
                         .anyRequest().authenticated()
                 )
@@ -74,8 +75,9 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(List.of(
-            "http://localhost:4200",
+        config.setAllowedOriginPatterns(List.of(
+            "http://localhost:*",
+            "http://127.0.0.1:*",
             "https://fronted-pochonance-7aj6.vercel.app"
         ));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
