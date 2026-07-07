@@ -13,7 +13,6 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
-import org.springframework.scheduling.annotation.Scheduled;
 
 import java.time.*;
 import java.util.*;
@@ -186,6 +185,8 @@ public class RetiradorServiceImpl implements RetiradorService {
 
         if (solicitud.getEstado() == EstadoSolicitud.COMPLETADO)
             throw new IllegalStateException("La solicitud ya fue confirmada.");
+        if (solicitud.getEstado() == EstadoSolicitud.CANCELADO)
+            throw new IllegalStateException("Esta solicitud fue cancelada, no se puede confirmar.");
         if (solicitud.getRetirador() == null)
             throw new IllegalStateException("La solicitud aún no tiene un retirador asignado.");
 
@@ -223,6 +224,82 @@ public class RetiradorServiceImpl implements RetiradorService {
     @Override
     public List<SolicitudRetiro> historialPorRetirador(Long retiradorId) {
         return solicitudRepository.findByRetiradorIdOrderByFechaCreacionDesc(retiradorId);
+    }
+
+    @Override
+    @Transactional
+    public SolicitudRetiro reenviarSolicitud(Long solicitudId) {
+        SolicitudRetiro solicitud = solicitudRepository.findById(solicitudId)
+                .orElseThrow(() -> new RuntimeException("Solicitud no encontrada: " + solicitudId));
+
+        if (solicitud.getEstado() == EstadoSolicitud.COMPLETADO) {
+            throw new IllegalStateException("La solicitud ya fue completada, no se puede reenviar.");
+        }
+        if (solicitud.getEstado() == EstadoSolicitud.CANCELADO) {
+            throw new IllegalStateException("Esta solicitud fue cancelada, no se puede reenviar.");
+        }
+        if (solicitud.getRetirador() == null) {
+            throw new IllegalStateException(
+                    "Esta solicitud no tiene un retirador asignado (es una solicitud general sin asignar).");
+        }
+
+        notificarN8n(solicitud, solicitud.getRetirador(), n8nWebhookUrl);
+        return solicitud;
+    }
+
+    @Override
+    @Transactional
+    public SolicitudRetiro cancelarSolicitud(Long solicitudId) {
+        SolicitudRetiro solicitud = solicitudRepository.findById(solicitudId)
+                .orElseThrow(() -> new RuntimeException("Solicitud no encontrada: " + solicitudId));
+
+        if (solicitud.getEstado() == EstadoSolicitud.COMPLETADO) {
+            throw new IllegalStateException(
+                    "No se puede cancelar: el retiro ya fue completado y el dinero ya se movió.");
+        }
+        if (solicitud.getEstado() == EstadoSolicitud.CANCELADO) {
+            throw new IllegalStateException("Esta solicitud ya estaba cancelada.");
+        }
+
+        // No hay que revertir ningún saldo: el dinero solo se descuenta al
+        // confirmar (COMPLETADO), así que cancelar antes de eso no toca cuentas ni
+        // caja.
+        boolean estabaSinAsignar = solicitud.getEstado() == EstadoSolicitud.SIN_ASIGNAR;
+        Retirador retirador = solicitud.getRetirador();
+
+        solicitud.setEstado(EstadoSolicitud.CANCELADO);
+        solicitudRepository.save(solicitud);
+
+        // Si tenía mensaje en el grupo: si aún nadie la había tomado, se borra
+        // directamente; si ya estaba tomada, se edita para dejar claro que se canceló.
+        if (solicitud.getTelegramMessageId() != null
+                && telegramGroupChatId != null && !telegramGroupChatId.isBlank()) {
+            if (estabaSinAsignar) {
+                telegramService.deleteMessage(telegramGroupChatId, solicitud.getTelegramMessageId());
+            } else {
+                telegramService.editMessage(telegramGroupChatId, solicitud.getTelegramMessageId(),
+                        "🚫 *Solicitud de Retiro #" + solicitud.getId() + " — CANCELADA*");
+            }
+        }
+
+        // Si ya estaba asignada a un retirador, editamos el mensaje privado original
+        // ("Nueva Solicitud de Retiro...") para quitarle los botones y marcarlo como
+        // cancelado, en vez de dejarlo activo y mandar un mensaje nuevo aparte.
+        if (retirador != null && retirador.getTelegramChatId() != null) {
+            String textoCancelado = "🚫 *Solicitud #" + solicitud.getId() + " cancelada.";
+            if (solicitud.getTelegramPrivateMessageId() != null) {
+                telegramService.editMessageTextOnly(
+                        String.valueOf(retirador.getTelegramChatId()),
+                        solicitud.getTelegramPrivateMessageId(),
+                        textoCancelado);
+            } else {
+                // No teníamos guardado el message_id (solicitud antigua) — avisamos aparte.
+                telegramService.sendMessage(String.valueOf(retirador.getTelegramChatId()), textoCancelado);
+            }
+        }
+
+        log.info("[Retiro] Solicitud #{} cancelada manualmente desde la app.", solicitudId);
+        return solicitud;
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -446,7 +523,8 @@ public class RetiradorServiceImpl implements RetiradorService {
         }
 
         // Notificación adicional directa por Telegram al retirador (si tiene chat
-        // vinculado)
+        // vinculado, es decir, si ya le dio /start al bot)
+        boolean telegramEnviado = false;
         try {
             if (retirador.getTelegramChatId() != null) {
                 StringBuilder sb = new StringBuilder();
@@ -461,19 +539,30 @@ public class RetiradorServiceImpl implements RetiradorService {
                 sb.append("🏦 ");
                 for (int i = 0; i < solicitud.getDetalles().size(); i++) {
                     DetalleRetiro d = solicitud.getDetalles().get(i);
-                    if (i > 0) sb.append(", ");
+                    if (i > 0)
+                        sb.append(", ");
                     sb.append(d.getCuentaCop().getName())
                             .append(" (").append(d.getCuentaCop().getBankType().name()).append(")");
                 }
-                telegramService.sendMessageWithTwoButtons(
+                Integer privateMessageId = telegramService.sendMessageWithTwoButtons(
                         String.valueOf(retirador.getTelegramChatId()),
                         sb.toString(),
                         "✅ Ya hice el retiro", "completed:" + solicitud.getId(),
                         "❌ Cancelar", "cancel:" + solicitud.getId());
+                // Guardamos el message_id para poder editar este mensaje después
+                // (ej: quitarle los botones si se cancela desde la app).
+                solicitud.setTelegramPrivateMessageId(privateMessageId);
+                solicitudRepository.save(solicitud);
+                telegramEnviado = true;
+            } else {
+                log.warn(
+                        "[Retiro] Solicitud #{}: {} (@{}) todavía no ha vinculado su Telegram (no le ha dado /start al bot) — no se pudo notificar directamente. Usa 'Reenviar' cuando lo haga.",
+                        solicitud.getId(), retirador.getNombre(), retirador.getTelegramUsername());
             }
         } catch (Exception e) {
             log.error("[Retiro] Error al notificar por Telegram: {}", e.getMessage());
         }
+        solicitud.setTelegramNotificado(telegramEnviado);
     }
 
     /**
@@ -528,7 +617,8 @@ public class RetiradorServiceImpl implements RetiradorService {
             sb.append("🏦 ");
             for (int i = 0; i < solicitud.getDetalles().size(); i++) {
                 DetalleRetiro d = solicitud.getDetalles().get(i);
-                if (i > 0) sb.append(", ");
+                if (i > 0)
+                    sb.append(", ");
                 sb.append(d.getCuentaCop().getName())
                         .append(" (").append(d.getCuentaCop().getBankType().name()).append(")");
             }
@@ -566,37 +656,34 @@ public class RetiradorServiceImpl implements RetiradorService {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Tarea programada: Recordatorio de caja cada 30 minutos
+    // Recordatorio de caja: se dispara puntualmente (al confirmar un retiro o
+    // al registrar una entrega parcial), NUNCA por un ciclo programado. Así el
+    // botón "Entregar efectivo" queda siempre como el ÚLTIMO mensaje del chat,
+    // sin duplicarse ni saturar la conversación.
     // ─────────────────────────────────────────────────────────────────────────
-    @Scheduled(fixedRate = 1800000) // 1800000 ms = 30 minutos
-    @Transactional(readOnly = true)
-    public void recordarCajaRetiradores() {
-        List<Retirador> retiradores = retiradorRepository.findAll();
-        for (Retirador r : retiradores) {
-            if (r.getTelegramChatId() != null && r.getEfectivo() != null && r.getEfectivo().getSaldo() > 0) {
-                enviarRecordatorioCaja(r);
-            }
-        }
-    }
-
     @Override
     public void enviarRecordatorioCaja(Retirador retirador) {
-        if (retirador.getTelegramChatId() == null || retirador.getEfectivo() == null
-                || retirador.getEfectivo().getSaldo() <= 0) {
+        if (retirador.getTelegramChatId() == null) {
             return;
         }
 
-        // Si existe un recordatorio anterior para este retirador, lo borramos
-        Integer lastMessageId = lastReminderMessageIds.get(retirador.getId());
+        // Siempre limpiamos el recordatorio anterior (si existe), sin importar
+        // si ahora hay o no saldo pendiente.
+        Integer lastMessageId = lastReminderMessageIds.remove(retirador.getId());
         if (lastMessageId != null) {
             telegramService.deleteMessage(String.valueOf(retirador.getTelegramChatId()), lastMessageId);
         }
 
-        String msj = String.format(
-                "⚠️ *Recordatorio de Caja*\n\nTienes dinero en tu caja por valor de *$%,.0f*.\n\nPor favor, aproxímate al lugar indicado para cancelar.",
-                retirador.getEfectivo().getSaldo());
-        Integer newMessageId = telegramService.sendMessageWithButton(
-                String.valueOf(retirador.getTelegramChatId()), msj, "✅ Entregar efectivo", "entregar_start");
+        if (retirador.getEfectivo() == null || retirador.getEfectivo().getSaldo() <= 0) {
+            // Caja en $0: no hace falta ningún recordatorio nuevo.
+            return;
+        }
+
+        String msj = String.format("💰 Caja: *$%,.0f*", retirador.getEfectivo().getSaldo());
+        Integer newMessageId = telegramService.sendMessageWithTwoButtons(
+                String.valueOf(retirador.getTelegramChatId()), msj,
+                "✅ Entregar efectivo", "entregar_start",
+                "🧾 Registrar gasto", "gasto_start");
 
         // Guardamos el ID del nuevo recordatorio
         if (newMessageId != null) {

@@ -61,6 +61,16 @@ public class RetiradorController {
         return ResponseEntity.ok(service.confirmarSolicitud(solicitudId));
     }
 
+    @PostMapping("/solicitudes/{solicitudId}/reenviar")
+    public ResponseEntity<SolicitudRetiro> reenviar(@PathVariable Long solicitudId) {
+        return ResponseEntity.ok(service.reenviarSolicitud(solicitudId));
+    }
+
+    @PostMapping("/solicitudes/{solicitudId}/cancelar")
+    public ResponseEntity<SolicitudRetiro> cancelarSolicitud(@PathVariable Long solicitudId) {
+        return ResponseEntity.ok(service.cancelarSolicitud(solicitudId));
+    }
+
     @GetMapping("/{id}/solicitudes")
     public List<SolicitudRetiro> historial(@PathVariable Long id) {
         return service.historialPorRetirador(id);
