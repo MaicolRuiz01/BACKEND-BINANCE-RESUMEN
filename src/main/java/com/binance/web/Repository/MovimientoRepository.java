@@ -4,15 +4,37 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import com.binance.web.Entity.Movimiento;
+import com.binance.web.movimientos.MovimientoDTO;
 
 @Repository
 public interface MovimientoRepository extends JpaRepository<Movimiento, Integer> {
-	
+
 	List<Movimiento> findByTipo(String tipo);
 	List<Movimiento> findByTipoStartingWithOrderByFechaDesc(String prefijoTipo);
+
+	/**
+	 * Proyección liviana de los movimientos de una caja (origen o destino) en UNA sola
+	 * consulta con joins, trayendo solo los nombres. Evita el N+1 del EAGER (cuentas COP
+	 * con sus llaves Brebe, etc.), que hacía lentísima la carga contra la BD remota.
+	 */
+	@Query("SELECT new com.binance.web.movimientos.MovimientoDTO(" +
+	       "m.id, m.tipo, m.fecha, m.monto, " +
+	       "co.name, cd.name, cj.name, cjd.name, pc.nombre, pp.name) " +
+	       "FROM Movimiento m " +
+	       "LEFT JOIN m.cuentaOrigen co " +
+	       "LEFT JOIN m.cuentaDestino cd " +
+	       "LEFT JOIN m.caja cj " +
+	       "LEFT JOIN m.cajaDestino cjd " +
+	       "LEFT JOIN m.pagoCliente pc " +
+	       "LEFT JOIN m.pagoProveedor pp " +
+	       "WHERE cj.id = :cajaId OR cjd.id = :cajaId " +
+	       "ORDER BY m.fecha DESC")
+	List<MovimientoDTO> findMovimientosCajaLite(@Param("cajaId") Integer cajaId);
 	List<Movimiento> findByTipoAndPagoProveedor_Id(String tipo, Integer proveedorId);
 	List<Movimiento> findByTipoAndPagoCliente_Id(String tipo, Integer clienteId);
     List<Movimiento> findByCuentaOrigenIdOrCuentaDestinoId(Integer cuentaOrigenId, Integer cuentaDestinoId);

@@ -176,7 +176,8 @@ public class MovimientoController {
 
 	@GetMapping("/caja/{cajaId}")
 	public List<MovimientoDTO> listarMovimientosPorCaja(@PathVariable Integer cajaId) {
-		return movimientoService.listarMovimientosPorCaja(cajaId).stream().map(this::mapToDto).toList();
+		// Proyección liviana en 1 sola consulta (antes: EAGER N+1 → lentísimo contra BD remota).
+		return movimientoService.listarMovimientosCajaLite(cajaId);
 	}
 	
 	// MovimientoController.java

@@ -483,6 +483,13 @@ public class MovimientoServiceImplement implements MovimientoService {
 		// donde es destino (para que los traspasos entre cajas aparezcan en ambas).
 		return movimientoRepository.findByCaja_IdOrCajaDestino_IdOrderByFechaDesc(cajaId, cajaId);
 	}
+
+	@Override
+	public List<MovimientoDTO> listarMovimientosCajaLite(Integer cajaId) {
+		if (cajaId == null)
+			throw new IllegalArgumentException("cajaId no puede ser nulo");
+		return movimientoRepository.findMovimientosCajaLite(cajaId);
+	}
 	
 	@Override
 	@Transactional
@@ -868,6 +875,22 @@ public class MovimientoServiceImplement implements MovimientoService {
 	        return;
 	    }
 
+	    if ("TRANSFERENCIA CAJA".equals(tipo)) {
+	        // Revertir el traspaso entre cajas: devolver al origen, quitar al destino.
+	        Efectivo origen = m.getCaja();
+	        Efectivo destino = m.getCajaDestino();
+	        if (origen != null) {
+	            origen.setSaldo(round2((origen.getSaldo() != null ? origen.getSaldo() : 0.0) + monto));
+	            efectivoRepository.save(origen);
+	        }
+	        if (destino != null) {
+	            destino.setSaldo(round2((destino.getSaldo() != null ? destino.getSaldo() : 0.0) - monto));
+	            efectivoRepository.save(destino);
+	        }
+	        movimientoRepository.delete(m);
+	        return;
+	    }
+
 	    if (tipo.startsWith("RETIRO")) {
 	        // Revertir EXACTO lo que hizo RegistrarRetiro:
 	        AccountCop cuenta = m.getCuentaOrigen();
@@ -915,7 +938,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 	    // Otros tipos (transferencias, ajustes, C2C, etc.) todavía no tienen reversa
 	    // implementada: se rechaza para NO dejar saldos descuadrados.
 	    throw new IllegalStateException(
-	            "Por ahora solo se pueden eliminar movimientos de tipo 'PAGO PROVEEDOR' o 'RETIRO'.");
+	            "Este tipo de movimiento aún no se puede eliminar (solo PAGO PROVEEDOR, RETIRO y TRANSFERENCIA CAJA).");
 	}
 
 }

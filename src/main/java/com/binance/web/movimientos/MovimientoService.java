@@ -33,6 +33,8 @@ public interface MovimientoService {
 	List<Movimiento> listarPagosCuentaPorId(Integer cajaId);
 	Movimiento registrarPagoClienteACliente(PagoClienteAClienteDto dto);
 	List<Movimiento> listarMovimientosPorCaja(Integer cajaId);
+	/** Proyección liviana (1 query) de los movimientos de una caja, para carga rápida. */
+	List<MovimientoDTO> listarMovimientosCajaLite(Integer cajaId);
 	Movimiento registrarPagoClienteAProveedor(PagoClienteAProveedorDto dto);
 	Movimiento registrarPagoClienteAClienteCop(Integer clienteOrigenId, Integer clienteDestinoId, Double montoCop);
 	Movimiento registrarPagoProveedorACliente(PagoProveedorAClienteDto dto);
