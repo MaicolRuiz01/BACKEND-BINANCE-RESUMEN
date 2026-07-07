@@ -60,4 +60,12 @@ public class Movimiento {
 
     // Si quieres permitir reversas:
     private Integer reversaDeMovimientoId; // null si no es reversa
+
+    /**
+     * Para retiros: ¿ya se descontó el 4x1000 de la cuenta?
+     *  - Nequi/Daviplata: true (se descuenta al instante).
+     *  - Bancolombia: false al crearse (se descuenta al día siguiente por el scheduler).
+     *  - null en movimientos viejos/otros tipos → se trata como "ya aplicado".
+     */
+    private Boolean comisionAplicada;
 }

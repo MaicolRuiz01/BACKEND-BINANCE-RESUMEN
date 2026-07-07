@@ -32,6 +32,9 @@ import com.binance.web.Repository.ClienteRepository;
 import com.binance.web.Repository.SupplierRepository;
 import com.binance.web.model.BuyDollarsDto;
 import com.binance.web.model.TransaccionesDTO;
+import com.binance.web.Entity.Transacciones;
+import com.binance.web.transacciones.TransaccionesRepository;
+import com.binance.web.util.TraspasoWalletService;
 import com.binance.web.service.AccountBinanceService;
 import com.binance.web.service.AverageRateService;
 import com.binance.web.service.BuyDollarsService;
@@ -66,6 +69,10 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 	private AccountBinanceService accountBinanceService; 
 	@Autowired
 	private AccountBinanceRepository accountBinanceRepository;
+	@Autowired
+	private TransaccionesRepository transaccionesRepository;
+	@Autowired
+	private TraspasoWalletService traspasoWalletService;
 	@Autowired
 	private SolanaController solanaController;
 
@@ -174,6 +181,27 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
                 if (buyDollarsRepository.findByDedupeKey(dedupeKey).isPresent()) {
                     continue;
                   }
+
+                // 🔁 Wallet Bybit (u otra externa) → es un TRASPASO, NO una compra.
+                // El cripto real sí entró (se ajusta el saldo), pero se registra como
+                // Transacción/traspaso y NO como BuyDollars (no afecta proveedores/clientes).
+                if (traspasoWalletService.esWalletTraspaso(dto.getContraparteAddress())) {
+                    accountBinanceService.updateOrCreateCryptoBalance(account.getId(), dto.getCryptoSymbol(), dto.getAmount());
+                    String txHash = dto.getIdDeposit();
+                    if (txHash == null || !transaccionesRepository.existsByTxId(txHash)) {
+                        Transacciones t = new Transacciones();
+                        t.setIdtransaccion("TRASPASO-BYBIT-" + txHash);
+                        t.setTxId(txHash);
+                        t.setCantidad(dto.getAmount());     // crudo (USDT reales)
+                        t.setFecha(dto.getDate());
+                        t.setTipo(dto.getCryptoSymbol());
+                        t.setCuentaTo(account);             // entró a nuestra cuenta
+                        t.setCuentaFrom(null);              // Bybit no es cuenta nuestra
+                        transaccionesRepository.save(t);
+                    }
+                    existentes.add(dto.getIdDeposit());
+                    continue;
+                }
 
                 // ✅ Modificación 2: Lógica genérica para actualizar/crear balances de criptos
                 // Se usa el nuevo campo 'amount' y 'cryptoSymbol' del DTO

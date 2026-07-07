@@ -27,3 +27,12 @@ cuentas-tab y en el modal P2P — coincide con el mockup del cliente.
 
 ## Monto verdadero (buy/sell)
 - Campo opcional al asignar; si viene, reemplaza amount/dollars para el cálculo de pesos. NO ajusta saldo cripto.
+
+## 4x1000 en retiros (regla del cliente)
+- Nequi y Daviplata: 4x1000 se descuenta AL INSTANTE al retirar (monto + 0.4%).
+- BANCOLOMBIA: hoy solo baja el monto; el 4x1000 se descuenta AL DÍA SIGUIENTE (scheduler). La cuenta puede quedar en negativo (saldo por cobrar).
+- Total de arriba (Cuentas COP) = suma de saldos − 0.4% (neto para sacarlo). Las tarjetas muestran saldo real.
+
+## PENDIENTE — Wallet Bybit = TRASPASO (buy/sell dollars)
+- Si un buy o sell dollar viene de/va a la wallet Bybit TU4vEruvZwLLkSfV9bNw12EJTPvNr7Pvaa (o cualquiera de Bybit), NO es compra/venta: es un TRASPASO. Esa wallet NO es una de nuestras cuentas cripto (no se trae info de ella), solo se detecta que un movimiento está relacionado con esa dirección → traspaso.
+- Factibilidad: la dirección de contraparte está en TronScan (toAddress / ownerAddress|fromAddress) pero HOY no se guarda en BuyDollarsDto/SellDollarsDto. Habría que capturarla en TronScanService (parseIncoming/Outgoing), agregar campo al DTO y en el import tratar esas tx como traspaso. FALTA definir: ¿1 wallet o lista? ¿dónde guardarla (config/BD)? ¿solo excluir o registrar Transaccion/traspaso?

@@ -31,4 +31,7 @@ public class BuyDollarsDto {
 	// Si viene informado al asignar, se usa en vez del monto importado para calcular
 	// los pesos y se guarda como amount. El saldo cripto NO se toca (queda el real recibido).
 	private Double montoVerdadero;
+	// Dirección de la contraparte on-chain (remitente en entradas). Si es una wallet
+	// Bybit conocida, el import lo trata como TRASPASO en vez de compra.
+	private String contraparteAddress;
 }

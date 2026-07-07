@@ -44,6 +44,9 @@ import com.binance.web.Repository.ClienteRepository;
 import com.binance.web.Repository.SellDollarsRepository;
 import com.binance.web.Repository.SupplierRepository;
 import com.binance.web.Entity.Supplier;
+import com.binance.web.Entity.Transacciones;
+import com.binance.web.transacciones.TransaccionesRepository;
+import com.binance.web.util.TraspasoWalletService;
 import lombok.RequiredArgsConstructor;
 
 @Service
@@ -75,6 +78,10 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 	private AverageRateRepository averageRateRepository;
 	@Autowired
 	private AccountCryptoBalanceService accountCryptoBalanceService;
+	@Autowired
+	private TransaccionesRepository transaccionesRepository;
+	@Autowired
+	private TraspasoWalletService traspasoWalletService;
 	@Autowired
 	private SolanaController solanaController;
 	
@@ -574,6 +581,30 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 	      double feeSOL  = dto.getNetworkFeeInSOL() != null ? dto.getNetworkFeeInSOL() : 0.0;
 	      double feeTRX  = dto.getComision() != null ? dto.getComision() : 0.0;
 	      Double eqTRX   = dto.getEquivalenteciaTRX(); // puede ser null
+
+	      // 🔁 Wallet Bybit → TRASPASO, NO venta. Se descuenta el cripto igual (salió),
+	      // pero se registra como Transacción/traspaso y NO como SellDollars.
+	      if (account != null && traspasoWalletService.esWalletTraspaso(dto.getContraparteAddress())) {
+	        try {
+	          accountCryptoBalanceService.updateCryptoBalance(account, symbol, -dollars, true);
+	          if (feeTRX > 0) accountCryptoBalanceService.updateCryptoBalance(account, "TRX", -feeTRX, true);
+	        } catch (Exception ex) {
+	          System.out.println("⚠️ No se pudo ajustar balance cripto (traspaso Bybit): " + ex.getMessage());
+	        }
+	        String txHash = dto.getIdWithdrawals();
+	        if (txHash == null || !transaccionesRepository.existsByTxId(txHash)) {
+	          Transacciones t = new Transacciones();
+	          t.setIdtransaccion("TRASPASO-BYBIT-" + txHash);
+	          t.setTxId(txHash);
+	          t.setCantidad(dollars);      // crudo (USDT reales)
+	          t.setFecha(dto.getDate());
+	          t.setTipo(symbol);
+	          t.setCuentaFrom(account);    // salió de nuestra cuenta
+	          t.setCuentaTo(null);         // Bybit no es cuenta nuestra
+	          transaccionesRepository.save(t);
+	        }
+	        continue;
+	      }
 
 	      // Ajuste de balances cripto (no rompe import si falla)
 	      try {

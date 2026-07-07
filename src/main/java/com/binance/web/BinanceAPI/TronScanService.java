@@ -296,6 +296,7 @@ public class TronScanService {
                     if (c != null) dto.setClienteId(c.getId());
                 }
 
+                dto.setContraparteAddress(toAddress); // destinatario → para detectar wallet Bybit (traspaso)
                 result.add(dto);
             }
         } catch (Exception e) {
@@ -359,6 +360,7 @@ public class TronScanService {
                             dto.setPesos(0.0);
                             dto.setDate(LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp), ZoneId.of("America/Bogota")));
                             dto.setAsignada(false);
+                            dto.setContraparteAddress(fromAddress); // remitente → para detectar wallet Bybit (traspaso)
 
                             result.add(dto);
                         }

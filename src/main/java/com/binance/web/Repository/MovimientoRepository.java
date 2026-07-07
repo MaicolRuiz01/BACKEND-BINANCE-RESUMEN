@@ -17,6 +17,9 @@ public interface MovimientoRepository extends JpaRepository<Movimiento, Integer>
 	List<Movimiento> findByTipo(String tipo);
 	List<Movimiento> findByTipoStartingWithOrderByFechaDesc(String prefijoTipo);
 
+	/** Retiros con 4x1000 pendiente (Bancolombia) hechos antes de la fecha dada → para el scheduler. */
+	List<Movimiento> findByComisionAplicadaFalseAndFechaBefore(LocalDateTime limite);
+
 	/**
 	 * Proyección liviana de los movimientos de una caja (origen o destino) en UNA sola
 	 * consulta con joins, trayendo solo los nombres. Evita el N+1 del EAGER (cuentas COP

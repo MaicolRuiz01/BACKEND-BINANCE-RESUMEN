@@ -176,12 +176,17 @@ public class MovimientoServiceImplement implements MovimientoService {
 	    double corresponsalRest = cuentaOrigen.getCupoCorresponsalDisponibleHoy() != null ? cuentaOrigen.getCupoCorresponsalDisponibleHoy() : 0.0;
 	    cuentaOrigen.setCupoDisponibleHoy(round2(cajeroRest + corresponsalRest));
 
-	    // Validar saldo (con comisión 4x1000)
+	    // Comisión 4x1000. En BANCOLOMBIA se difiere al día siguiente (la aplica el scheduler);
+	    // en Nequi/Daviplata se descuenta al instante.
 	    double comision = monto * 0.004;
 	    double montoConComision = monto + comision;
 	    double saldoCuenta = cuentaOrigen.getBalance() != null ? cuentaOrigen.getBalance() : 0.0;
-	    if (montoConComision > saldoCuenta) {
-	        throw new IllegalArgumentException("Saldo insuficiente. Disponible: $" + String.format("%,.0f", saldoCuenta) + " · Requerido: $" + String.format("%,.0f", montoConComision));
+	    boolean diferir4x1000 = "BANCOLOMBIA".equalsIgnoreCase(String.valueOf(cuentaOrigen.getBankType()));
+
+	    // Lo que realmente sale HOY de la cuenta (Bancolombia solo el monto; el 4x1000 va mañana).
+	    double deduccionHoy = diferir4x1000 ? monto : montoConComision;
+	    if (deduccionHoy > saldoCuenta) {
+	        throw new IllegalArgumentException("Saldo insuficiente. Disponible: $" + String.format("%,.0f", saldoCuenta) + " · Requerido: $" + String.format("%,.0f", deduccionHoy));
 	    }
 
 	    Movimiento mov = Movimiento.builder()
@@ -191,9 +196,11 @@ public class MovimientoServiceImplement implements MovimientoService {
 	            .cuentaOrigen(cuentaOrigen)
 	            .caja(caja)
 	            .comision(comision)
+	            // Bancolombia: 4x1000 pendiente (se aplica al día siguiente). Otros bancos: ya aplicado.
+	            .comisionAplicada(!diferir4x1000)
 	            .build();
 
-	    cuentaOrigen.setBalance(round2(saldoCuenta - montoConComision));
+	    cuentaOrigen.setBalance(round2(saldoCuenta - deduccionHoy));
 
 	    double saldoCaja = caja.getSaldo() != null ? caja.getSaldo() : 0.0;
 	    caja.setSaldo(round2(saldoCaja + monto));
@@ -896,11 +903,13 @@ public class MovimientoServiceImplement implements MovimientoService {
 	        AccountCop cuenta = m.getCuentaOrigen();
 	        Efectivo caja = m.getCaja();
 	        double comision = m.getComision() != null ? m.getComision() : 0.0;
-	        double montoConComision = monto + comision;
+	        // Solo devolver el 4x1000 si REALMENTE se descontó (Bancolombia pendiente = aún no).
+	        boolean comisionYaAplicada = !Boolean.FALSE.equals(m.getComisionAplicada());
+	        double aReversar = monto + (comisionYaAplicada ? comision : 0.0);
 
-	        // 1) Devolver el saldo a la cuenta COP (monto + comisión 4x1000).
+	        // 1) Devolver a la cuenta COP lo que salió (monto + 4x1000 si ya se había aplicado).
 	        if (cuenta != null) {
-	            cuenta.setBalance(round2((cuenta.getBalance() != null ? cuenta.getBalance() : 0.0) + montoConComision));
+	            cuenta.setBalance(round2((cuenta.getBalance() != null ? cuenta.getBalance() : 0.0) + aReversar));
 
 	            // 2) Restablecer el cupo del tipo, SOLO si el retiro fue del día de hoy
 	            //    (si fue otro día, el cupo ya se reseteó y no se debe tocar).

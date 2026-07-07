@@ -67,3 +67,37 @@ Construido esta sesión (2026-06-28):
 - Front: AuthService guarda sessionId (poch_sid) y hace heartbeat cada 60s (reanuda tras refresh); logout avisa al backend. sesion.service.ts (getResumen), admin.guard.ts, pages/operadores/*, ruta /operadores (adminGuard) e ítem de menú OPERADORES solo-admin.
 - Tabla sesion_operador la crea Hibernate (ddl-auto=update).
 - NOTA: se decidió heartbeat (no beforeunload/sendBeacon, porque disparaba en refresh y cerraba la sesión antes de tiempo).
+
+## ── Sesión 2026-07-06 ──
+
+## Borrados con reversa de saldos
+- Cajas (Efectivo): DELETE /efectivo/{id} (EfectivoService.eliminarCaja). 409 si tiene FK (movimientos/gastos).
+- Proveedores (Supplier): DELETE /supplier/{id} (deleteSupplier). 409 si tiene compras/pagos/movimientos.
+- Movimientos: DELETE /movimiento/eliminar/{id} (MovimientoService.eliminarMovimiento). Revierte saldos EXACTO por tipo:
+  · PAGO PROVEEDOR: +proveedor destino; origen = +cuentaCOP(monto*1.004) / +caja / -provOrigen / -cliente.
+  · RETIRO CAJERO/CORRESPONSAL: +cuentaCOP (monto + 4x1000 solo si comisionAplicada), -caja(monto), restablece cupo del tipo si el retiro es de HOY (clamp al max).
+  · TRANSFERENCIA CAJA: +origen, -destino.
+  · Otros tipos: se rechazan (no descuadrar).
+- Front: botones en la vista REAL de cajas saldos/tabs/cajas/cajas.component (tarjeta = eliminar caja; modal Movimientos = columna Acción con eliminar por fila, helper esEliminable). OJO: hay una cajas-tab gemela en asignaciones/tabs que NO es la que usa Milton.
+- lista-pagos (proveedor): se arregló el confirm INVERTIDO (if(!confirm) borraba al cancelar) + Output eliminado para recargar saldos.
+
+## Traspaso entre cajas (sin 4x1000)
+- Movimiento.cajaDestino (nuevo). RegistrarTransferenciaCaja: resta origen, suma destino, tipo "TRANSFERENCIA CAJA", comision 0.
+- listarMovimientosPorCaja usa findByCaja_IdOrCajaDestino_IdOrderByFechaDesc (aparece en ambas cajas). Endpoint POST /movimiento/transferencia-caja. Front: botón "Transferir entre cajas" en cajas-tab.
+
+## Retiros: listado + eliminar
+- BUG arreglado: listarRetiros usaba findByTipo("RETIRO") exacto; los retiros son "RETIRO CAJERO"/"RETIRO CORRESPONSAL" → ahora findByTipoStartingWith("RETIRO"). Antes la lista salía vacía.
+- Eliminar retiro revierte saldos y cupo (ver arriba). Se ve en Movimientos → Retiros y en el modal de la caja.
+
+## Perf: movimientos de caja en 1 query
+- El endpoint /movimiento/caja/{id} traía cada Movimiento con TODAS sus @ManyToOne EAGER (cuentas COP con brebeKeys, etc.) → N+1 lentísimo contra BD remota. Ahora usa proyección JPQL findMovimientosCajaLite (1 sola query, solo nombres). Constructor liviano en MovimientoDTO.
+
+## Fix dropdown "Proveedor Destino" (modal Pago a Proveedor)
+- El select se reseteaba al hacer scroll porque el panel vivía dentro del p-dialog. Fix: appendTo="body" (+ [filter] y scrollHeight) en todos los dropdowns de ese modal (proveedor.component.html).
+
+## 4x1000: total neto + diferido en Bancolombia
+- Total de arriba en Cuentas COP: badge "Total COP disponible" = suma de saldos × 0.996 (getter totalCuentasNeto). Las tarjetas siguen mostrando el saldo real.
+- Al RETIRAR: Nequi y Daviplata descuentan el 4x1000 al instante; BANCOLOMBIA lo DIFIERE al día siguiente (hoy solo baja el monto).
+  · Movimiento.comisionAplicada (Bancolombia=false al crear, otros=true; null en viejos = "ya aplicado").
+  · Comision4x1000Scheduler: cada hora (con catch-up) aplica el 4x1000 pendiente de retiros con fecha < hoy → cuenta puede quedar en NEGATIVO (saldo por cobrar).
+  · Validación de saldo del retiro usa lo que sale HOY (Bancolombia = solo monto).
