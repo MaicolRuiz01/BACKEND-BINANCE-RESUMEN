@@ -316,7 +316,9 @@ public class MovimientoServiceImplement implements MovimientoService {
 
 	@Override
 	public List<Movimiento> listarRetiros() {
-		return movimientoRepository.findByTipo("RETIRO");
+		// Los retiros se guardan como "RETIRO CAJERO" / "RETIRO CORRESPONSAL",
+		// así que hay que buscar por prefijo (findByTipo exacto los perdía).
+		return movimientoRepository.findByTipoStartingWithOrderByFechaDesc("RETIRO");
 	}
 
 	@Override
@@ -866,10 +868,54 @@ public class MovimientoServiceImplement implements MovimientoService {
 	        return;
 	    }
 
-	    // Otros tipos (transferencias, retiros, ajustes, C2C, etc.) todavía no tienen reversa
+	    if (tipo.startsWith("RETIRO")) {
+	        // Revertir EXACTO lo que hizo RegistrarRetiro:
+	        AccountCop cuenta = m.getCuentaOrigen();
+	        Efectivo caja = m.getCaja();
+	        double comision = m.getComision() != null ? m.getComision() : 0.0;
+	        double montoConComision = monto + comision;
+
+	        // 1) Devolver el saldo a la cuenta COP (monto + comisión 4x1000).
+	        if (cuenta != null) {
+	            cuenta.setBalance(round2((cuenta.getBalance() != null ? cuenta.getBalance() : 0.0) + montoConComision));
+
+	            // 2) Restablecer el cupo del tipo, SOLO si el retiro fue del día de hoy
+	            //    (si fue otro día, el cupo ya se reseteó y no se debe tocar).
+	            asegurarCupoHoy(cuenta);
+	            java.time.LocalDate diaRetiro = m.getFecha() != null ? m.getFecha().toLocalDate() : null;
+	            java.time.LocalDate hoy = java.time.LocalDate.now(ZONE_BOGOTA);
+	            if (diaRetiro != null && diaRetiro.equals(hoy) && cuenta.getBankType() != null) {
+	                if (tipo.contains("CAJERO")) {
+	                    double max = CupoDiarioRules.maxCajeroPorBanco(cuenta.getBankType());
+	                    double disp = cuenta.getCupoCajeroDisponibleHoy() != null ? cuenta.getCupoCajeroDisponibleHoy() : 0.0;
+	                    cuenta.setCupoCajeroDisponibleHoy(round2(Math.min(max, disp + monto)));
+	                } else if (tipo.contains("CORRESPONSAL")) {
+	                    double max = CupoDiarioRules.maxCorresponsalPorBanco(cuenta.getBankType());
+	                    double disp = cuenta.getCupoCorresponsalDisponibleHoy() != null ? cuenta.getCupoCorresponsalDisponibleHoy() : 0.0;
+	                    cuenta.setCupoCorresponsalDisponibleHoy(round2(Math.min(max, disp + monto)));
+	                }
+	                // sincronizar el campo legacy (suma de ambos)
+	                double cj = cuenta.getCupoCajeroDisponibleHoy() != null ? cuenta.getCupoCajeroDisponibleHoy() : 0.0;
+	                double co = cuenta.getCupoCorresponsalDisponibleHoy() != null ? cuenta.getCupoCorresponsalDisponibleHoy() : 0.0;
+	                cuenta.setCupoDisponibleHoy(round2(cj + co));
+	            }
+	            accountCopRepository.save(cuenta);
+	        }
+
+	        // 3) Quitar de la caja el monto que había entrado.
+	        if (caja != null) {
+	            caja.setSaldo(round2((caja.getSaldo() != null ? caja.getSaldo() : 0.0) - monto));
+	            efectivoRepository.save(caja);
+	        }
+
+	        movimientoRepository.delete(m);
+	        return;
+	    }
+
+	    // Otros tipos (transferencias, ajustes, C2C, etc.) todavía no tienen reversa
 	    // implementada: se rechaza para NO dejar saldos descuadrados.
 	    throw new IllegalStateException(
-	            "Por ahora solo se pueden eliminar movimientos de tipo 'PAGO PROVEEDOR'.");
+	            "Por ahora solo se pueden eliminar movimientos de tipo 'PAGO PROVEEDOR' o 'RETIRO'.");
 	}
 
 }
