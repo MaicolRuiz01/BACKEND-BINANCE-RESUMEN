@@ -46,4 +46,13 @@ public class P2PPreAsignacion {
 
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
+
+    /**
+     * Estado manual del dinero de esta orden (lo controla el operario con 2 botones):
+     *  - "PENDIENTE": aún no ha caído → cuenta en el saldo AMARILLO.
+     *  - "RECIBIDO":  ya cayó → cuenta en el saldo VERDE (solo visual, no toca el saldo real).
+     * Sirve porque el estado de Binance no siempre refleja si el pago llegó de verdad.
+     */
+    @Column(name = "estado_manual")
+    private String estadoManual;
 }

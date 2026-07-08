@@ -72,6 +72,8 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
         @Autowired
         private AccountCopRepository accountCopRepository;
         @Autowired
+        private com.binance.web.Repository.MovimientoRepository movimientoRepository;
+        @Autowired
         private CryptoAverageRateService cryptoAverageRateService;
         @Autowired
         private BuyDollarsService buyDollarsService;
@@ -116,8 +118,22 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
             // 3) demás componentes del balance
             List<SellDollars> ventasGenerales = sellDollarsService.obtenerVentasPorFecha(fecha);
 
-            Double saldoCop = accountCopRepo.findAll().stream()
-                .mapToDouble(AccountCop::getBalance).sum();
+            // Cuentas COP para el balance:
+            //  - Nequi/Daviplata: su saldo tal cual (el 4x1000 ya se descuenta al instante).
+            //  - BANCOLOMBIA: (a) se le aplica el 4x1000 pendiente (el que se cobraría al día
+            //    siguiente por los retiros de hoy), y (b) al total resultante se le saca el 4x1000
+            //    y se le resta a ese mismo total (impuesto a futuro para sacar lo que queda).
+            java.util.List<AccountCop> todasCop = accountCopRepo.findAll();
+            double saldoCopOtros = todasCop.stream()
+                .filter(a -> a.getBankType() != com.binance.web.Entity.BankType.BANCOLOMBIA)
+                .mapToDouble(a -> a.getBalance() != null ? a.getBalance() : 0.0).sum();
+            double saldoBcol = todasCop.stream()
+                .filter(a -> a.getBankType() == com.binance.web.Entity.BankType.BANCOLOMBIA)
+                .mapToDouble(a -> a.getBalance() != null ? a.getBalance() : 0.0).sum();
+            double pendiente4x1000Bcol = movimientoRepository.sumComisionPendienteBancolombia();
+            double saldoBcolAjustado = saldoBcol - pendiente4x1000Bcol;      // (a)
+            double saldoBcolFinal = saldoBcolAjustado - (saldoBcolAjustado * 0.004); // (b)
+            Double saldoCop = saldoCopOtros + saldoBcolFinal;
 
             Double saldoProveedores = accountProveedorRepo.findAll().stream()
                 .mapToDouble(Supplier::getBalance).sum();

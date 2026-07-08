@@ -101,3 +101,34 @@ Construido esta sesión (2026-06-28):
   · Movimiento.comisionAplicada (Bancolombia=false al crear, otros=true; null en viejos = "ya aplicado").
   · Comision4x1000Scheduler: cada hora (con catch-up) aplica el 4x1000 pendiente de retiros con fecha < hoy → cuenta puede quedar en NEGATIVO (saldo por cobrar).
   · Validación de saldo del retiro usa lo que sale HOY (Bancolombia = solo monto).
+
+## ── Sesión 2026-07-08 ──
+
+## Wallet Bybit = TRASPASO (buy/sell dollars) [IMPLEMENTADO]
+- Config app.bybit.wallets (lista CSV en application.properties, arranca con TU4vEruvZwLLkSfV9bNw12EJTPvNr7Pvaa). Servicio util/TraspasoWalletService.esWalletTraspaso(address).
+- BuyDollarsDto/SellDollarsDto: campo contraparteAddress; se setea en TronScanService.parseTRC20Incoming (from) y Outgoing (to).
+- En import de compras/ventas: si la contraparte es Bybit → ajusta cripto igual (entra/sale) + crea Transaccion "TRASPASO-BYBIT-<txHash>" (un lado nuestra cuenta, el otro null) y NO registra BuyDollars/SellDollars. Idempotente por existsByTxId. Solo aplica a TRON (spot/binancePay no traen dirección).
+
+## Ventas en curso: cupo pasa a SOLO AVISO + saldos verde/amarillo
+- Se QUITÓ el bloqueo duro (copOptions ya no deshabilita, dropdownChanged ya no bloquea, se dejó de auto-abrir el modal cupoLleno). Ahora solo AVISA (avisarSiExcedeCupo) cuánto se pasó del cupo tras asignar.
+- Cards muestran DOS saldos: VERDE = saldo real + órdenes marcadas RECIBIDO (solo visual, NO toca el saldo real); AMARILLO = órdenes pre-asignadas pendientes.
+- 2 botones por orden ("Ya cayó"=RECIBIDO / "Pendiente"=PENDIENTE). Persisten: P2PPreAsignacion.estadoManual. ActiveP2POrderDto +estadoManual. Endpoint PUT /api/p2p/pre-asignacion/{orderNumber}/estado?estado=RECIBIDO|PENDIENTE. El real solo sube con el import al completar.
+
+## Cuentas COP: aviso de cupo agotado + iconos verde/rojo
+- Modal de Retiro (cuentas-tab): banner rojo si el cupo del medio está agotado + botón Confirmar deshabilitado; aviso amarillo si el monto supera el cupo.
+- Cards de cuentas COP: iconos pi-credit-card (cajero) y pi-building (corresponsal), verdes si hay cupo, rojos si agotado (como en ventas en curso).
+
+## Vista de movimientos de una cuenta COP (lista-ventas) reconstruida
+- 7 pestañas con carga perezosa: Ventas P2P, Compras P2P, Retiros, Traspasos (COP↔COP), Entradas, Salidas, Ajustes.
+- Nuevo backend: compras P2P por cuenta → CompraP2PCuentaDTO + BuyP2PRepository.findComprasP2PByAccountCop (join accountCopsDetails + binanceAccount.name) + endpoint GET /cuenta-cop/{id}/compras-p2p.
+- Retiros/Traspasos/Entradas/Salidas salen de getVistaCuentaCop (1 llamada, split por tipo). Ventas usan binanceAccount.name (no nameAccountBinance). Botón Regresar vuelve a la vista de cuentas COP (tab=cuentas-cop → container index 0 + saldosComp.verCop()). Se quitó el "ID #".
+
+## Saldo Total (vista saldos) = COP + VES→COP + cripto EXTERNA→COP
+- saldos.component: saldoTotalCop = totalCuentasCop + totalCuentasVesCop + criptoExternoCop (balanceExterno × tasa). Se quitaron las criptos internas del total.
+- FIX bug: getBalanceTotalExterno() llamaba por error al endpoint INTERNO; ahora usa getBalanceTotalExterno (/cuenta-binance/balance-total-externo).
+
+## Balance: cuentas COP Bancolombia con doble 4x1000
+- BalanceGeneralServiceImplement.saldoCop: Nequi/Daviplata tal cual; BANCOLOMBIA = (Σsaldo − 4x1000 pendiente) y a ese total se le resta su 4x1000. Query MovimientoRepository.sumComisionPendienteBancolombia (RETIRO*, comisionAplicada=false, bankType BANCOLOMBIA). Solo afecta el balance, no los saldos operativos.
+
+## SSE de saldos COP en tiempo real
+- SaldosSseController (/saldos-events/subscribe) + AccountCopSaldoListener (@EntityListeners en AccountCop): al cambiar cualquier saldo COP notifica DESPUÉS del commit (TransactionSynchronization.afterCommit). Frontend saldos-sse.service.ts (EventSource, reconecta); cuentas-tab y ventas-en-curso se suscriben (debounce 700ms) y refrescan con getSaldos() liviano (id+balance).

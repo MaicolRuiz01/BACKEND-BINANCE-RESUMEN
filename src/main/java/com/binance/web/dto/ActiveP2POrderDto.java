@@ -26,4 +26,7 @@ public class ActiveP2POrderDto {
     /** null si aún no se pre-asignó */
     private Integer preAsignadoCopId;
     private String  preAsignadoCopNombre;
+
+    /** "PENDIENTE" (amarillo) o "RECIBIDO" (verde) — clasificación manual del operario. */
+    private String  estadoManual;
 }

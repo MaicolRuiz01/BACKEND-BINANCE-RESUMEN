@@ -16,11 +16,13 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.EntityListeners;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
 
 @Entity
 @Table(name = "account_cop")
+@EntityListeners(com.binance.web.BinanceAPI.AccountCopSaldoListener.class)
 public class AccountCop {
 
     @Id

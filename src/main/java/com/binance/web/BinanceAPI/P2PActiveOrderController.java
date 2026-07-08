@@ -84,4 +84,19 @@ public class P2PActiveOrderController {
         activeOrderService.deletePreAsignacion(orderNumber);
         return ResponseEntity.ok(Map.of("mensaje", "Pre-asignación eliminada"));
     }
+
+    /**
+     * PUT /api/p2p/pre-asignacion/{orderNumber}/estado?estado=RECIBIDO|PENDIENTE
+     * Clasifica manualmente el dinero de la orden: RECIBIDO (verde) o PENDIENTE (amarillo).
+     */
+    @org.springframework.web.bind.annotation.PutMapping("/pre-asignacion/{orderNumber}/estado")
+    public ResponseEntity<?> setEstadoManual(@PathVariable String orderNumber,
+                                             @org.springframework.web.bind.annotation.RequestParam String estado) {
+        try {
+            activeOrderService.setEstadoManual(orderNumber, estado);
+            return ResponseEntity.ok(Map.of("mensaje", "Estado actualizado"));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
 }

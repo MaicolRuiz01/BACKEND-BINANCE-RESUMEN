@@ -112,6 +112,15 @@ public class AccountCopController {
         List<SaleP2P> sales = AccountCopService.getSalesByAccountCopId(id);
         return ResponseEntity.ok(sales);
     }
+
+	@org.springframework.beans.factory.annotation.Autowired
+	private com.binance.web.Repository.BuyP2PRepository buyP2PRepository;
+
+	/** Compras P2P asignadas a esta cuenta COP (para la vista de movimientos). */
+	@GetMapping("/{id}/compras-p2p")
+	public ResponseEntity<List<com.binance.web.model.CompraP2PCuentaDTO>> getComprasP2PByAccountCop(@PathVariable Integer id) {
+		return ResponseEntity.ok(buyP2PRepository.findComprasP2PByAccountCop(id));
+	}
 	
 	/**
 	 * PATCH /cuenta-cop/{id}/toggle-p2p
