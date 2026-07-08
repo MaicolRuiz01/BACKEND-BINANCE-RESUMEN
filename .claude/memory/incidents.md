@@ -35,3 +35,6 @@ línea 192 opción 4. No minimizar; ofrecer apoyo.
 - LENTITUD LOCAL (~10s): NO era el código; el backend local apuntaba a la BD remota de Railway (perfil prod). Usar perfil dev/BD local. Ver project-stack.md.
 - Montaje sandbox (9p/Windows): las lecturas por bash a veces quedan CACHEADAS/desactualizadas tras editar con las herramientas de archivo. Verificar con el Read tool (fuente confiable), no con `grep`/`wc` de bash.
 - Carpeta .claude/memory está PROTEGIDA para las herramientas Edit/Write; actualizarla por el shell (mcp__workspace__bash) escribiendo en el montaje.
+
+## 2026-07-08 — Confusión de saldo (Yeiner / Angie)
+- Banco (Bancolombia) tenía 2.976 pero el software mostraba 576 tras 17 órdenes + retiro 9.9M. Causa probable: el saldo real solo se acredita cuando la orden P2P se COMPLETA/importa; órdenes ya pagadas en el banco pero aún "en curso" no estaban acreditadas → desfase (~2.4M), que alguien cuadró con un ajuste manual. Lo mitigan verde/amarillo (se ve el pendiente) y el SSE (actualiza al instante). PENDIENTE opcional: auditar la lógica "orden P2P completa → acredita saldo cuenta" por si hay bug de acreditación.

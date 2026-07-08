@@ -36,3 +36,12 @@ cuentas-tab y en el modal P2P — coincide con el mockup del cliente.
 ## PENDIENTE — Wallet Bybit = TRASPASO (buy/sell dollars)
 - Si un buy o sell dollar viene de/va a la wallet Bybit TU4vEruvZwLLkSfV9bNw12EJTPvNr7Pvaa (o cualquiera de Bybit), NO es compra/venta: es un TRASPASO. Esa wallet NO es una de nuestras cuentas cripto (no se trae info de ella), solo se detecta que un movimiento está relacionado con esa dirección → traspaso.
 - Factibilidad: la dirección de contraparte está en TronScan (toAddress / ownerAddress|fromAddress) pero HOY no se guarda en BuyDollarsDto/SellDollarsDto. Habría que capturarla en TronScanService (parseIncoming/Outgoing), agregar campo al DTO y en el import tratar esas tx como traspaso. FALTA definir: ¿1 wallet o lista? ¿dónde guardarla (config/BD)? ¿solo excluir o registrar Transaccion/traspaso?
+
+## Balance Bancolombia (regla del cliente, solo para el cálculo del balance)
+- Nequi/Daviplata: saldo tal cual. BANCOLOMBIA: al total se le aplica (a) el 4x1000 pendiente de sus retiros de hoy (comisionAplicada=false) y (b) el 4x1000 sobre ese total. No toca los saldos operativos.
+
+## Wallets de traspaso (Bybit)
+- app.bybit.wallets (CSV). Movimientos on-chain TRON de/hacia esas wallets = TRASPASO (Transaccion + ajuste cripto), NO compra/venta.
+
+## Saldos verde/amarillo en P2P
+- Verde = saldo real + órdenes marcadas RECIBIDO (solo visual). Amarillo = pre-asignadas pendientes. estadoManual persiste en P2PPreAsignacion. El saldo real solo sube con el import al completar la orden.

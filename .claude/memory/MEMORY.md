@@ -1,5 +1,5 @@
 # Memory Index — Binance/P2P App (Milton Polana)
-*Última actualización: 2026-07-06*
+*Última actualización: 2026-07-08*
 
 ## Archivos
 - [project-stack.md] — Spring Boot 3.4.3 + Java 17 + Angular 17 + PrimeNG, Eclipse STS, JWT, CORS

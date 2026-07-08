@@ -225,17 +225,31 @@ public class P2PActiveOrderService {
         // Enriquecer con pre-asignación si existe
         Integer copId   = null;
         String  copNombre = null;
+        String  estadoManual = "PENDIENTE";
         Optional<P2PPreAsignacion> pre = preAsignacionRepository.findByOrderNumber(orderNumber);
         if (pre.isPresent()) {
             copId     = pre.get().getCuentaCop().getId();
             copNombre = pre.get().getCuentaCop().getName();
+            if (pre.get().getEstadoManual() != null) estadoManual = pre.get().getEstadoManual();
         }
 
         return new ActiveP2POrderDto(
                 orderNumber, status, statusLabel(status),
                 accountName, dollarsUs, pesosCop, tasa, createTime,
-                copId, copNombre
+                copId, copNombre, estadoManual
         );
+    }
+
+    /** Cambia el estado manual (PENDIENTE / RECIBIDO) de una orden pre-asignada. */
+    @Transactional
+    public void setEstadoManual(String orderNumber, String estado) {
+        String norm = "RECIBIDO".equalsIgnoreCase(estado) ? "RECIBIDO" : "PENDIENTE";
+        P2PPreAsignacion pre = preAsignacionRepository.findByOrderNumber(orderNumber)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "La orden no está pre-asignada a ninguna cuenta: " + orderNumber));
+        pre.setEstadoManual(norm);
+        pre.setUpdatedAt(LocalDateTime.now(ZONE));
+        preAsignacionRepository.save(pre);
     }
 
     private String statusLabel(String status) {
