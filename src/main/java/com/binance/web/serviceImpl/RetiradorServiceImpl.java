@@ -159,22 +159,57 @@ public class RetiradorServiceImpl implements RetiradorService {
     }
 
     /**
-     * Verifica que cada cuenta tenga saldo suficiente para cubrir el monto que se
-     * quiere solicitar en retiro. No descuenta nada aquí — el descuento real
-     * ocurre únicamente cuando el retirador confirma el retiro
-     * (confirmarSolicitud),
-     * esto solo evita crear/notificar una solicitud por encima de lo disponible.
+     * Verifica que cada cuenta tenga saldo DISPONIBLE suficiente para cubrir el
+     * monto que se quiere solicitar en retiro. No descuenta nada aquí — el
+     * descuento real ocurre únicamente cuando el retirador confirma el retiro
+     * (confirmarSolicitud), esto solo evita crear/notificar una solicitud por
+     * encima de lo disponible.
+     *
+     * "Disponible" = saldo de la cuenta MENOS lo que ya está comprometido en
+     * otras solicitudes SIN_ASIGNAR o PENDIENTE de esa misma cuenta (dinero
+     * que ya se pidió retirar pero el retirador todavía no confirmó). Esto
+     * evita que se pueda mandar dos veces una solicitud sobre el mismo dinero
+     * antes de que la primera se confirme.
      */
     private void validarSaldoSuficiente(List<DetalleRetiro> detalles) {
         for (DetalleRetiro detalle : detalles) {
             AccountCop cuenta = detalle.getCuentaCop();
-            if (cuenta.getBalance() < detalle.totalDetalle()) {
+            double comprometido = solicitudRepository.sumComprometidoPorCuenta(cuenta.getId());
+            double disponible = cuenta.getBalance() - comprometido;
+            if (disponible < detalle.totalDetalle()) {
                 throw new IllegalArgumentException(
-                        "Saldo insuficiente en la cuenta " + cuenta.getName() + " (disponible: $"
-                                + String.format("%,.0f", cuenta.getBalance()) + ", solicitado: $"
-                                + String.format("%,.0f", detalle.totalDetalle()) + ")");
+                        "Saldo insuficiente en la cuenta " + cuenta.getName() + " (saldo: $"
+                                + String.format("%,.0f", cuenta.getBalance())
+                                + ", ya comprometido en retiros pendientes de confirmar: $"
+                                + String.format("%,.0f", comprometido)
+                                + ", disponible: $" + String.format("%,.0f", disponible)
+                                + ", solicitado: $" + String.format("%,.0f", detalle.totalDetalle()) + ")");
             }
         }
+    }
+
+    @Override
+    public List<CuentaComprometidoDto> obtenerMontosComprometidos() {
+        List<DetalleRetiro> detalles = solicitudRepository.findDetallesComprometidos();
+        Map<Integer, List<DetalleRetiro>> porCuenta = detalles.stream()
+                .collect(Collectors.groupingBy(d -> d.getCuentaCop().getId()));
+
+        List<CuentaComprometidoDto> result = new ArrayList<>();
+        for (Map.Entry<Integer, List<DetalleRetiro>> entry : porCuenta.entrySet()) {
+            double total = entry.getValue().stream().mapToDouble(DetalleRetiro::totalDetalle).sum();
+            List<SolicitudComprometidaDto> solicitudes = entry.getValue().stream()
+                    .map(d -> new SolicitudComprometidaDto(
+                            d.getSolicitud().getId(),
+                            d.totalDetalle(),
+                            d.getSolicitud().getEstado().name(),
+                            d.getSolicitud().getFechaCreacion(),
+                            d.getSolicitud().getRetirador() != null
+                                    ? d.getSolicitud().getRetirador().getNombre()
+                                    : null))
+                    .collect(Collectors.toList());
+            result.add(new CuentaComprometidoDto(entry.getKey(), total, solicitudes));
+        }
+        return result;
     }
 
     @Override
