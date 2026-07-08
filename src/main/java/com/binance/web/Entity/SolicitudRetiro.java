@@ -49,4 +49,23 @@ public class SolicitudRetiro {
      */
     @Column(name = "telegram_message_id", nullable = true)
     private Integer telegramMessageId;
+
+    /**
+     * message_id del mensaje privado de Telegram ("Nueva Solicitud de Retiro")
+     * enviado directamente al retirador asignado. Se usa para poder editarlo
+     * (ej: quitarle los botones y marcarlo como cancelado) sin dejar un
+     * mensaje viejo con botones activos sueltos en el chat.
+     */
+    @Column(name = "telegram_private_message_id", nullable = true)
+    private Integer telegramPrivateMessageId;
+
+    /**
+     * Indica si la notificación privada de Telegram al retirador se pudo
+     * enviar. Es false cuando el retirador aún no ha vinculado su chat (no
+     * le ha dado /start al bot) — en ese caso el frontend debe avisar al
+     * admin en vez de asumir silenciosamente que llegó. No se persiste en
+     * BD, es solo informativo para la respuesta del API.
+     */
+    @Transient
+    private Boolean telegramNotificado;
 }

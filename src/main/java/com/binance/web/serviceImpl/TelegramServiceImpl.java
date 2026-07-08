@@ -243,8 +243,17 @@ public class TelegramServiceImpl implements TelegramService {
         try {
             Map<String, Object> payload = new HashMap<>();
             payload.put("callback_query_id", callbackQueryId);
-            payload.put("text", text);
-            payload.put("show_alert", true);
+
+            // Telegram no permite un "alert" (popup) sin texto — si se manda
+            // show_alert=true con text vacío, el callback nunca queda
+            // correctamente respondido y el cliente termina mostrando su propio
+            // diálogo genérico de "Error". Por eso solo mostramos el popup
+            // cuando en verdad hay un mensaje para el usuario.
+            boolean tieneTexto = text != null && !text.isBlank();
+            if (tieneTexto) {
+                payload.put("text", text);
+            }
+            payload.put("show_alert", tieneTexto);
 
             post("/answerCallbackQuery", payload);
         } catch (Exception e) {
