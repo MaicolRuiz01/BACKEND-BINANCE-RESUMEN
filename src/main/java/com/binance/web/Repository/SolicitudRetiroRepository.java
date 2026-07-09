@@ -48,6 +48,28 @@ public interface SolicitudRetiroRepository extends JpaRepository<SolicitudRetiro
     """)
     Double sumComprometidoPorCuenta(@Param("cuentaCopId") Integer cuentaCopId);
 
+    /**
+     * Igual que sumComprometidoPorCuenta pero separado por tipo (CAJERO / CORRESPONSAL),
+     * para poder validar el cupo diario de cada tipo por separado: dos solicitudes
+     * pendientes de la misma cuenta no deben poder sumar, entre ambas, más del cupo
+     * diario de cajero o de corresponsal, aunque ninguna se haya confirmado todavía.
+     */
+    @Query("""
+        SELECT COALESCE(SUM(COALESCE(d.montoCajero, 0)), 0)
+        FROM DetalleRetiro d
+        WHERE d.cuentaCop.id = :cuentaCopId
+          AND d.solicitud.estado IN ('SIN_ASIGNAR', 'PENDIENTE')
+    """)
+    Double sumMontoCajeroComprometidoPorCuenta(@Param("cuentaCopId") Integer cuentaCopId);
+
+    @Query("""
+        SELECT COALESCE(SUM(COALESCE(d.montoCorresponsal, 0)), 0)
+        FROM DetalleRetiro d
+        WHERE d.cuentaCop.id = :cuentaCopId
+          AND d.solicitud.estado IN ('SIN_ASIGNAR', 'PENDIENTE')
+    """)
+    Double sumMontoCorresponsalComprometidoPorCuenta(@Param("cuentaCopId") Integer cuentaCopId);
+
     /** Detalle completo de todas las solicitudes pendientes (para armar el desglose por cuenta). */
     @Query("""
         SELECT d FROM DetalleRetiro d

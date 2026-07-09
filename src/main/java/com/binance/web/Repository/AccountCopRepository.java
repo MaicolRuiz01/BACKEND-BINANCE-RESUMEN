@@ -43,14 +43,21 @@ public interface AccountCopRepository extends JpaRepository<AccountCop, Integer>
 	@Query("SELECT DISTINCT a FROM AccountCop a LEFT JOIN FETCH a.brebeKeys")
 	List<AccountCop> findAllWithBrebeKeys();
 
-	/** Solo id + saldo — consulta liviana para refrescar el saldo rápido. */
-	@Query("SELECT a.id AS id, a.balance AS balance FROM AccountCop a")
+	/** Id + saldo + cupo diario restante — consulta liviana para refrescar en tiempo real (SSE). */
+	@Query("""
+		SELECT a.id AS id, a.balance AS balance,
+		       a.cupoCajeroDisponibleHoy AS cupoCajeroDisponibleHoy,
+		       a.cupoCorresponsalDisponibleHoy AS cupoCorresponsalDisponibleHoy
+		FROM AccountCop a
+	""")
 	List<SaldoView> findAllSaldos();
 
-	/** Proyección liviana: solo lo necesario para el saldo. */
+	/** Proyección liviana: solo lo necesario para el saldo y el cupo del día. */
 	interface SaldoView {
 		Integer getId();
 		Double getBalance();
+		Double getCupoCajeroDisponibleHoy();
+		Double getCupoCorresponsalDisponibleHoy();
 	}
 
 }

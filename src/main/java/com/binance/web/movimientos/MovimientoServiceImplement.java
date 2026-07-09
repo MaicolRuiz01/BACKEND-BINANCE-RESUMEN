@@ -108,27 +108,10 @@ public class MovimientoServiceImplement implements MovimientoService {
 		return movimientoRepository.save(mov);
 	}
 	
+	/** Delegado al util compartido — así el mismo reset diario lo usan movimientos
+	 *  directos y el módulo de retiradores, sin duplicar la lógica. */
 	private void asegurarCupoHoy(AccountCop acc) {
-	    if (acc.getBankType() == null) {
-	        throw new IllegalStateException("La cuenta COP no tiene bankType");
-	    }
-
-	    LocalDate hoy = LocalDate.now(ZONE_BOGOTA);
-	    boolean diaDistinto = acc.getCupoFecha() == null || !hoy.equals(acc.getCupoFecha());
-
-	    // Si es día nuevo o cualquier cupo no está inicializado → resetear ambos
-	    if (diaDistinto
-	            || acc.getCupoCajeroDisponibleHoy() == null
-	            || acc.getCupoCorresponsalDisponibleHoy() == null) {
-	        double cajero      = CupoDiarioRules.maxCajeroPorBanco(acc.getBankType());
-	        double corresponsal = CupoDiarioRules.maxCorresponsalPorBanco(acc.getBankType());
-	        acc.setCupoFecha(hoy);
-	        acc.setCupoCajeroDisponibleHoy(cajero);
-	        acc.setCupoCorresponsalDisponibleHoy(corresponsal);
-	        // legacy
-	        acc.setCupoDiarioMax(cajero + corresponsal);
-	        acc.setCupoDisponibleHoy(cajero + corresponsal);
-	    }
+	    CupoDiarioRules.asegurarCupoHoy(acc);
 	}
 
 	@Override
