@@ -37,4 +37,7 @@ public interface AccountBinanceService {
 	void syncAllInternalBalancesFromExternal();
 	List<CryptoBalanceDto> getInternalBalancesDetail(String accountName);
 
+	/** Detalle de criptos por cuenta desde el saldo EXTERNO real (consulta en vivo). */
+	List<CryptoBalanceDto> getExternalBalancesDetail(String accountName);
+
 }

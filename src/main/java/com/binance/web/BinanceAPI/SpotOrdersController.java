@@ -230,6 +230,7 @@ public class SpotOrdersController {
                     double amount = dep.path("amount").asDouble(0);
                     String coin = dep.path("coin").asText("");
                     String txId = dep.path("txId").asText(null);
+                    String network = dep.path("network").asText(null);
                     String tsStr = dep.path("insertTime").asText(null);
 
                     // ya registrado o inválido
@@ -246,6 +247,9 @@ public class SpotOrdersController {
                         dto.setDate(fecha);
                         dto.setAmount(amount);
                         dto.setCryptoSymbol(coin);
+                        // El depósito de Binance no trae el remitente; se resuelve on-chain por txId
+                        // para detectar si viene de la wallet Bybit (traspaso, no compra).
+                        dto.setContraparteAddress(resolverRemitenteOnChain(txId, network));
                         // si tu dto tiene txId, también:
                         // dto.setTxId(txId);
                         resultado.add(dto);
@@ -310,6 +314,7 @@ public class SpotOrdersController {
                         dto.setDate(fecha);
                         dto.setDollars(amount);         // cantidad retirada en cripto
                         dto.setCryptoSymbol(coin);      // moneda retirada
+                        dto.setContraparteAddress(addr); // destino del retiro → detectar wallet Bybit (traspaso)
                         result.add(dto);
                     }
                 }
@@ -420,6 +425,29 @@ public class SpotOrdersController {
             @RequestParam(defaultValue = "100") int limit) {
         String response = binanceService.getAllSpotTradesForAllAccounts(symbol, limit);
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Resuelve el remitente (from) on-chain de un depósito a partir de su txId.
+     * El historial de depósitos de Binance NO trae quién envió, así que se consulta
+     * la transacción TRON por hash. Se usa para detectar depósitos que vienen de la
+     * wallet de traspaso (Bybit) y tratarlos como TRASPASO en vez de compra.
+     * Devuelve la dirección base58 del emisor, o null si no se puede resolver / no es on-chain.
+     */
+    private String resolverRemitenteOnChain(String txId, String network) {
+        if (txId == null || txId.isBlank() || txId.startsWith("Off-chain")) return null;
+        try {
+            boolean esTron = network == null
+                    || "TRC20".equalsIgnoreCase(network)
+                    || "TRX".equalsIgnoreCase(network)
+                    || "TRON".equalsIgnoreCase(network);
+            if (!esTron) return null;
+            JsonNode tx = tronScanService.getTxByHash(txId);
+            String from = tx.path("from").asText(null);
+            return (from != null && !from.isBlank()) ? from : null;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private boolean isInternalDeposit(String txId, String coin, String network, Set<String> ownAddrs) {

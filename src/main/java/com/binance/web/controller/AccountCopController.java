@@ -35,21 +35,43 @@ public class AccountCopController {
 	private final AccountCopExcelService accountCopExcelService;
 	private final BrebeKeyRepository brebeKeyRepository;
 	private final RetiradorService retiradorService;
+	private final com.binance.web.Repository.AccountCopRepository accountCopRepository;
+	private final com.binance.web.Repository.MovimientoRepository movimientoRepository;
 
 	public AccountCopController(AccountCopService AccountCopService,
 			AccountCopExcelService accountCopExcelService,
 			BrebeKeyRepository brebeKeyRepository,
-			RetiradorService retiradorService) {
+			RetiradorService retiradorService,
+			com.binance.web.Repository.AccountCopRepository accountCopRepository,
+			com.binance.web.Repository.MovimientoRepository movimientoRepository) {
 		this.AccountCopService = AccountCopService;
 		this.accountCopExcelService = accountCopExcelService;
 		this.brebeKeyRepository = brebeKeyRepository;
 		this.retiradorService = retiradorService;
+		this.accountCopRepository = accountCopRepository;
+		this.movimientoRepository = movimientoRepository;
 	}
 
 	@GetMapping(produces = "application/json")
 	public ResponseEntity<List<AccountCop>> getAllAccountCop() {
 		List<AccountCop> cuentasCop = AccountCopService.findAllAccountCop();
 		return ResponseEntity.ok(cuentasCop);
+	}
+
+	/**
+	 * Total COP disponible — MISMO valor para la card "CUENTAS COP" y el label
+	 * "TOTAL COP DISPONIBLE". Suma de saldos de TODAS las cuentas COP, menos el
+	 * 4x1000 diferido pendiente (el de Bancolombia que se cobraría al día siguiente;
+	 * para el total NO se difiere, se descuenta de una), y a ese neto se le resta el
+	 * 4x1000 de sacarlo (× 0.996).
+	 */
+	@GetMapping(value = "/total-disponible", produces = "application/json")
+	public ResponseEntity<Double> getTotalCopDisponible() {
+		double sumaSaldos = accountCopRepository.sumBalances();
+		double pendiente4x1000 = movimientoRepository.sumComisionPendienteBancolombia();
+		double neto = sumaSaldos - pendiente4x1000;
+		double disponible = neto * 0.996; // 4x1000 para sacarlo
+		return ResponseEntity.ok(disponible);
 	}
 
 	/** Consulta liviana: solo id + saldo de cada cuenta COP. Rápida, para refrescar el saldo. */

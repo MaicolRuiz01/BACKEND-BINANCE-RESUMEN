@@ -42,4 +42,8 @@ public class Gasto {
 	@Column(unique = true)
 	private String idempotencyKey;
 
+	/** Id del Movimiento asociado (para que el gasto aparezca en el historial y el
+	 *  scheduler pueda diferir su 4x1000). Se usa al eliminar para borrar ese movimiento. */
+	private Integer movimientoId;
+
 }

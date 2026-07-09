@@ -166,5 +166,12 @@ public class AccountBinanceController {
 	    return ResponseEntity.ok(list);
 	}
 
+	/** Detalle de criptos por cuenta desde el saldo EXTERNO real (en vivo). */
+	@GetMapping("/balances-externos")
+	public ResponseEntity<List<CryptoBalanceDto>> getExternalBalances(@RequestParam String name) {
+	    List<CryptoBalanceDto> list = accountBinanceService.getExternalBalancesDetail(name);
+	    return ResponseEntity.ok(list);
+	}
+
 
 }
