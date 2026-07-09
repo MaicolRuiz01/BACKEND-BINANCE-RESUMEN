@@ -504,45 +504,27 @@ public class TelegramWebhookService {
 
         log.info("[Webhook] Solicitud #{} asignada a {} (@{})", solicitudId, retirador.getNombre(), telegramUsername);
 
-        // ── Confirmar el retiro DE INMEDIATO: se salta el paso de "Ya hice el
-        // retiro". Aceptar = confirmar, así que aquí mismo se resta el saldo de
-        // la cuenta y se acredita la caja del retirador. ─────────────────────
-        try {
-            retiradorService.confirmarSolicitud(solicitudId);
-        } catch (IllegalStateException e) {
-            // Saldo insuficiente u otra validación de negocio: la solicitud queda
-            // asignada (PENDIENTE) para poder confirmarla luego desde la app,
-            // pero avisamos que no se completó todavía.
-            telegramService.answerCallbackQuery(callbackQueryId, "❌ " + e.getMessage());
-            if (solicitud.getTelegramMessageId() != null && !groupChatId.isBlank()) {
-                telegramService.editMessage(groupChatId, solicitud.getTelegramMessageId(),
-                        buildTextoTomado(solicitud, retirador));
-            }
-            return;
-        }
-
         // Sin popup: los mensajes de abajo (grupo + privado) ya muestran el resultado.
         telegramService.answerCallbackQuery(callbackQueryId, "");
 
-        // ── Editar el mensaje del grupo para indicar que ya quedó completado ──
+        // ── Editar el mensaje del grupo para indicar que ya fue tomada ────────
         if (solicitud.getTelegramMessageId() != null && !groupChatId.isBlank()) {
             telegramService.editMessage(groupChatId, solicitud.getTelegramMessageId(),
-                    buildTextoCompletado(solicitud, retirador));
+                    buildTextoTomado(solicitud, retirador));
         }
 
-        // Obtener el retirador actualizado (con su caja ya acreditada)
-        Retirador retiradorActualizado = retiradorRepository.findById(retirador.getId()).orElse(retirador);
-
-        // ── Notificación privada al retirador: retiro ya completado ──────
-        if (retiradorActualizado.getTelegramChatId() != null) {
-            telegramService.sendMessage(String.valueOf(retiradorActualizado.getTelegramChatId()),
-                    "✅ *Retiro completado* (Solicitud #" + solicitudId + ")");
-
-            // Refrescar el recordatorio de caja (botón "Entregar efectivo") para
-            // que quede como último mensaje del chat, reflejando el nuevo saldo.
-            if (retiradorActualizado.getEfectivo() != null) {
-                retiradorService.enviarRecordatorioCaja(retiradorActualizado);
-            }
+        // ── Mensaje privado al retirador con los dos botones: "Ya hice el
+        // retiro" / "Cancelar". El retiro NO se confirma acá — se confirma
+        // recién cuando el retirador presiona "Ya hice el retiro" desde el
+        // privado (handleCompleted), igual que en el flujo de solicitud directa. ──
+        if (retirador.getTelegramChatId() != null) {
+            Integer privateMessageId = telegramService.sendMessageWithTwoButtons(
+                    String.valueOf(retirador.getTelegramChatId()),
+                    buildMensajePrivado(solicitud, retirador),
+                    "✅ Ya hice el retiro", "completed:" + solicitud.getId(),
+                    "❌ Cancelar", "cancel:" + solicitud.getId());
+            solicitud.setTelegramPrivateMessageId(privateMessageId);
+            solicitudRepository.save(solicitud);
         }
     }
 
@@ -713,13 +695,16 @@ public class TelegramWebhookService {
         sb.append("💵 *Tu pago:* $").append(String.format("%,.0f", solicitud.getPagoRetirador())).append(" COP\n");
         sb.append("🏦 *Detalles:*");
         for (var d : solicitud.getDetalles()) {
+            double montoCajero = d.getMontoCajero() != null ? d.getMontoCajero() : 0.0;
+            double montoCorresponsal = d.getMontoCorresponsal() != null ? d.getMontoCorresponsal() : 0.0;
+            String banco = d.getCuentaCop().getBankType() != null ? d.getCuentaCop().getBankType().name() : "?";
             sb.append("\n  • ").append(d.getCuentaCop().getName())
-                    .append(" (").append(d.getCuentaCop().getBankType().name()).append(")")
+                    .append(" (").append(banco).append(")")
                     .append(" | ").append(d.getTipoRetiro().name())
-                    .append(" | Cajero: $").append(String.format("%,.0f", d.getMontoCajero()))
-                    .append(" | Corresponsal: $").append(String.format("%,.0f", d.getMontoCorresponsal()));
+                    .append(" | Cajero: $").append(String.format("%,.0f", montoCajero))
+                    .append(" | Corresponsal: $").append(String.format("%,.0f", montoCorresponsal));
         }
-        sb.append("\n\n⏰ *Confirma el retiro desde la app una vez completado.*");
+        sb.append("\n\n⏰ *Presiona \"Ya hice el retiro\" cuando lo completes.*");
         return sb.toString();
     }
 

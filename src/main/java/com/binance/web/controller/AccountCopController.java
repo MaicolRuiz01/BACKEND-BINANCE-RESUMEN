@@ -21,8 +21,10 @@ import com.binance.web.Entity.AccountCop;
 import com.binance.web.Entity.BrebeKey;
 import com.binance.web.Entity.SaleP2P;
 import com.binance.web.Repository.BrebeKeyRepository;
+import com.binance.web.dto.CuentaComprometidoDto;
 import com.binance.web.service.AccountCopExcelService;
 import com.binance.web.service.AccountCopService;
+import com.binance.web.service.RetiradorService;
 
 @RestController
 @RequestMapping("/cuenta-cop")
@@ -32,13 +34,16 @@ public class AccountCopController {
 	private final AccountCopService AccountCopService;
 	private final AccountCopExcelService accountCopExcelService;
 	private final BrebeKeyRepository brebeKeyRepository;
+	private final RetiradorService retiradorService;
 
 	public AccountCopController(AccountCopService AccountCopService,
 			AccountCopExcelService accountCopExcelService,
-			BrebeKeyRepository brebeKeyRepository) {
+			BrebeKeyRepository brebeKeyRepository,
+			RetiradorService retiradorService) {
 		this.AccountCopService = AccountCopService;
 		this.accountCopExcelService = accountCopExcelService;
 		this.brebeKeyRepository = brebeKeyRepository;
+		this.retiradorService = retiradorService;
 	}
 
 	@GetMapping(produces = "application/json")
@@ -51,6 +56,17 @@ public class AccountCopController {
 	@GetMapping(value = "/saldos", produces = "application/json")
 	public ResponseEntity<List<com.binance.web.Repository.AccountCopRepository.SaldoView>> getSaldos() {
 		return ResponseEntity.ok(AccountCopService.findAllSaldos());
+	}
+
+	/**
+	 * Cuánto dinero de cada cuenta ya está "comprometido" en solicitudes de
+	 * retiro enviadas pero aún no confirmadas por el retirador (SIN_ASIGNAR o
+	 * PENDIENTE), con el desglose de esas solicitudes. Para mostrar en la
+	 * vista de Cuentas: saldo bruto vs. saldo disponible.
+	 */
+	@GetMapping(value = "/comprometido", produces = "application/json")
+	public ResponseEntity<List<CuentaComprometidoDto>> getMontosComprometidos() {
+		return ResponseEntity.ok(retiradorService.obtenerMontosComprometidos());
 	}
 
 	@GetMapping("/{id}")
