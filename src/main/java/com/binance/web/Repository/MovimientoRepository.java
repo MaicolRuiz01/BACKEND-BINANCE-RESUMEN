@@ -20,9 +20,11 @@ public interface MovimientoRepository extends JpaRepository<Movimiento, Integer>
 	/** Retiros con 4x1000 pendiente (Bancolombia) hechos antes de la fecha dada → para el scheduler. */
 	List<Movimiento> findByComisionAplicadaFalseAndFechaBefore(LocalDateTime limite);
 
-	/** Suma del 4x1000 AÚN pendiente de retiros de cuentas Bancolombia (para el balance). */
+	/** Suma del 4x1000 AÚN pendiente de CUALQUIER salida de cuentas Bancolombia (para el balance).
+	 *  comisionAplicada=false + banco BANCOLOMBIA ya identifica un 4x1000 diferido pendiente,
+	 *  sin importar el tipo (retiro, pago proveedor, pago retirador, etc.). */
 	@Query("SELECT COALESCE(SUM(m.comision), 0) FROM Movimiento m "
-	     + "WHERE m.comisionAplicada = false AND m.tipo LIKE 'RETIRO%' "
+	     + "WHERE m.comisionAplicada = false "
 	     + "AND m.cuentaOrigen.bankType = com.binance.web.Entity.BankType.BANCOLOMBIA")
 	double sumComisionPendienteBancolombia();
 

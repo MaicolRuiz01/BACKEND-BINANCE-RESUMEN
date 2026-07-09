@@ -33,6 +33,7 @@ public class RetiradorServiceImpl implements RetiradorService {
     private final SolicitudRetiroRepository solicitudRepository;
     private final AccountCopRepository accountCopRepository;
     private final EfectivoRepository efectivoRepository;
+    private final MovimientoRepository movimientoRepository;
     private final RestTemplate restTemplate = new RestTemplate();
     private final TelegramService telegramService;
 
@@ -44,11 +45,13 @@ public class RetiradorServiceImpl implements RetiradorService {
             SolicitudRetiroRepository solicitudRepository,
             AccountCopRepository accountCopRepository,
             EfectivoRepository efectivoRepository,
+            MovimientoRepository movimientoRepository,
             TelegramService telegramService) {
         this.retiradorRepository = retiradorRepository;
         this.solicitudRepository = solicitudRepository;
         this.accountCopRepository = accountCopRepository;
         this.efectivoRepository = efectivoRepository;
+        this.movimientoRepository = movimientoRepository;
         this.telegramService = telegramService;
     }
 
@@ -317,9 +320,20 @@ public class RetiradorServiceImpl implements RetiradorService {
             }
         }
 
+        Retirador retirador = solicitud.getRetirador();
+        Efectivo caja = retirador.getEfectivo();
+        LocalDateTime ahora = LocalDateTime.now(ZONE_BOGOTA);
+
         for (DetalleRetiro detalle : solicitud.getDetalles()) {
             AccountCop cuenta = detalle.getCuentaCop();
-            cuenta.setBalance(cuenta.getBalance() - detalle.totalDetalle());
+
+            // 4x1000 sobre la salida de cuenta COP. En BANCOLOMBIA se DIFIERE al día siguiente
+            // (el scheduler lo aplica sobre los movimientos con comisionAplicada=false); en los
+            // demás bancos se descuenta al instante. Mismo criterio que el retiro manual.
+            double montoDet = detalle.totalDetalle();
+            boolean esBanco = "BANCOLOMBIA".equalsIgnoreCase(String.valueOf(cuenta.getBankType()));
+            double deduccionHoy = esBanco ? montoDet : (montoDet + montoDet * 0.004);
+            cuenta.setBalance(cuenta.getBalance() - deduccionHoy);
 
             if (cuenta.getBankType() != null) {
                 if (detalle.getMontoCajero() != null && detalle.getMontoCajero() > 0) {
@@ -337,11 +351,34 @@ public class RetiradorServiceImpl implements RetiradorService {
             }
 
             accountCopRepository.save(cuenta);
+
+            // Registrar el/los movimiento(s) de RETIRO para que aparezcan en el historial de la
+            // cuenta y de la caja. Antes NO se creaba movimiento → el saldo se movía "invisible".
+            if (detalle.getMontoCajero() != null && detalle.getMontoCajero() > 0) {
+                movimientoRepository.save(Movimiento.builder()
+                        .tipo("RETIRO CAJERO")
+                        .fecha(ahora)
+                        .monto(detalle.getMontoCajero())
+                        .cuentaOrigen(cuenta)
+                        .caja(caja)
+                        .comision(detalle.getMontoCajero() * 0.004)
+                        .comisionAplicada(!esBanco)
+                        .build());
+            }
+            if (detalle.getMontoCorresponsal() != null && detalle.getMontoCorresponsal() > 0) {
+                movimientoRepository.save(Movimiento.builder()
+                        .tipo("RETIRO CORRESPONSAL")
+                        .fecha(ahora)
+                        .monto(detalle.getMontoCorresponsal())
+                        .cuentaOrigen(cuenta)
+                        .caja(caja)
+                        .comision(detalle.getMontoCorresponsal() * 0.004)
+                        .comisionAplicada(!esBanco)
+                        .build());
+            }
         }
 
-        Retirador retirador = solicitud.getRetirador();
-        if (retirador.getEfectivo() != null) {
-            Efectivo caja = retirador.getEfectivo();
+        if (caja != null) {
             caja.setSaldo(caja.getSaldo() + solicitud.getTotalMonto());
             efectivoRepository.save(caja);
         }
@@ -522,10 +559,23 @@ public class RetiradorServiceImpl implements RetiradorService {
         if ("COP".equalsIgnoreCase(dto.getFuente())) {
             AccountCop cuenta = accountCopRepository.findById(dto.getCuentaCopId())
                     .orElseThrow(() -> new RuntimeException("Cuenta COP no encontrada: " + dto.getCuentaCopId()));
-            if (cuenta.getBalance() < dto.getMonto())
+            // 4x1000 sobre la salida de cuenta COP: diferido en BANCOLOMBIA, inmediato en los demás.
+            boolean esBanco = "BANCOLOMBIA".equalsIgnoreCase(String.valueOf(cuenta.getBankType()));
+            double comision = dto.getMonto() * 0.004;
+            double deduccionHoy = esBanco ? dto.getMonto() : (dto.getMonto() + comision);
+            if (cuenta.getBalance() < deduccionHoy)
                 throw new IllegalStateException("Saldo insuficiente en la cuenta COP");
-            cuenta.setBalance(cuenta.getBalance() - dto.getMonto());
+            cuenta.setBalance(cuenta.getBalance() - deduccionHoy);
             accountCopRepository.save(cuenta);
+
+            movimientoRepository.save(Movimiento.builder()
+                    .tipo("PAGO RETIRADOR")
+                    .fecha(LocalDateTime.now(ZONE_BOGOTA))
+                    .monto(dto.getMonto())
+                    .cuentaOrigen(cuenta)
+                    .comision(comision)
+                    .comisionAplicada(!esBanco)
+                    .build());
 
         } else if ("CAJA".equalsIgnoreCase(dto.getFuente())) {
             Efectivo caja = efectivoRepository.findById(dto.getCajaId())
@@ -534,6 +584,16 @@ public class RetiradorServiceImpl implements RetiradorService {
                 throw new IllegalStateException("Saldo insuficiente en la caja");
             caja.setSaldo(caja.getSaldo() - dto.getMonto());
             efectivoRepository.save(caja);
+
+            // Pago en efectivo: sin 4x1000, pero se registra el movimiento para el historial.
+            movimientoRepository.save(Movimiento.builder()
+                    .tipo("PAGO RETIRADOR")
+                    .fecha(LocalDateTime.now(ZONE_BOGOTA))
+                    .monto(dto.getMonto())
+                    .caja(caja)
+                    .comision(0.0)
+                    .comisionAplicada(true)
+                    .build());
 
         } else {
             throw new IllegalArgumentException("Fuente inválida. Use 'COP' o 'CAJA'");

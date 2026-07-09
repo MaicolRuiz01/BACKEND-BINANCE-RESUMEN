@@ -7,9 +7,11 @@ import org.springframework.stereotype.Service;
 import com.binance.web.Entity.AccountCop;
 import com.binance.web.Entity.Efectivo;
 import com.binance.web.Entity.Gasto;
+import com.binance.web.Entity.Movimiento;
 import com.binance.web.Repository.AccountCopRepository;
 import com.binance.web.Repository.EfectivoRepository;
 import com.binance.web.Repository.GastoRepository;
+import com.binance.web.Repository.MovimientoRepository;
 import com.binance.web.service.GastoService;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,6 +30,8 @@ public class GastoServiceImplement implements GastoService{
     private AccountCopRepository accountCopRepository;
     @Autowired
     private EfectivoRepository efectivoRepository;
+    @Autowired
+    private MovimientoRepository movimientoRepository;
 
     public List<Gasto> findAll() {
         return gastoRepository.findAll();
@@ -61,14 +65,32 @@ public class GastoServiceImplement implements GastoService{
         }
 
         Double monto = nuevoGasto.getMonto();
-        double montoComision = monto * 1.004;
+        double comision = monto * 0.004;
 
         // Siempre asigna la fecha del sistema
         nuevoGasto.setFecha(LocalDateTime.now());
 
         if (nuevoGasto.getCuentaPago() != null) {
+            AccountCop cuenta = accountCopRepository.findById(nuevoGasto.getCuentaPago().getId())
+                .orElseThrow(() -> new RuntimeException("Cuenta COP no encontrada"));
+            // 4x1000: diferido en BANCOLOMBIA (lo cobra el scheduler al día siguiente),
+            // inmediato en los demás bancos.
+            boolean esBanco = "BANCOLOMBIA".equalsIgnoreCase(String.valueOf(cuenta.getBankType()));
+            double deduccionHoy = esBanco ? monto : (monto + comision);
             // Resta ATÓMICA en la BD: no se pierde aunque el sync P2P actualice el saldo a la vez.
-            accountCopRepository.restarSaldo(nuevoGasto.getCuentaPago().getId(), montoComision);
+            accountCopRepository.restarSaldo(cuenta.getId(), deduccionHoy);
+
+            // Movimiento GASTO: lo hace visible en el historial y deja el 4x1000 pendiente
+            // (comisionAplicada=false) para que el scheduler lo difiera en Bancolombia.
+            Movimiento mov = movimientoRepository.save(Movimiento.builder()
+                    .tipo("GASTO")
+                    .fecha(nuevoGasto.getFecha())
+                    .monto(monto)
+                    .cuentaOrigen(cuenta)
+                    .comision(comision)
+                    .comisionAplicada(!esBanco)
+                    .build());
+            nuevoGasto.setMovimientoId(mov.getId());
         }
 
         if (nuevoGasto.getPagoEfectivo() != null) {
@@ -77,6 +99,17 @@ public class GastoServiceImplement implements GastoService{
 
             caja.setSaldo(caja.getSaldo() - monto);
             efectivoRepository.save(caja);
+
+            // Gasto en efectivo: sin 4x1000, pero se registra el movimiento para el historial de la caja.
+            Movimiento mov = movimientoRepository.save(Movimiento.builder()
+                    .tipo("GASTO")
+                    .fecha(nuevoGasto.getFecha())
+                    .monto(monto)
+                    .caja(caja)
+                    .comision(0.0)
+                    .comisionAplicada(true)
+                    .build());
+            nuevoGasto.setMovimientoId(mov.getId());
         }
 
         return gastoRepository.save(nuevoGasto);
@@ -89,12 +122,21 @@ public class GastoServiceImplement implements GastoService{
             .orElseThrow(() -> new RuntimeException("Gasto no encontrado"));
 
         Double monto = gasto.getMonto() != null ? gasto.getMonto() : 0.0;
+        double comision = monto * 0.004;
 
-        // Devuelve EXACTAMENTE lo que se había restado al crear el gasto:
-        //  - Cuenta COP: monto * 1.004 (incluye la comisión del 0.4%).
-        //  - Caja efectivo: monto (sin comisión).
+        // Movimiento asociado (si el gasto es de antes de este cambio, movimientoId es null).
+        Movimiento mov = gasto.getMovimientoId() != null
+                ? movimientoRepository.findById(gasto.getMovimientoId()).orElse(null)
+                : null;
+
+        // Devuelve EXACTAMENTE lo que se había restado:
+        //  - Cuenta COP: monto + 4x1000 SOLO si el 4x1000 ya se había aplicado
+        //    (en Bancolombia diferido, si el scheduler aún no corrió, solo se devuelve el monto).
+        //    Gastos viejos (sin movimiento) devuelven monto*1.004, como antes.
         if (gasto.getCuentaPago() != null) {
-            accountCopRepository.sumarSaldo(gasto.getCuentaPago().getId(), monto * 1.004);
+            boolean comisionYaAplicada = (mov == null) || !Boolean.FALSE.equals(mov.getComisionAplicada());
+            double aReversar = monto + (comisionYaAplicada ? comision : 0.0);
+            accountCopRepository.sumarSaldo(gasto.getCuentaPago().getId(), aReversar);
         }
 
         if (gasto.getPagoEfectivo() != null) {
@@ -103,6 +145,11 @@ public class GastoServiceImplement implements GastoService{
 
             caja.setSaldo(caja.getSaldo() + monto);
             efectivoRepository.save(caja);
+        }
+
+        // Borrar el movimiento asociado para que no quede colgado ni el scheduler lo procese.
+        if (mov != null) {
+            movimientoRepository.delete(mov);
         }
 
         gastoRepository.delete(gasto);

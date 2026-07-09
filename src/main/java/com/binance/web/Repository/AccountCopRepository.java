@@ -43,6 +43,10 @@ public interface AccountCopRepository extends JpaRepository<AccountCop, Integer>
 	@Query("SELECT DISTINCT a FROM AccountCop a LEFT JOIN FETCH a.brebeKeys")
 	List<AccountCop> findAllWithBrebeKeys();
 
+	/** Suma total del saldo de TODAS las cuentas COP (para el total disponible). */
+	@Query("SELECT COALESCE(SUM(a.balance), 0) FROM AccountCop a")
+	double sumBalances();
+
 	/** Id + saldo + cupo diario restante — consulta liviana para refrescar en tiempo real (SSE). */
 	@Query("""
 		SELECT a.id AS id, a.balance AS balance,

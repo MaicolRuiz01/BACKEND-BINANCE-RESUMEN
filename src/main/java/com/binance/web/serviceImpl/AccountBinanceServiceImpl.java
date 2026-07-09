@@ -624,7 +624,31 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
 
 	    return out;
 	}
-	
+
+	/**
+	 * Detalle de criptos por cuenta desde el saldo EXTERNO REAL (consulta en vivo al
+	 * exchange / on-chain), NO el interno. Mismo formato que getInternalBalancesDetail.
+	 */
+	@Override
+	public List<CryptoBalanceDto> getExternalBalancesDetail(String accountName) {
+	    Map<String, Double> external = getExternalBalancesSnapshot(accountName);
+	    Map<String, Double> priceCache = new HashMap<>();
+	    List<CryptoBalanceDto> out = new ArrayList<>();
+
+	    for (Map.Entry<String, Double> e : external.entrySet()) {
+	        String sym = e.getKey() != null ? e.getKey().trim().toUpperCase() : "";
+	        double qty = e.getValue() != null ? e.getValue() : 0.0;
+	        if (sym.isEmpty() || qty <= 0) continue;
+
+	        double px = usdtPrice(sym, priceCache);
+	        double usdtVal = qty * px;
+	        out.add(new CryptoBalanceDto(sym, qty, usdtVal));
+	    }
+
+	    out.sort(Comparator.comparing(CryptoBalanceDto::getUsdtValue).reversed());
+	    return out;
+	}
+
 	private Map<String, Double> getTodayCryptoAverageRates() {
 	    LocalDate hoy = LocalDate.now(ZONE_BOGOTA);
 

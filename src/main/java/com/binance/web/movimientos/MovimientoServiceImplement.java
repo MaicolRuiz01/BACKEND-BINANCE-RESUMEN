@@ -51,15 +51,18 @@ public class MovimientoServiceImplement implements MovimientoService {
 				.orElseThrow(() -> new RuntimeException("Cuenta Destino no encontrada"));
 
 		double comision = monto * 0.004;
-		double montoConComision = monto + comision;
+		// 4x1000: diferido en BANCOLOMBIA (scheduler al día siguiente), inmediato en los demás.
+		boolean esBanco = "BANCOLOMBIA".equalsIgnoreCase(String.valueOf(cuentaFrom.getBankType()));
+		double deduccionHoy = esBanco ? monto : (monto + comision);
 
 		Movimiento mov = Movimiento.builder().tipo("TRANSFERENCIA").fecha(LocalDateTime.now()).monto(monto)
 				.cuentaOrigen(cuentaFrom) // ✅ origen correcto
 				.cuentaDestino(cuentaTo) // ✅ destino correcto
 				.comision(comision) // ✅ sólo la comisión, no "monto+comisión"
+				.comisionAplicada(!esBanco) // Bancolombia: 4x1000 pendiente (diferido)
 				.build();
 
-		cuentaFrom.setBalance(cuentaFrom.getBalance() - montoConComision);
+		cuentaFrom.setBalance(cuentaFrom.getBalance() - deduccionHoy);
 		cuentaTo.setBalance(cuentaTo.getBalance() + monto);
 		accountCopRepository.save(cuentaFrom);
 		accountCopRepository.save(cuentaTo);
@@ -246,15 +249,19 @@ public class MovimientoServiceImplement implements MovimientoService {
 					.orElseThrow(() -> new RuntimeException("Cuenta de Origen no encontrada."));
 
 			comision = monto * 0.004;
-			Double montoConComision = monto + comision;
+			// 4x1000: diferido en BANCOLOMBIA (lo cobra el scheduler al día siguiente),
+			// inmediato en los demás bancos.
+			boolean esBanco = "BANCOLOMBIA".equalsIgnoreCase(String.valueOf(cuentaCop.getBankType()));
+			double deduccionHoy = esBanco ? monto : (monto + comision);
 
 			// Actualizar el balance de la cuenta
-			cuentaCop.setBalance(cuentaCop.getBalance() - montoConComision);
+			cuentaCop.setBalance(cuentaCop.getBalance() - deduccionHoy);
 			accountCopRepository.save(cuentaCop);
 
 			// Crear el objeto Movimiento
 			pagoProveedor.setCuentaOrigen(cuentaCop);
 			pagoProveedor.setComision(comision);
+			pagoProveedor.setComisionAplicada(!esBanco);
 
 		}
 		// 4. Lógica para el pago desde la caja (efectivo)
@@ -355,8 +362,11 @@ public class MovimientoServiceImplement implements MovimientoService {
 				supplierRepository.save(destino);
 			}
 			if (m.getCuentaOrigen() != null) {
+				// Solo devolver el 4x1000 si ya se había descontado (Bancolombia diferido = aún no).
+				boolean comisionViejaAplicada = !Boolean.FALSE.equals(m.getComisionAplicada());
+				double aReversar = montoViejo + (comisionViejaAplicada ? comisionVieja : 0.0);
 				AccountCop c = m.getCuentaOrigen();
-				c.setBalance(round2((c.getBalance() != null ? c.getBalance() : 0.0) + montoViejo + comisionVieja));
+				c.setBalance(round2((c.getBalance() != null ? c.getBalance() : 0.0) + aReversar));
 				accountCopRepository.save(c);
 			} else if (m.getCaja() != null) {
 				Efectivo caja = m.getCaja();
@@ -443,9 +453,12 @@ public class MovimientoServiceImplement implements MovimientoService {
 			}
 			if (m.getCuentaOrigen() != null) {
 				double comisionNueva = round2(montoNuevo * 0.004);
-				m.setComision(comisionNueva);
 				AccountCop c = m.getCuentaOrigen();
-				c.setBalance(round2((c.getBalance() != null ? c.getBalance() : 0.0) - montoNuevo - comisionNueva));
+				boolean esBanco = "BANCOLOMBIA".equalsIgnoreCase(String.valueOf(c.getBankType()));
+				double deduccionHoy = esBanco ? montoNuevo : (montoNuevo + comisionNueva);
+				m.setComision(comisionNueva);
+				m.setComisionAplicada(!esBanco);
+				c.setBalance(round2((c.getBalance() != null ? c.getBalance() : 0.0) - deduccionHoy));
 				accountCopRepository.save(c);
 			} else if (m.getCaja() != null) {
 				m.setComision(0.0);
@@ -925,15 +938,16 @@ public class MovimientoServiceImplement implements MovimientoService {
 	    Cliente cliente = clienteRepository.findById(clienteId)
 	            .orElseThrow(() -> new RuntimeException("Cliente no encontrado"));
 
-	    // 👉 comisión 4x1000
+	    // 👉 comisión 4x1000 — diferida en BANCOLOMBIA (scheduler al día siguiente), inmediata en los demás.
 	    double comision = monto * 0.004;
-	    double montoTotal = monto + comision;
+	    boolean esBanco = "BANCOLOMBIA".equalsIgnoreCase(String.valueOf(cuenta.getBankType()));
+	    double deduccionHoy = esBanco ? monto : (monto + comision);
 
 	    // 👉 ACTUALIZAR SALDOS
 	    double saldoCuenta = cuenta.getBalance() != null ? cuenta.getBalance() : 0.0;
 	    double saldoCliente = cliente.getSaldo() != null ? cliente.getSaldo() : 0.0;
 
-	    cuenta.setBalance(saldoCuenta - montoTotal);  // la cuenta paga + comisión
+	    cuenta.setBalance(saldoCuenta - deduccionHoy);  // la cuenta paga (4x1000 diferido si es Bancolombia)
 	    cliente.setSaldo(saldoCliente + monto);       // el cliente recibe solo el monto
 
 	    accountCopRepository.save(cuenta);
@@ -945,6 +959,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 	    mov.setFecha(LocalDateTime.now());
 	    mov.setMonto(monto);
 	    mov.setComision(comision);
+	    mov.setComisionAplicada(!esBanco);
 
 	    mov.setCuentaOrigen(cuenta);      // quien paga
 	    mov.setPagoCliente(cliente);      // quien recibe
@@ -996,8 +1011,11 @@ public class MovimientoServiceImplement implements MovimientoService {
 	        // 2) revertir el origen (uno solo de estos se usó al crear).
 	        if (m.getCuentaOrigen() != null) {
 	            double comision = m.getComision() != null ? m.getComision() : 0.0;
+	            // Solo devolver el 4x1000 si REALMENTE se descontó (Bancolombia pendiente = aún no).
+	            boolean comisionYaAplicada = !Boolean.FALSE.equals(m.getComisionAplicada());
+	            double aReversar = monto + (comisionYaAplicada ? comision : 0.0);
 	            AccountCop c = m.getCuentaOrigen();
-	            c.setBalance((c.getBalance() != null ? c.getBalance() : 0.0) + monto + comision);
+	            c.setBalance((c.getBalance() != null ? c.getBalance() : 0.0) + aReversar);
 	            accountCopRepository.save(c);
 	        } else if (m.getCaja() != null) {
 	            Efectivo caja = m.getCaja();
