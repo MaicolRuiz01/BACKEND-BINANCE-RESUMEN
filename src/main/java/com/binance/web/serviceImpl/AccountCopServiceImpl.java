@@ -38,23 +38,7 @@ public class AccountCopServiceImpl implements AccountCopService {
 	@Transactional
 	public List<AccountCop> findAllAccountCop() {
 		List<AccountCop> cuentasCop = AccountCopRepository.findAllWithBrebeKeys();
-		LocalDate hoy = LocalDate.now(ZONE_BOGOTA);
-		boolean alguienActualizado = false;
-		for (AccountCop acc : cuentasCop) {
-			if (acc.getBankType() == null) continue;
-			boolean diaDistinto = acc.getCupoFecha() == null || !hoy.equals(acc.getCupoFecha());
-			if (diaDistinto || acc.getCupoCajeroDisponibleHoy() == null || acc.getCupoCorresponsalDisponibleHoy() == null) {
-				double cajero       = CupoDiarioRules.maxCajeroPorBanco(acc.getBankType());
-				double corresponsal = CupoDiarioRules.maxCorresponsalPorBanco(acc.getBankType());
-				acc.setCupoFecha(hoy);
-				acc.setCupoCajeroDisponibleHoy(cajero);
-				acc.setCupoCorresponsalDisponibleHoy(corresponsal);
-				acc.setCupoDiarioMax(cajero + corresponsal);
-				acc.setCupoDisponibleHoy(cajero + corresponsal);
-				AccountCopRepository.save(acc);
-				alguienActualizado = true;
-			}
-		}
+		asegurarCupoHoyDeTodas(cuentasCop);
 		return cuentasCop;
 	}
 
@@ -64,8 +48,29 @@ public class AccountCopServiceImpl implements AccountCopService {
 	}
 
 	@Override
+	@Transactional
 	public List<AccountCopRepository.SaldoView> findAllSaldos() {
+		// Antes de devolver el cupo "liviano" (usado por el refresco en tiempo
+		// real / SSE de las vistas de retiro), hay que asegurar que esté al día:
+		// el reset diario normalmente ocurre al entrar a la vista de Cuentas
+		// (findAllAccountCop), pero si nadie pasó por ahí todavía hoy, este
+		// endpoint liviano podría devolver el cupo de ayer.
+		List<AccountCop> cuentas = AccountCopRepository.findAll();
+		asegurarCupoHoyDeTodas(cuentas);
 		return AccountCopRepository.findAllSaldos();
+	}
+
+	/** Resetea a los máximos del día el cupo de cualquier cuenta cuyo cupo esté vencido o sin inicializar. */
+	private void asegurarCupoHoyDeTodas(List<AccountCop> cuentas) {
+		LocalDate hoy = LocalDate.now(ZONE_BOGOTA);
+		for (AccountCop acc : cuentas) {
+			if (acc.getBankType() == null) continue;
+			boolean diaDistinto = acc.getCupoFecha() == null || !hoy.equals(acc.getCupoFecha());
+			if (diaDistinto || acc.getCupoCajeroDisponibleHoy() == null || acc.getCupoCorresponsalDisponibleHoy() == null) {
+				CupoDiarioRules.asegurarCupoHoy(acc);
+				AccountCopRepository.save(acc);
+			}
+		}
 	}
 
 

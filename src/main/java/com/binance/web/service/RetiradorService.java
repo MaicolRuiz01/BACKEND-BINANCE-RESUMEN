@@ -53,4 +53,12 @@ public interface RetiradorService {
 
     /** Envía (o reenvía) el recordatorio de caja a un retirador puntual, con botón "Entregar efectivo". */
     void enviarRecordatorioCaja(Retirador retirador);
+
+    /**
+     * Para cada cuenta COP con solicitudes SIN_ASIGNAR o PENDIENTE, cuánto de
+     * su saldo ya está "comprometido" (reservado) en esas solicitudes, más el
+     * desglose de cuáles son. Sirve para que la vista de Cuentas muestre
+     * "saldo disponible" distinto de "saldo bruto".
+     */
+    List<CuentaComprometidoDto> obtenerMontosComprometidos();
 }

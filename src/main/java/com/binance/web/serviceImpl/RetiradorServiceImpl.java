@@ -5,6 +5,7 @@ import com.binance.web.Repository.*;
 import com.binance.web.dto.*;
 import com.binance.web.service.RetiradorService;
 import com.binance.web.service.TelegramService;
+import com.binance.web.util.CupoDiarioRules;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
@@ -159,22 +160,110 @@ public class RetiradorServiceImpl implements RetiradorService {
     }
 
     /**
-     * Verifica que cada cuenta tenga saldo suficiente para cubrir el monto que se
-     * quiere solicitar en retiro. No descuenta nada aquí — el descuento real
-     * ocurre únicamente cuando el retirador confirma el retiro
-     * (confirmarSolicitud),
-     * esto solo evita crear/notificar una solicitud por encima de lo disponible.
+     * Verifica que cada cuenta tenga saldo DISPONIBLE suficiente para cubrir el
+     * monto que se quiere solicitar en retiro. No descuenta nada aquí — el
+     * descuento real ocurre únicamente cuando el retirador confirma el retiro
+     * (confirmarSolicitud), esto solo evita crear/notificar una solicitud por
+     * encima de lo disponible.
+     *
+     * "Disponible" = saldo de la cuenta MENOS lo que ya está comprometido en
+     * otras solicitudes SIN_ASIGNAR o PENDIENTE de esa misma cuenta (dinero
+     * que ya se pidió retirar pero el retirador todavía no confirmó). Esto
+     * evita que se pueda mandar dos veces una solicitud sobre el mismo dinero
+     * antes de que la primera se confirme.
      */
     private void validarSaldoSuficiente(List<DetalleRetiro> detalles) {
         for (DetalleRetiro detalle : detalles) {
             AccountCop cuenta = detalle.getCuentaCop();
-            if (cuenta.getBalance() < detalle.totalDetalle()) {
+            double comprometido = solicitudRepository.sumComprometidoPorCuenta(cuenta.getId());
+            double disponible = cuenta.getBalance() - comprometido;
+            if (disponible < detalle.totalDetalle()) {
                 throw new IllegalArgumentException(
-                        "Saldo insuficiente en la cuenta " + cuenta.getName() + " (disponible: $"
-                                + String.format("%,.0f", cuenta.getBalance()) + ", solicitado: $"
-                                + String.format("%,.0f", detalle.totalDetalle()) + ")");
+                        "Saldo insuficiente en la cuenta " + cuenta.getName() + " (saldo: $"
+                                + String.format("%,.0f", cuenta.getBalance())
+                                + ", ya comprometido en retiros pendientes de confirmar: $"
+                                + String.format("%,.0f", comprometido)
+                                + ", disponible: $" + String.format("%,.0f", disponible)
+                                + ", solicitado: $" + String.format("%,.0f", detalle.totalDetalle()) + ")");
+            }
+
+            validarCupoDiario(detalle, cuenta);
+        }
+    }
+
+    /**
+     * Límite diario por tipo de retiro, por cuenta (ej: Bancolombia hoy = $2.700
+     * cajero / $10.000 corresponsal — ver CupoDiarioRules). Se valida por
+     * separado: en un retiro COMPLETO, el monto de cajero se descuenta del cupo
+     * de cajero y el de corresponsal del cupo de corresponsal, cada uno con su
+     * propio tope (no es un tope combinado).
+     *
+     * Igual que con el saldo, se resta lo que ya está comprometido en otras
+     * solicitudes SIN_ASIGNAR/PENDIENTE de esa cuenta para no permitir que dos
+     * solicitudes sin confirmar, sumadas, superen el cupo del día.
+     */
+    private void validarCupoDiario(DetalleRetiro detalle, AccountCop cuenta) {
+        if (cuenta.getBankType() == null) {
+            // Cuenta sin banco configurado (ej: cuentas de prueba viejas) — no hay
+            // regla de cupo diario que aplicarle, no bloqueamos por esto.
+            return;
+        }
+        CupoDiarioRules.asegurarCupoHoy(cuenta);
+        accountCopRepository.save(cuenta);
+
+        if (detalle.getMontoCajero() != null && detalle.getMontoCajero() > 0) {
+            double comprometidoCajero = solicitudRepository.sumMontoCajeroComprometidoPorCuenta(cuenta.getId());
+            double cupoHoy = cuenta.getCupoCajeroDisponibleHoy() != null ? cuenta.getCupoCajeroDisponibleHoy() : 0.0;
+            double disponibleCajero = cupoHoy - comprometidoCajero;
+            if (detalle.getMontoCajero() > disponibleCajero) {
+                throw new IllegalArgumentException(
+                        "Cupo diario de CAJERO agotado en la cuenta " + cuenta.getName() + " (cupo de hoy: $"
+                                + String.format("%,.0f", cupoHoy)
+                                + ", ya comprometido en solicitudes pendientes: $"
+                                + String.format("%,.0f", comprometidoCajero)
+                                + ", disponible: $" + String.format("%,.0f", disponibleCajero)
+                                + ", solicitado: $" + String.format("%,.0f", detalle.getMontoCajero()) + ")");
             }
         }
+
+        if (detalle.getMontoCorresponsal() != null && detalle.getMontoCorresponsal() > 0) {
+            double comprometidoCorresponsal = solicitudRepository.sumMontoCorresponsalComprometidoPorCuenta(cuenta.getId());
+            double cupoHoy = cuenta.getCupoCorresponsalDisponibleHoy() != null ? cuenta.getCupoCorresponsalDisponibleHoy() : 0.0;
+            double disponibleCorresponsal = cupoHoy - comprometidoCorresponsal;
+            if (detalle.getMontoCorresponsal() > disponibleCorresponsal) {
+                throw new IllegalArgumentException(
+                        "Cupo diario de CORRESPONSAL agotado en la cuenta " + cuenta.getName() + " (cupo de hoy: $"
+                                + String.format("%,.0f", cupoHoy)
+                                + ", ya comprometido en solicitudes pendientes: $"
+                                + String.format("%,.0f", comprometidoCorresponsal)
+                                + ", disponible: $" + String.format("%,.0f", disponibleCorresponsal)
+                                + ", solicitado: $" + String.format("%,.0f", detalle.getMontoCorresponsal()) + ")");
+            }
+        }
+    }
+
+    @Override
+    public List<CuentaComprometidoDto> obtenerMontosComprometidos() {
+        List<DetalleRetiro> detalles = solicitudRepository.findDetallesComprometidos();
+        Map<Integer, List<DetalleRetiro>> porCuenta = detalles.stream()
+                .collect(Collectors.groupingBy(d -> d.getCuentaCop().getId()));
+
+        List<CuentaComprometidoDto> result = new ArrayList<>();
+        for (Map.Entry<Integer, List<DetalleRetiro>> entry : porCuenta.entrySet()) {
+            double total = entry.getValue().stream().mapToDouble(DetalleRetiro::totalDetalle).sum();
+            List<SolicitudComprometidaDto> solicitudes = entry.getValue().stream()
+                    .map(d -> new SolicitudComprometidaDto(
+                            d.getSolicitud().getId(),
+                            d.totalDetalle(),
+                            d.getSolicitud().getEstado().name(),
+                            d.getSolicitud().getFechaCreacion(),
+                            d.getSolicitud().getRetirador() != null
+                                    ? d.getSolicitud().getRetirador().getNombre()
+                                    : null))
+                    .collect(Collectors.toList());
+            result.add(new CuentaComprometidoDto(entry.getKey(), total, solicitudes));
+        }
+        return result;
     }
 
     @Override
@@ -190,7 +279,10 @@ public class RetiradorServiceImpl implements RetiradorService {
         if (solicitud.getRetirador() == null)
             throw new IllegalStateException("La solicitud aún no tiene un retirador asignado.");
 
-        // Validar saldo suficiente en TODAS las cuentas antes de restar nada
+        // Validar saldo Y cupo diario suficiente en TODAS las cuentas antes de restar nada.
+        // El cupo se revalida acá (no solo al crear la solicitud) porque puede haber
+        // pasado tiempo entre que se creó y se confirma, y mientras tanto el cupo
+        // pudo haberse gastado por otro retiro (directo o de otra solicitud).
         for (DetalleRetiro detalle : solicitud.getDetalles()) {
             AccountCop cuenta = detalle.getCuentaCop();
             if (cuenta.getBalance() < detalle.totalDetalle()) {
@@ -199,11 +291,51 @@ public class RetiradorServiceImpl implements RetiradorService {
                                 + String.format("%,.0f", cuenta.getBalance()) + ", requerido: $"
                                 + String.format("%,.0f", detalle.totalDetalle()) + ")");
             }
+
+            // Cuentas sin banco configurado (ej: cuentas de prueba viejas) no tienen
+            // regla de cupo diario que aplicarles — no bloqueamos por esto.
+            if (cuenta.getBankType() != null) {
+                CupoDiarioRules.asegurarCupoHoy(cuenta);
+                if (detalle.getMontoCajero() != null && detalle.getMontoCajero() > 0) {
+                    double disp = cuenta.getCupoCajeroDisponibleHoy() != null ? cuenta.getCupoCajeroDisponibleHoy() : 0.0;
+                    if (detalle.getMontoCajero() > disp) {
+                        throw new IllegalStateException(
+                                "Cupo diario de CAJERO agotado en la cuenta " + cuenta.getName() + " (disponible: $"
+                                        + String.format("%,.0f", disp) + ", requerido: $"
+                                        + String.format("%,.0f", detalle.getMontoCajero()) + ")");
+                    }
+                }
+                if (detalle.getMontoCorresponsal() != null && detalle.getMontoCorresponsal() > 0) {
+                    double disp = cuenta.getCupoCorresponsalDisponibleHoy() != null ? cuenta.getCupoCorresponsalDisponibleHoy() : 0.0;
+                    if (detalle.getMontoCorresponsal() > disp) {
+                        throw new IllegalStateException(
+                                "Cupo diario de CORRESPONSAL agotado en la cuenta " + cuenta.getName() + " (disponible: $"
+                                        + String.format("%,.0f", disp) + ", requerido: $"
+                                        + String.format("%,.0f", detalle.getMontoCorresponsal()) + ")");
+                    }
+                }
+            }
         }
 
         for (DetalleRetiro detalle : solicitud.getDetalles()) {
             AccountCop cuenta = detalle.getCuentaCop();
             cuenta.setBalance(cuenta.getBalance() - detalle.totalDetalle());
+
+            if (cuenta.getBankType() != null) {
+                if (detalle.getMontoCajero() != null && detalle.getMontoCajero() > 0) {
+                    double disp = cuenta.getCupoCajeroDisponibleHoy() != null ? cuenta.getCupoCajeroDisponibleHoy() : 0.0;
+                    cuenta.setCupoCajeroDisponibleHoy(disp - detalle.getMontoCajero());
+                }
+                if (detalle.getMontoCorresponsal() != null && detalle.getMontoCorresponsal() > 0) {
+                    double disp = cuenta.getCupoCorresponsalDisponibleHoy() != null ? cuenta.getCupoCorresponsalDisponibleHoy() : 0.0;
+                    cuenta.setCupoCorresponsalDisponibleHoy(disp - detalle.getMontoCorresponsal());
+                }
+                // Sincronizar el campo legacy (suma de ambos cupos).
+                double cajeroRest = cuenta.getCupoCajeroDisponibleHoy() != null ? cuenta.getCupoCajeroDisponibleHoy() : 0.0;
+                double corresponsalRest = cuenta.getCupoCorresponsalDisponibleHoy() != null ? cuenta.getCupoCorresponsalDisponibleHoy() : 0.0;
+                cuenta.setCupoDisponibleHoy(cajeroRest + corresponsalRest);
+            }
+
             accountCopRepository.save(cuenta);
         }
 
@@ -264,37 +396,32 @@ public class RetiradorServiceImpl implements RetiradorService {
         // No hay que revertir ningún saldo: el dinero solo se descuenta al
         // confirmar (COMPLETADO), así que cancelar antes de eso no toca cuentas ni
         // caja.
-        boolean estabaSinAsignar = solicitud.getEstado() == EstadoSolicitud.SIN_ASIGNAR;
         Retirador retirador = solicitud.getRetirador();
 
         solicitud.setEstado(EstadoSolicitud.CANCELADO);
         solicitudRepository.save(solicitud);
 
-        // Si tenía mensaje en el grupo: si aún nadie la había tomado, se borra
-        // directamente; si ya estaba tomada, se edita para dejar claro que se canceló.
+        // Borra el mensaje del grupo por completo (esté o no ya tomada), como si la
+        // solicitud nunca hubiera existido — nada de dejarlo editado con texto de
+        // "cancelada" ni con botones activos sueltos.
         if (solicitud.getTelegramMessageId() != null
                 && telegramGroupChatId != null && !telegramGroupChatId.isBlank()) {
-            if (estabaSinAsignar) {
-                telegramService.deleteMessage(telegramGroupChatId, solicitud.getTelegramMessageId());
-            } else {
-                telegramService.editMessage(telegramGroupChatId, solicitud.getTelegramMessageId(),
-                        "🚫 *Solicitud de Retiro #" + solicitud.getId() + " — CANCELADA*");
-            }
+            telegramService.deleteMessage(telegramGroupChatId, solicitud.getTelegramMessageId());
         }
 
-        // Si ya estaba asignada a un retirador, editamos el mensaje privado original
-        // ("Nueva Solicitud de Retiro...") para quitarle los botones y marcarlo como
-        // cancelado, en vez de dejarlo activo y mandar un mensaje nuevo aparte.
+        // Borra el mensaje privado original ("Nueva Solicitud de Retiro...") por
+        // completo, en vez de editarlo, para que no quede nada visible ni botones
+        // activos con los que se pueda interactuar después de cancelada.
         if (retirador != null && retirador.getTelegramChatId() != null) {
-            String textoCancelado = "🚫 *Solicitud #" + solicitud.getId() + " cancelada.";
             if (solicitud.getTelegramPrivateMessageId() != null) {
-                telegramService.editMessageTextOnly(
+                telegramService.deleteMessage(
                         String.valueOf(retirador.getTelegramChatId()),
-                        solicitud.getTelegramPrivateMessageId(),
-                        textoCancelado);
+                        solicitud.getTelegramPrivateMessageId());
             } else {
-                // No teníamos guardado el message_id (solicitud antigua) — avisamos aparte.
-                telegramService.sendMessage(String.valueOf(retirador.getTelegramChatId()), textoCancelado);
+                // No teníamos guardado el message_id (solicitud antigua) — no hay nada que
+                // borrar, así que avisamos aparte con un mensaje nuevo.
+                telegramService.sendMessage(String.valueOf(retirador.getTelegramChatId()),
+                        "🚫 *Solicitud #" + solicitud.getId() + " cancelada.*");
             }
         }
 
