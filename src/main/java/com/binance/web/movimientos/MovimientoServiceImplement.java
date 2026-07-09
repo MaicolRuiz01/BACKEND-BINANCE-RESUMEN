@@ -344,34 +344,186 @@ public class MovimientoServiceImplement implements MovimientoService {
 	}
 
 	@Override
-	public Movimiento actualizarMovimiento(Integer id, Double monto, Integer cuentaOrigenId, Integer cuentaDestinoId,
+	@Transactional
+	public Movimiento actualizarMovimiento(Integer id, Double montoParam, Integer cuentaOrigenId, Integer cuentaDestinoId,
 			Integer cajaId) {
-		Movimiento movimiento = movimientoRepository.findById(id)
+		Movimiento m = movimientoRepository.findById(id)
 				.orElseThrow(() -> new RuntimeException("Movimiento no encontrado con id: " + id));
 
-		if (monto != null) {
-			movimiento.setMonto(monto);
+		String tipo = m.getTipo() != null ? m.getTipo() : "";
+
+		// Solo se puede editar lo que sabemos revertir/aplicar sobre saldos (igual que eliminarMovimiento).
+		boolean soportado = "PAGO PROVEEDOR".equals(tipo)
+				|| tipo.startsWith("RETIRO")
+				|| "TRANSFERENCIA CAJA".equals(tipo);
+		if (!soportado) {
+			throw new IllegalStateException(
+				"Este tipo de movimiento aún no se puede editar (solo PAGO PROVEEDOR, RETIRO y TRANSFERENCIA CAJA).");
 		}
 
+		double montoViejo    = m.getMonto() != null ? m.getMonto() : 0.0;
+		double comisionVieja = m.getComision() != null ? m.getComision() : 0.0;
+
+		// ── 1) REVERTIR el efecto viejo sobre los saldos (mismo criterio que eliminarMovimiento) ──
+		if ("PAGO PROVEEDOR".equals(tipo)) {
+			Supplier destino = m.getPagoProveedor();
+			if (destino != null) {
+				destino.setBalance((destino.getBalance() != null ? destino.getBalance() : 0.0) + montoViejo);
+				supplierRepository.save(destino);
+			}
+			if (m.getCuentaOrigen() != null) {
+				AccountCop c = m.getCuentaOrigen();
+				c.setBalance(round2((c.getBalance() != null ? c.getBalance() : 0.0) + montoViejo + comisionVieja));
+				accountCopRepository.save(c);
+			} else if (m.getCaja() != null) {
+				Efectivo caja = m.getCaja();
+				caja.setSaldo(round2((caja.getSaldo() != null ? caja.getSaldo() : 0.0) + montoViejo));
+				efectivoRepository.save(caja);
+			} else if (m.getProveedorOrigen() != null) {
+				Supplier po = m.getProveedorOrigen();
+				po.setBalance((po.getBalance() != null ? po.getBalance() : 0.0) - montoViejo);
+				supplierRepository.save(po);
+			} else if (m.getPagoCliente() != null) {
+				Cliente cl = m.getPagoCliente();
+				cl.setSaldo((cl.getSaldo() != null ? cl.getSaldo() : 0.0) - montoViejo);
+				clienteRepository.save(cl);
+			}
+		} else if (tipo.startsWith("RETIRO")) {
+			AccountCop cuenta = m.getCuentaOrigen();
+			Efectivo caja = m.getCaja();
+			boolean comisionYaAplicada = !Boolean.FALSE.equals(m.getComisionAplicada());
+			double aReversar = montoViejo + (comisionYaAplicada ? comisionVieja : 0.0);
+			if (cuenta != null) {
+				cuenta.setBalance(round2((cuenta.getBalance() != null ? cuenta.getBalance() : 0.0) + aReversar));
+				asegurarCupoHoy(cuenta);
+				java.time.LocalDate diaRetiro = m.getFecha() != null ? m.getFecha().toLocalDate() : null;
+				java.time.LocalDate hoy = java.time.LocalDate.now(ZONE_BOGOTA);
+				if (diaRetiro != null && diaRetiro.equals(hoy) && cuenta.getBankType() != null) {
+					if (tipo.contains("CAJERO")) {
+						double max = CupoDiarioRules.maxCajeroPorBanco(cuenta.getBankType());
+						double disp = cuenta.getCupoCajeroDisponibleHoy() != null ? cuenta.getCupoCajeroDisponibleHoy() : 0.0;
+						cuenta.setCupoCajeroDisponibleHoy(round2(Math.min(max, disp + montoViejo)));
+					} else if (tipo.contains("CORRESPONSAL")) {
+						double max = CupoDiarioRules.maxCorresponsalPorBanco(cuenta.getBankType());
+						double disp = cuenta.getCupoCorresponsalDisponibleHoy() != null ? cuenta.getCupoCorresponsalDisponibleHoy() : 0.0;
+						cuenta.setCupoCorresponsalDisponibleHoy(round2(Math.min(max, disp + montoViejo)));
+					}
+					double cj = cuenta.getCupoCajeroDisponibleHoy() != null ? cuenta.getCupoCajeroDisponibleHoy() : 0.0;
+					double co = cuenta.getCupoCorresponsalDisponibleHoy() != null ? cuenta.getCupoCorresponsalDisponibleHoy() : 0.0;
+					cuenta.setCupoDisponibleHoy(round2(cj + co));
+				}
+				accountCopRepository.save(cuenta);
+			}
+			if (caja != null) {
+				caja.setSaldo(round2((caja.getSaldo() != null ? caja.getSaldo() : 0.0) - montoViejo));
+				efectivoRepository.save(caja);
+			}
+		} else if ("TRANSFERENCIA CAJA".equals(tipo)) {
+			Efectivo origen = m.getCaja();
+			Efectivo destino = m.getCajaDestino();
+			if (origen != null) {
+				origen.setSaldo(round2((origen.getSaldo() != null ? origen.getSaldo() : 0.0) + montoViejo));
+				efectivoRepository.save(origen);
+			}
+			if (destino != null) {
+				destino.setSaldo(round2((destino.getSaldo() != null ? destino.getSaldo() : 0.0) - montoViejo));
+				efectivoRepository.save(destino);
+			}
+		}
+
+		// ── 2) Actualizar referencias y monto del movimiento (nuevo estado) ──
 		if (cuentaOrigenId != null) {
 			AccountCop cuentaOrigen = accountCopRepository.findById(cuentaOrigenId)
 					.orElseThrow(() -> new RuntimeException("Cuenta origen no encontrada con id: " + cuentaOrigenId));
-			movimiento.setCuentaOrigen(cuentaOrigen);
+			m.setCuentaOrigen(cuentaOrigen);
 		}
-
 		if (cuentaDestinoId != null) {
 			AccountCop cuentaDestino = accountCopRepository.findById(cuentaDestinoId)
 					.orElseThrow(() -> new RuntimeException("Cuenta destino no encontrada con id: " + cuentaDestinoId));
-			movimiento.setCuentaDestino(cuentaDestino);
+			m.setCuentaDestino(cuentaDestino);
 		}
-
 		if (cajaId != null) {
 			Efectivo caja = efectivoRepository.findById(cajaId)
 					.orElseThrow(() -> new RuntimeException("Caja no encontrada con id: " + cajaId));
-			movimiento.setCaja(caja);
+			m.setCaja(caja);
 		}
 
-		return movimientoRepository.save(movimiento);
+		double montoNuevo = montoParam != null ? montoParam : montoViejo;
+		m.setMonto(montoNuevo);
+
+		// ── 3) APLICAR el efecto nuevo sobre los saldos (mismo criterio que al crear) ──
+		if ("PAGO PROVEEDOR".equals(tipo)) {
+			Supplier destino = m.getPagoProveedor();
+			if (destino != null) {
+				destino.setBalance((destino.getBalance() != null ? destino.getBalance() : 0.0) - montoNuevo);
+				supplierRepository.save(destino);
+			}
+			if (m.getCuentaOrigen() != null) {
+				double comisionNueva = round2(montoNuevo * 0.004);
+				m.setComision(comisionNueva);
+				AccountCop c = m.getCuentaOrigen();
+				c.setBalance(round2((c.getBalance() != null ? c.getBalance() : 0.0) - montoNuevo - comisionNueva));
+				accountCopRepository.save(c);
+			} else if (m.getCaja() != null) {
+				m.setComision(0.0);
+				Efectivo caja = m.getCaja();
+				caja.setSaldo(round2((caja.getSaldo() != null ? caja.getSaldo() : 0.0) - montoNuevo));
+				efectivoRepository.save(caja);
+			} else if (m.getProveedorOrigen() != null) {
+				Supplier po = m.getProveedorOrigen();
+				po.setBalance((po.getBalance() != null ? po.getBalance() : 0.0) + montoNuevo);
+				supplierRepository.save(po);
+			} else if (m.getPagoCliente() != null) {
+				Cliente cl = m.getPagoCliente();
+				cl.setSaldo((cl.getSaldo() != null ? cl.getSaldo() : 0.0) + montoNuevo);
+				clienteRepository.save(cl);
+			}
+		} else if (tipo.startsWith("RETIRO")) {
+			AccountCop cuenta = m.getCuentaOrigen();
+			Efectivo caja = m.getCaja();
+			double comisionNueva = round2(montoNuevo * 0.004);
+			boolean diferir4x1000 = cuenta != null && "BANCOLOMBIA".equalsIgnoreCase(String.valueOf(cuenta.getBankType()));
+			m.setComision(comisionNueva);
+			m.setComisionAplicada(!diferir4x1000);
+			double deduccionHoy = diferir4x1000 ? montoNuevo : (montoNuevo + comisionNueva);
+			if (cuenta != null) {
+				cuenta.setBalance(round2((cuenta.getBalance() != null ? cuenta.getBalance() : 0.0) - deduccionHoy));
+				asegurarCupoHoy(cuenta);
+				java.time.LocalDate diaRetiro = m.getFecha() != null ? m.getFecha().toLocalDate() : null;
+				java.time.LocalDate hoy = java.time.LocalDate.now(ZONE_BOGOTA);
+				if (diaRetiro != null && diaRetiro.equals(hoy) && cuenta.getBankType() != null) {
+					if (tipo.contains("CAJERO")) {
+						double disp = cuenta.getCupoCajeroDisponibleHoy() != null ? cuenta.getCupoCajeroDisponibleHoy() : 0.0;
+						cuenta.setCupoCajeroDisponibleHoy(round2(Math.max(0.0, disp - montoNuevo)));
+					} else if (tipo.contains("CORRESPONSAL")) {
+						double disp = cuenta.getCupoCorresponsalDisponibleHoy() != null ? cuenta.getCupoCorresponsalDisponibleHoy() : 0.0;
+						cuenta.setCupoCorresponsalDisponibleHoy(round2(Math.max(0.0, disp - montoNuevo)));
+					}
+					double cj = cuenta.getCupoCajeroDisponibleHoy() != null ? cuenta.getCupoCajeroDisponibleHoy() : 0.0;
+					double co = cuenta.getCupoCorresponsalDisponibleHoy() != null ? cuenta.getCupoCorresponsalDisponibleHoy() : 0.0;
+					cuenta.setCupoDisponibleHoy(round2(cj + co));
+				}
+				accountCopRepository.save(cuenta);
+			}
+			if (caja != null) {
+				caja.setSaldo(round2((caja.getSaldo() != null ? caja.getSaldo() : 0.0) + montoNuevo));
+				efectivoRepository.save(caja);
+			}
+		} else if ("TRANSFERENCIA CAJA".equals(tipo)) {
+			m.setComision(0.0);
+			Efectivo origen = m.getCaja();
+			Efectivo destino = m.getCajaDestino();
+			if (origen != null) {
+				origen.setSaldo(round2((origen.getSaldo() != null ? origen.getSaldo() : 0.0) - montoNuevo));
+				efectivoRepository.save(origen);
+			}
+			if (destino != null) {
+				destino.setSaldo(round2((destino.getSaldo() != null ? destino.getSaldo() : 0.0) + montoNuevo));
+				efectivoRepository.save(destino);
+			}
+		}
+
+		return movimientoRepository.save(m);
 	}
 
 	@Override
