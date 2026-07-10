@@ -96,56 +96,85 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 	        BuyDollars existing = buyDollarsRepository.findById(id)
 	            .orElseThrow(() -> new RuntimeException("Compra con ID " + id + " no encontrada"));
 
-	        // Valores antiguos
-	        Double oldAmount = existing.getAmount();
-	        Double oldPesos = existing.getPesos();
-	        Supplier oldSupplier = existing.getSupplier();
+	        // ===== Valores ANTIGUOS (el titular real puede ser proveedor O cliente) =====
+	        Double   oldAmount       = existing.getAmount();
+	        Double   oldPesos        = existing.getPesos() != null ? existing.getPesos() : 0.0;
+	        Supplier oldSupplier     = existing.getSupplier();
+	        Cliente  oldCliente      = existing.getCliente();
 	        AccountBinance oldAccount = existing.getAccountBinance();
-	        String oldCryptoSymbol = existing.getCryptoSymbol();
-	        
-	        // Valores nuevos
-	        Double newAmount = dto.getAmount();
-	        Double newTasa = dto.getTasa();
-	        Double newPesos = newAmount * newTasa;
-	        Integer newSupplierId = dto.getSupplierId();
-	        Integer newAccountId = dto.getAccountBinanceId();
-	        String newCryptoSymbol = dto.getCryptoSymbol();
+	        String   oldCryptoSymbol = existing.getCryptoSymbol();
 
-	        // 1. Revertir saldos anteriores
+	        // ===== Valores NUEVOS (con fallbacks para no romper si el front no manda algún campo) =====
+	        Double  newAmount       = dto.getAmount()  != null ? dto.getAmount()  : oldAmount;
+	        Double  newTasa         = dto.getTasa()    != null ? dto.getTasa()    : existing.getTasa();
+	        Double  newPesos        = (newAmount != null && newTasa != null) ? newAmount * newTasa : 0.0;
+	        Integer newSupplierId   = dto.getSupplierId();
+	        Integer newClienteId    = dto.getClienteId();
+	        Integer newAccountId    = dto.getAccountBinanceId();
+	        String  newCryptoSymbol = dto.getCryptoSymbol() != null ? dto.getCryptoSymbol() : oldCryptoSymbol;
+
+	        // Debe reasignarse a un proveedor O a un cliente (uno de los dos).
+	        if (newSupplierId == null && newClienteId == null) {
+	            throw new RuntimeException("Debe especificar un proveedor o un cliente para reasignar la compra");
+	        }
+
+	        // 1. REVERTIR el saldo del titular ANTERIOR — sea proveedor o cliente.
+	        //    (En "debe/debemos" del cliente el signo es el mismo que en la asignación: al asignar
+	        //     se sumó oldPesos, así que aquí se resta oldPesos para deshacerlo.)
 	        if (oldSupplier != null) {
-	            oldSupplier.setBalance(oldSupplier.getBalance() - oldPesos);
+	            double bal = oldSupplier.getBalance() != null ? oldSupplier.getBalance() : 0.0;
+	            oldSupplier.setBalance(bal - oldPesos);
 	            supplierRepository.save(oldSupplier);
 	        }
-	        if (oldAccount != null) {
-	            accountBinanceService.subtractCryptoBalance(oldAccount.getId(), oldCryptoSymbol,
-	            oldAmount == null ? null : oldAmount * 1000.0);
+	        if (oldCliente != null) {
+	            double sal = oldCliente.getSaldo() != null ? oldCliente.getSaldo() : 0.0;
+	            oldCliente.setSaldo(sal - oldPesos);
+	            clienteRepository.save(oldCliente);
 	        }
 
-	        // 2. Actualizar la entidad BuyDollars
+	        // 2. Actualizar los datos de la compra.
 	        existing.setAmount(newAmount);
 	        existing.setTasa(newTasa);
 	        existing.setPesos(newPesos);
 	        existing.setCryptoSymbol(newCryptoSymbol);
-	        
-	        // Asignar proveedor
-	        Supplier newSupplier = supplierRepository.findById(newSupplierId)
-	            .orElseThrow(() -> new RuntimeException("Nuevo proveedor no encontrado"));
-	        existing.setSupplier(newSupplier);
 
-	        // Asignar cuenta de Binance
-	        AccountBinance newAccount = accountBinanceRepository.findById(newAccountId)
-	            .orElseThrow(() -> new RuntimeException("Nueva cuenta de Binance no encontrada"));
-	        existing.setAccountBinance(newAccount);
-	        
-	        // 3. Aplicar los nuevos saldos
-	        Double currentNewSupplierBalance = newSupplier.getBalance() != null ? newSupplier.getBalance() : 0.0;
-	        newSupplier.setBalance(currentNewSupplierBalance + newPesos);
-	        supplierRepository.save(newSupplier);
-	        
-	        accountBinanceService.updateOrCreateCryptoBalance(newAccount.getId(), newCryptoSymbol,
-	            newAmount == null ? null : newAmount * 1000.0);
-	        
-	        // Se guarda la compra con los nuevos datos
+	        // 3. Reasignar el titular NUEVO y APLICAR el saldo. Proveedor tiene prioridad si vinieran ambos.
+	        //    Se limpia SIEMPRE el otro lado para que la compra nunca quede con proveedor y cliente a la vez.
+	        if (newSupplierId != null) {
+	            Supplier newSupplier = supplierRepository.findById(newSupplierId)
+	                .orElseThrow(() -> new RuntimeException("Nuevo proveedor no encontrado"));
+	            existing.setSupplier(newSupplier);
+	            existing.setCliente(null);
+	            double bal = newSupplier.getBalance() != null ? newSupplier.getBalance() : 0.0;
+	            newSupplier.setBalance(bal + newPesos);
+	            supplierRepository.save(newSupplier);
+	        } else {
+	            Cliente newCliente = clienteRepository.findById(newClienteId)
+	                .orElseThrow(() -> new RuntimeException("Nuevo cliente no encontrado"));
+	            existing.setCliente(newCliente);
+	            existing.setSupplier(null);
+	            double sal = newCliente.getSaldo() != null ? newCliente.getSaldo() : 0.0;
+	            newCliente.setSaldo(sal + newPesos);
+	            clienteRepository.save(newCliente);
+	        }
+
+	        // 4. Cuenta Binance / saldo cripto:
+	        //    El cripto ya entró físicamente a una cuenta al importar la compra. Reasignar el PROVEEDOR
+	        //    (o el cliente) NO debe tocar el saldo cripto. Solo si el operario cambia la CUENTA de verdad
+	        //    se mueve el cripto de una cuenta a la otra. Así reasignar un proveedor no descuadra el cripto.
+	        if (newAccountId != null && (oldAccount == null || !newAccountId.equals(oldAccount.getId()))) {
+	            if (oldAccount != null && oldAmount != null) {
+	                accountBinanceService.subtractCryptoBalance(oldAccount.getId(), oldCryptoSymbol, oldAmount * 1000.0);
+	            }
+	            AccountBinance newAccount = accountBinanceRepository.findById(newAccountId)
+	                .orElseThrow(() -> new RuntimeException("Nueva cuenta de Binance no encontrada"));
+	            existing.setAccountBinance(newAccount);
+	            if (newAmount != null) {
+	                accountBinanceService.updateOrCreateCryptoBalance(newAccount.getId(), newCryptoSymbol, newAmount * 1000.0);
+	            }
+	        }
+	        // Si la cuenta no cambió, el saldo cripto se deja intacto a propósito.
+
 	        return buyDollarsRepository.save(existing);
 	    }
 
