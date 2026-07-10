@@ -120,6 +120,8 @@ public class TelegramWebhookService {
             handleGastoStart(callbackQueryId, telegramUserId, messageId);
         } else if (data.equals("gasto_cancel")) {
             handleGastoCancel(callbackQueryId, telegramUserId, messageId);
+        } else if (data.equals("movimientos_start")) {
+            handleMovimientosStart(callbackQueryId, telegramUserId, messageId);
         }
     }
 
@@ -262,6 +264,146 @@ public class TelegramWebhookService {
     }
 
     /**
+     * Botón "Movimientos": responde de una vez con los movimientos (y ajustes)
+     * de la caja del retirador SOLO DEL DÍA DE HOY — sin preguntar nada ni
+     * esperar respuesta. El histórico completo solo se ve desde la plataforma.
+     */
+    private void handleMovimientosStart(String callbackQueryId, Long telegramUserId, Integer messageId) {
+        Retirador retirador = retiradorRepository.findByTelegramChatId(telegramUserId).orElse(null);
+        if (retirador == null) {
+            telegramService.answerCallbackQuery(callbackQueryId, "⚠️ No estás registrado como retirador.");
+            return;
+        }
+        if (retirador.getEfectivo() == null) {
+            telegramService.answerCallbackQuery(callbackQueryId, "⚠️ No se encontró tu caja.");
+            return;
+        }
+
+        Integer cajaId = retirador.getEfectivo().getId();
+        java.time.LocalDateTime desde = java.time.LocalDate.now(ZONE_BOGOTA).atStartOfDay();
+        java.time.LocalDateTime hasta = java.time.LocalDateTime.now(ZONE_BOGOTA);
+
+        java.util.List<com.binance.web.movimientos.MovimientoDTO> movimientos = movimientoService
+                .listarMovimientosCajaLiteEntreFechas(cajaId, desde, hasta);
+        java.util.List<Movimiento> ajustes = movimientoService.listarAjustesCajaEntreFechas(cajaId, desde, hasta);
+
+        String reporte = buildReporteMovimientos(retirador, movimientos, ajustes);
+        telegramService.sendMessage(String.valueOf(telegramUserId), reporte);
+
+        // Sin popup: la respuesta ya se mandó como mensaje nuevo.
+        telegramService.answerCallbackQuery(callbackQueryId, "");
+
+        if (retirador.getEfectivo().getSaldo() > 0) {
+            // Reenviamos el recordatorio de caja (3 botones) como mensaje NUEVO,
+            // para que quede debajo del reporte de movimientos en vez de arriba.
+            // enviarRecordatorioCaja ya se encarga de borrar el mensaje viejo.
+            retiradorService.enviarRecordatorioCaja(retirador);
+        } else {
+            telegramService.editMessageTextOnly(String.valueOf(telegramUserId), messageId, "Tu caja está en $0.");
+        }
+    }
+
+    /** Arma el texto del reporte de movimientos, ordenado por fecha descendente. */
+    private String buildReporteMovimientos(Retirador retirador,
+            java.util.List<com.binance.web.movimientos.MovimientoDTO> movimientos,
+            java.util.List<Movimiento> ajustes) {
+
+        java.time.format.DateTimeFormatter fmtHora = java.time.format.DateTimeFormatter.ofPattern("HH:mm");
+        java.util.List<java.util.AbstractMap.SimpleEntry<java.time.LocalDateTime, String>> entradas = new java.util.ArrayList<>();
+        // Suma por tipo (GASTO, PAGO PROVEEDOR, RETIRO CAJERO, etc.), en el orden en
+        // que se van encontrando, para el resumen de totales.
+        java.util.LinkedHashMap<String, Double> totalesPorTipo = new java.util.LinkedHashMap<>();
+
+        for (var m : movimientos) {
+            String tipo = m.getTipo() != null ? m.getTipo() : "MOVIMIENTO";
+            double monto = m.getMonto() != null ? m.getMonto() : 0.0;
+            totalesPorTipo.merge(tipo, monto, Double::sum);
+
+            StringBuilder linea = new StringBuilder();
+            linea.append("🕐 *").append(m.getFecha() != null ? m.getFecha().format(fmtHora) : "?").append("*\n");
+            linea.append(tipo).append(" — $").append(String.format("%,.0f", monto));
+
+            java.util.List<String> partes = new java.util.ArrayList<>();
+            if (m.getCuentaOrigen() != null)
+                partes.add(m.getCuentaOrigen());
+            if (m.getPagoProveedor() != null)
+                partes.add("proveedor " + m.getPagoProveedor());
+            if (m.getPagoCliente() != null)
+                partes.add(m.getPagoCliente());
+            if (m.getCuentaDestino() != null)
+                partes.add(m.getCuentaDestino());
+            if (m.getCajaDestino() != null)
+                partes.add(m.getCajaDestino());
+            if (!partes.isEmpty()) {
+                linea.append(" (").append(String.join(" → ", partes)).append(")");
+            }
+            if (m.getMotivo() != null && !m.getMotivo().isBlank()) {
+                linea.append(" — ").append(m.getMotivo());
+            }
+            entradas.add(new java.util.AbstractMap.SimpleEntry<>(m.getFecha(), linea.toString()));
+        }
+
+        for (var a : ajustes) {
+            String tipo = "AJUSTE DE SALDO";
+            double monto = a.getMonto() != null ? a.getMonto() : 0.0;
+            totalesPorTipo.merge(tipo, monto, Double::sum);
+
+            StringBuilder linea = new StringBuilder();
+            linea.append("🕐 *").append(a.getFecha() != null ? a.getFecha().format(fmtHora) : "?").append("*\n");
+            linea.append("⚙️ ").append(tipo).append(" — $").append(String.format("%,.0f", monto));
+            if (a.getMotivo() != null && !a.getMotivo().isBlank()) {
+                linea.append(" (").append(a.getMotivo()).append(")");
+            }
+            entradas.add(new java.util.AbstractMap.SimpleEntry<>(a.getFecha(), linea.toString()));
+        }
+
+        entradas.sort((e1, e2) -> {
+            if (e1.getKey() == null)
+                return 1;
+            if (e2.getKey() == null)
+                return -1;
+            return e2.getKey().compareTo(e1.getKey());
+        });
+
+        String fechaHoy = java.time.LocalDate.now(ZONE_BOGOTA)
+                .format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy"));
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("📊 *Movimientos de hoy (").append(fechaHoy).append(")*\n");
+        sb.append("💰 Caja actual: *$").append(String.format("%,.0f", retirador.getEfectivo().getSaldo()))
+                .append("*\n\n");
+
+        if (entradas.isEmpty()) {
+            sb.append("_No ha habido movimientos hoy._");
+            return sb.toString();
+        }
+
+        // ── Totales por tipo ──
+        sb.append("📈 *Totales de hoy (").append(fechaHoy).append("):*\n");
+        for (var e : totalesPorTipo.entrySet()) {
+            sb.append("• ").append(e.getKey()).append(": $").append(String.format("%,.0f", e.getValue())).append("\n");
+        }
+        sb.append("\n");
+
+        // ── Detalle, uno por bloque: hora arriba, detalle abajo ──
+        int maxLineas = 40;
+        int total = entradas.size();
+        int limite = Math.min(total, maxLineas);
+        java.util.List<String> bloques = new java.util.ArrayList<>();
+        for (int i = 0; i < limite; i++) {
+            bloques.add(entradas.get(i).getValue());
+        }
+        sb.append(String.join("\n\n", bloques));
+
+        if (total > maxLineas) {
+            sb.append("\n\n_...y ").append(total - maxLineas)
+                    .append(" movimiento(s) más. Consulta la plataforma para ver el detalle completo._");
+        }
+
+        return sb.toString();
+    }
+
+    /**
      * Procesa el texto que el retirador escribió como respuesta al flujo
      * "Registrar gasto". Espera el formato "<monto> <descripción>", ej: "2000
      * agua".
@@ -331,21 +473,17 @@ public class TelegramWebhookService {
         pendingGastos.remove(telegramUserId);
         double restante = saldoActual - monto;
 
-        if (restante > 0) {
-            String textoFinal = String.format(
-                    "✅ Gasto registrado: *$%,.0f* — %s.\n\n💰 Caja: *$%,.0f*",
-                    monto, descripcion, restante);
-            java.util.LinkedHashMap<String, String> buttonsData = new java.util.LinkedHashMap<>();
-            buttonsData.put("✅ Entregar efectivo", "entregar_start");
-            buttonsData.put("🧾 Registrar gasto", "gasto_start");
-            telegramService.editMessageWithDynamicButtons(String.valueOf(telegramUserId), pending.messageId(),
-                    textoFinal, buttonsData);
-        } else {
-            String textoFinal = String.format(
-                    "✅ Gasto registrado: *$%,.0f* — %s.\n\nTu caja ahora está en *$0*.",
-                    monto, descripcion);
-            telegramService.editMessageTextOnly(String.valueOf(telegramUserId), pending.messageId(), textoFinal);
-        }
+        String textoFinal = restante > 0
+                ? String.format("✅ Gasto registrado: *$%,.0f* — %s.\n\n💰 Caja: *$%,.0f*", monto, descripcion,
+                        restante)
+                : String.format("✅ Gasto registrado: *$%,.0f* — %s.\n\nTu caja ahora está en *$0*.", monto,
+                        descripcion);
+        telegramService.sendMessage(String.valueOf(telegramUserId), textoFinal);
+
+        // Reenviamos el recordatorio de caja (3 botones) como mensaje NUEVO, para
+        // que quede debajo de la confirmación en vez de arriba; esto también borra
+        // el mensaje viejo (el que pedía el monto y la descripción).
+        retiradorService.enviarRecordatorioCaja(retirador);
 
         log.info("[Gasto] {} registró un gasto de ${} ({}) — restante ${}",
                 retirador.getNombre(), monto, descripcion, restante);
@@ -360,6 +498,7 @@ public class TelegramWebhookService {
         java.util.LinkedHashMap<String, String> buttonsData = new java.util.LinkedHashMap<>();
         buttonsData.put("✅ Entregar efectivo", "entregar_start");
         buttonsData.put("🧾 Registrar gasto", "gasto_start");
+        buttonsData.put("📊 Movimientos", "movimientos_start");
         telegramService.editMessageWithDynamicButtons(String.valueOf(telegramUserId), messageId, texto, buttonsData);
     }
 
@@ -431,22 +570,19 @@ public class TelegramWebhookService {
         pendingEntregas.remove(telegramUserId);
         double restante = saldoActual - monto;
 
-        String textoFinal;
-        if (restante > 0) {
-            textoFinal = String.format(
-                    "✅ Entregaste *$%,.0f* a *%s*.\n\n⚠️ Aún tienes *$%,.0f* en caja. Por favor entrega el resto.",
-                    monto, proveedor.getName(), restante);
-            java.util.LinkedHashMap<String, String> buttonsData = new java.util.LinkedHashMap<>();
-            buttonsData.put("✅ Entregar efectivo", "entregar_start");
-            buttonsData.put("🧾 Registrar gasto", "gasto_start");
-            telegramService.editMessageWithDynamicButtons(String.valueOf(telegramUserId), pending.messageId(),
-                    textoFinal, buttonsData);
-        } else {
-            textoFinal = String.format(
-                    "✅ *Entregado con éxito*\n\nEntregaste *$%,.0f* a *%s*.\nTu caja ahora está en *$0*.",
-                    monto, proveedor.getName());
-            telegramService.editMessageTextOnly(String.valueOf(telegramUserId), pending.messageId(), textoFinal);
-        }
+        String textoFinal = restante > 0
+                ? String.format(
+                        "✅ Entregaste *$%,.0f* a *%s*.\n\n⚠️ Aún tienes *$%,.0f* en caja. Por favor entrega el resto.",
+                        monto, proveedor.getName(), restante)
+                : String.format(
+                        "✅ *Entregado con éxito*\n\nEntregaste *$%,.0f* a *%s*.\nTu caja ahora está en *$0*.",
+                        monto, proveedor.getName());
+        telegramService.sendMessage(String.valueOf(telegramUserId), textoFinal);
+
+        // Reenviamos el recordatorio de caja (3 botones) como mensaje NUEVO, para
+        // que quede debajo de la confirmación en vez de arriba; esto también borra
+        // el mensaje viejo (el que pedía el monto a entregar).
+        retiradorService.enviarRecordatorioCaja(retirador);
 
         log.info("[Entrega Efectivo] {} entregó ${} a {} (restante ${})",
                 retirador.getNombre(), monto, proveedor.getName(), restante);

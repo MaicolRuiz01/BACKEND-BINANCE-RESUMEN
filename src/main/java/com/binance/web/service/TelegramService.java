@@ -13,6 +13,9 @@ public interface TelegramService {
 
     Integer sendMessageWithTwoButtons(String chatId, String text, String btn1Text, String btn1Data, String btn2Text, String btn2Data);
 
+    /** Envía un mensaje NUEVO con un teclado de botones dinámico (N botones, uno por fila). */
+    Integer sendMessageWithButtons(String chatId, String text, java.util.Map<String, String> buttonsData);
+
     /** Edita el texto de un mensaje ya enviado (para marcar la solicitud como tomada). */
     void editMessage(String chatId, Integer messageId, String newText);
 
