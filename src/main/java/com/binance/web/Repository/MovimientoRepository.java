@@ -35,7 +35,7 @@ public interface MovimientoRepository extends JpaRepository<Movimiento, Integer>
 	 */
 	@Query("SELECT new com.binance.web.movimientos.MovimientoDTO(" +
 	       "m.id, m.tipo, m.fecha, m.monto, " +
-	       "co.name, cd.name, cj.name, cjd.name, pc.nombre, pp.name) " +
+	       "co.name, cd.name, cj.name, cjd.name, pc.nombre, pp.name, m.motivo) " +
 	       "FROM Movimiento m " +
 	       "LEFT JOIN m.cuentaOrigen co " +
 	       "LEFT JOIN m.cuentaDestino cd " +
@@ -46,6 +46,22 @@ public interface MovimientoRepository extends JpaRepository<Movimiento, Integer>
 	       "WHERE cj.id = :cajaId OR cjd.id = :cajaId " +
 	       "ORDER BY m.fecha DESC")
 	List<MovimientoDTO> findMovimientosCajaLite(@Param("cajaId") Integer cajaId);
+
+	/** Igual que findMovimientosCajaLite pero acotado a un rango de fechas (para el bot de Telegram). */
+	@Query("SELECT new com.binance.web.movimientos.MovimientoDTO(" +
+	       "m.id, m.tipo, m.fecha, m.monto, " +
+	       "co.name, cd.name, cj.name, cjd.name, pc.nombre, pp.name, m.motivo) " +
+	       "FROM Movimiento m " +
+	       "LEFT JOIN m.cuentaOrigen co " +
+	       "LEFT JOIN m.cuentaDestino cd " +
+	       "LEFT JOIN m.caja cj " +
+	       "LEFT JOIN m.cajaDestino cjd " +
+	       "LEFT JOIN m.pagoCliente pc " +
+	       "LEFT JOIN m.pagoProveedor pp " +
+	       "WHERE (cj.id = :cajaId OR cjd.id = :cajaId) AND m.fecha BETWEEN :desde AND :hasta " +
+	       "ORDER BY m.fecha DESC")
+	List<MovimientoDTO> findMovimientosCajaLiteEntreFechas(@Param("cajaId") Integer cajaId,
+	        @Param("desde") LocalDateTime desde, @Param("hasta") LocalDateTime hasta);
 	List<Movimiento> findByTipoAndPagoProveedor_Id(String tipo, Integer proveedorId);
 	List<Movimiento> findByTipoAndPagoCliente_Id(String tipo, Integer clienteId);
     List<Movimiento> findByCuentaOrigenIdOrCuentaDestinoId(Integer cuentaOrigenId, Integer cuentaDestinoId);
@@ -73,6 +89,12 @@ public interface MovimientoRepository extends JpaRepository<Movimiento, Integer>
     );
 
     List<Movimiento> findByCaja_IdAndTipoOrderByFechaDesc(Integer cajaId, String tipo);
+    List<Movimiento> findByCaja_IdAndTipoAndFechaBetweenOrderByFechaDesc(
+            Integer cajaId,
+            String tipo,
+            LocalDateTime desde,
+            LocalDateTime hasta
+    );
     List<Movimiento> findByAjusteCuentaCop_IdAndFechaBetween(
             Integer cuentaId,
             LocalDateTime desde,

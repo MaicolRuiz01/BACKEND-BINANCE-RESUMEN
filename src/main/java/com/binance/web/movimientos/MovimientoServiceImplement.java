@@ -243,6 +243,9 @@ public class MovimientoServiceImplement implements MovimientoService {
 
 		Movimiento pagoProveedor = new Movimiento();
 		double comision = 0.0;
+		// Por defecto no hay comisión pendiente (pagos desde caja/proveedor/cliente no
+		// tienen 4x1000). La rama de cuentaCopId la pisa según el banco si aplica.
+		pagoProveedor.setComisionAplicada(true);
 
 		if (cuentaCopId != null) {
 			AccountCop cuentaCop = accountCopRepository.findById(cuentaCopId)
@@ -645,7 +648,14 @@ public class MovimientoServiceImplement implements MovimientoService {
 			throw new IllegalArgumentException("cajaId no puede ser nulo");
 		return movimientoRepository.findMovimientosCajaLite(cajaId);
 	}
-	
+
+	@Override
+	public List<MovimientoDTO> listarMovimientosCajaLiteEntreFechas(Integer cajaId, LocalDateTime desde, LocalDateTime hasta) {
+		if (cajaId == null)
+			throw new IllegalArgumentException("cajaId no puede ser nulo");
+		return movimientoRepository.findMovimientosCajaLiteEntreFechas(cajaId, desde, hasta);
+	}
+
 	@Override
 	@Transactional
 	public Movimiento registrarPagoClienteAProveedor(PagoClienteAProveedorDto dto) {
@@ -989,6 +999,12 @@ public class MovimientoServiceImplement implements MovimientoService {
 	public List<Movimiento> listarAjustesCaja(Integer cajaId) {
 	    if (cajaId == null) throw new IllegalArgumentException("cajaId no puede ser nulo");
 	    return movimientoRepository.findByCaja_IdAndTipoOrderByFechaDesc(cajaId, "AJUSTE_SALDO_CAJA");
+	}
+
+	@Override
+	public List<Movimiento> listarAjustesCajaEntreFechas(Integer cajaId, LocalDateTime desde, LocalDateTime hasta) {
+	    if (cajaId == null) throw new IllegalArgumentException("cajaId no puede ser nulo");
+	    return movimientoRepository.findByCaja_IdAndTipoAndFechaBetweenOrderByFechaDesc(cajaId, "AJUSTE_SALDO_CAJA", desde, hasta);
 	}
 
 	@Override

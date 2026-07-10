@@ -254,6 +254,15 @@ public class RetiradorServiceImpl implements RetiradorService {
         List<CuentaComprometidoDto> result = new ArrayList<>();
         for (Map.Entry<Integer, List<DetalleRetiro>> entry : porCuenta.entrySet()) {
             double total = entry.getValue().stream().mapToDouble(DetalleRetiro::totalDetalle).sum();
+            // Desglosado por canal, para poder netear el cupo diario de cajero y de
+            // corresponsal por separado (un retiro pendiente por cajero no debe
+            // descontar cupo de corresponsal, y viceversa).
+            double totalCajero = entry.getValue().stream()
+                    .mapToDouble(d -> d.getMontoCajero() != null ? d.getMontoCajero() : 0.0)
+                    .sum();
+            double totalCorresponsal = entry.getValue().stream()
+                    .mapToDouble(d -> d.getMontoCorresponsal() != null ? d.getMontoCorresponsal() : 0.0)
+                    .sum();
             List<SolicitudComprometidaDto> solicitudes = entry.getValue().stream()
                     .map(d -> new SolicitudComprometidaDto(
                             d.getSolicitud().getId(),
@@ -264,7 +273,7 @@ public class RetiradorServiceImpl implements RetiradorService {
                                     ? d.getSolicitud().getRetirador().getNombre()
                                     : null))
                     .collect(Collectors.toList());
-            result.add(new CuentaComprometidoDto(entry.getKey(), total, solicitudes));
+            result.add(new CuentaComprometidoDto(entry.getKey(), total, totalCajero, totalCorresponsal, solicitudes));
         }
         return result;
     }
@@ -867,10 +876,12 @@ public class RetiradorServiceImpl implements RetiradorService {
         }
 
         String msj = String.format("💰 Caja: *$%,.0f*", retirador.getEfectivo().getSaldo());
-        Integer newMessageId = telegramService.sendMessageWithTwoButtons(
-                String.valueOf(retirador.getTelegramChatId()), msj,
-                "✅ Entregar efectivo", "entregar_start",
-                "🧾 Registrar gasto", "gasto_start");
+        java.util.LinkedHashMap<String, String> buttonsData = new java.util.LinkedHashMap<>();
+        buttonsData.put("✅ Entregar efectivo", "entregar_start");
+        buttonsData.put("🧾 Registrar gasto", "gasto_start");
+        buttonsData.put("📊 Movimientos", "movimientos_start");
+        Integer newMessageId = telegramService.sendMessageWithButtons(
+                String.valueOf(retirador.getTelegramChatId()), msj, buttonsData);
 
         // Guardamos el ID del nuevo recordatorio
         if (newMessageId != null) {
