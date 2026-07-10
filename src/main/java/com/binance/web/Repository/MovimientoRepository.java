@@ -35,7 +35,7 @@ public interface MovimientoRepository extends JpaRepository<Movimiento, Integer>
 	 */
 	@Query("SELECT new com.binance.web.movimientos.MovimientoDTO(" +
 	       "m.id, m.tipo, m.fecha, m.monto, " +
-	       "co.name, cd.name, cj.name, cjd.name, pc.nombre, pp.name) " +
+	       "co.name, cd.name, cj.name, cjd.name, pc.nombre, COALESCE(pp.name, po.name)) " +
 	       "FROM Movimiento m " +
 	       "LEFT JOIN m.cuentaOrigen co " +
 	       "LEFT JOIN m.cuentaDestino cd " +
@@ -43,6 +43,7 @@ public interface MovimientoRepository extends JpaRepository<Movimiento, Integer>
 	       "LEFT JOIN m.cajaDestino cjd " +
 	       "LEFT JOIN m.pagoCliente pc " +
 	       "LEFT JOIN m.pagoProveedor pp " +
+	       "LEFT JOIN m.proveedorOrigen po " +
 	       "WHERE cj.id = :cajaId OR cjd.id = :cajaId " +
 	       "ORDER BY m.fecha DESC")
 	List<MovimientoDTO> findMovimientosCajaLite(@Param("cajaId") Integer cajaId);

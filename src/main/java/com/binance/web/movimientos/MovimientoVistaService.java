@@ -159,6 +159,10 @@ public class MovimientoVistaService {
 		if ("DEPOSITO".equalsIgnoreCase(m.getTipo())) {
 			return -(m.getMonto() != null ? m.getMonto() : 0.0);
 		}
+		if ("PAGO PROVEEDOR A CAJA".equalsIgnoreCase(m.getTipo())) {
+			// El proveedor nos da efectivo → ENTRA a la caja.
+			return +(m.getMonto() != null ? m.getMonto() : 0.0);
+		}
 		if ("PAGO PROVEEDOR".equalsIgnoreCase(m.getTipo())) {
 			return -(m.getMonto() != null ? m.getMonto() : 0.0);
 		}

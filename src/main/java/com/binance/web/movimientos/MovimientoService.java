@@ -27,6 +27,9 @@ public interface MovimientoService {
 	List<Movimiento> listarPagos();
 	Movimiento actualizarMovimiento(Integer id, Double monto, Integer cuentaOrigenId, Integer cuentaDestinoId, Integer cajaId);
 	Movimiento registrarPagoProveedor(Integer cuentaCopId, Integer cajaId, Integer proveedorOrigenId, Integer proveedorDestinoId,Integer clienteId, Double monto);
+
+	/** El proveedor nos da efectivo → ENTRA a una caja (sin 4x1000). */
+	Movimiento registrarPagoProveedorACaja(Integer proveedorId, Integer cajaId, Double monto);
 	List<Movimiento> listarPagosProveedorPorId(Integer proveedorId);
 	List<Movimiento> listarMovimientosPorCliente(Integer clienteId);
 	Movimiento registrarPagoCaja(Integer clienteId, Integer cajaId, Double monto);

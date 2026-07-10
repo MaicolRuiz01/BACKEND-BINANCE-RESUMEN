@@ -97,6 +97,13 @@ public class MovimientoController {
 		return movimientoService.registrarPagoProveedor(cuentaId, caja, proveedorOrigen, proveedor, clienteId, monto);
 	}
 
+	/** El proveedor nos da efectivo → ENTRA a una caja (sin 4x1000, es efectivo). */
+	@PostMapping("/pago-proveedor-a-caja")
+	public Movimiento pagoProveedorACaja(@RequestParam Integer proveedor, @RequestParam Integer cajaId,
+			@RequestParam Double monto) {
+		return movimientoService.registrarPagoProveedorACaja(proveedor, cajaId, monto);
+	}
+
 	@PostMapping("/pago-caja")
 	public Movimiento pagoClienteCaja(@RequestParam Integer clienteId, @RequestParam Integer cajaId,
 			@RequestParam Double monto) {

@@ -305,6 +305,42 @@ public class MovimientoServiceImplement implements MovimientoService {
 		return movimientoRepository.save(pagoProveedor);
 	}
 
+	/**
+	 * El proveedor nos DA efectivo → ENTRA a una caja. Sin 4x1000 (es efectivo).
+	 * El saldo del proveedor es un "debe/debemos": si nos frontea efectivo, le debemos MÁS
+	 * (misma convención que proveedorOrigen en los pagos: += monto).
+	 */
+	@Override
+	@Transactional
+	public Movimiento registrarPagoProveedorACaja(Integer proveedorId, Integer cajaId, Double monto) {
+		if (proveedorId == null || cajaId == null)
+			throw new IllegalArgumentException("Debe indicar el proveedor y la caja.");
+		if (monto == null || monto <= 0)
+			throw new IllegalArgumentException("El monto debe ser mayor a 0.");
+
+		Supplier proveedor = supplierRepository.findById(proveedorId)
+				.orElseThrow(() -> new RuntimeException("Proveedor no encontrado."));
+		Efectivo caja = efectivoRepository.findById(cajaId)
+				.orElseThrow(() -> new RuntimeException("Caja no encontrada."));
+
+		// Entra a la caja (sin comisión).
+		caja.setSaldo((caja.getSaldo() != null ? caja.getSaldo() : 0.0) + monto);
+		efectivoRepository.save(caja);
+
+		// El proveedor nos fronteó efectivo → le debemos más (saldo = debe).
+		proveedor.setBalance((proveedor.getBalance() != null ? proveedor.getBalance() : 0.0) + monto);
+		supplierRepository.save(proveedor);
+
+		Movimiento mov = new Movimiento();
+		mov.setTipo("PAGO PROVEEDOR A CAJA");
+		mov.setFecha(LocalDateTime.now());
+		mov.setMonto(monto);
+		mov.setComision(0.0);
+		mov.setCaja(caja);                 // entra a esta caja
+		mov.setProveedorOrigen(proveedor); // el proveedor es el origen del dinero
+		return movimientoRepository.save(mov);
+	}
+
 	@Override
 	public List<Movimiento> listar() {
 		// TODO Auto-generated method stub
@@ -999,6 +1035,22 @@ public class MovimientoServiceImplement implements MovimientoService {
 
 	    String tipo = m.getTipo() != null ? m.getTipo() : "";
 	    double monto = m.getMonto() != null ? m.getMonto() : 0.0;
+
+	    if ("PAGO PROVEEDOR A CAJA".equals(tipo)) {
+	        // Revertir: sale de la caja y el proveedor vuelve a deber menos.
+	        if (m.getCaja() != null) {
+	            Efectivo caja = m.getCaja();
+	            caja.setSaldo(round2((caja.getSaldo() != null ? caja.getSaldo() : 0.0) - monto));
+	            efectivoRepository.save(caja);
+	        }
+	        if (m.getProveedorOrigen() != null) {
+	            Supplier po = m.getProveedorOrigen();
+	            po.setBalance((po.getBalance() != null ? po.getBalance() : 0.0) - monto);
+	            supplierRepository.save(po);
+	        }
+	        movimientoRepository.delete(m);
+	        return;
+	    }
 
 	    if ("PAGO PROVEEDOR".equals(tipo)) {
 	        // Revertir EXACTO lo que hizo registrarPagoProveedor:
