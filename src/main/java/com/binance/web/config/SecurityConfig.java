@@ -46,6 +46,8 @@ public class SecurityConfig {
                         .requestMatchers("/auth/login").permitAll()
                         .requestMatchers("/actuator/**").permitAll()
                         .requestMatchers("/telegram/webhook").permitAll()
+                        // Endpoint de diagnóstico (solo lectura, no guarda nada) — abierto para pruebas.
+                        .requestMatchers("/api/spot-orders/diagnostico-ayer").permitAll()
                         // Todo lo demás requiere autenticación
                         .anyRequest().authenticated()
                 )

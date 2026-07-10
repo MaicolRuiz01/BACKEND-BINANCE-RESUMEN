@@ -35,10 +35,19 @@ public class TraspasoWalletService {
         return wallets.contains(normalizar(address));
     }
 
+    /**
+     * Normaliza una dirección TRON a un núcleo comparable. La misma dirección puede venir en:
+     *  - Base58  (T...)              → se deja tal cual (en minúsculas)
+     *  - hex TRON (41 + 20 bytes)    → se le quita el prefijo 41
+     *  - hex ETH (0x + 20 bytes)     → se le quita el 0x
+     * Así los formatos hex (41c686… y 0xc686…) quedan como el mismo núcleo (c686…) y coinciden.
+     */
     private static String normalizar(String w) {
         if (w == null) return "";
         String s = w.trim().toLowerCase();
         if (s.startsWith("0x")) s = s.substring(2);
+        // hex TRON: 41 + 20 bytes (40 hex) = 42 chars. Quitamos el 41 para dejar solo el núcleo.
+        if (s.length() == 42 && s.startsWith("41")) s = s.substring(2);
         return s;
     }
 }
