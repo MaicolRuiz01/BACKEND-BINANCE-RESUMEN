@@ -27,6 +27,8 @@ public interface SellDollarsRepository extends JpaRepository<SellDollars, Intege
 	List<SellDollars> findByCliente_IdOrderByDateDesc(Integer clienteId);
 	Optional<SellDollars> findByDedupeKey(String dedupeKey);
 	List<SellDollars> findBySupplier_IdOrderByDateDesc(Integer supplierId);
+	/** Ventas del proveedor acotadas a un rango de fechas (para el resumen del día — rápido). */
+	List<SellDollars> findBySupplier_IdAndDateBetween(Integer supplierId, LocalDateTime desde, LocalDateTime hasta);
 	List<SellDollars> findByAsignadoFalseAndDateLessThan(LocalDateTime end);
 	List<SellDollars> findByAsignadoFalseAndDateBetween(LocalDateTime start, LocalDateTime end);
 

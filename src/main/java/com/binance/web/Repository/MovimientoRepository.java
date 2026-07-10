@@ -7,7 +7,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
-
 import com.binance.web.Entity.Movimiento;
 import com.binance.web.movimientos.MovimientoDTO;
 
@@ -35,13 +34,14 @@ public interface MovimientoRepository extends JpaRepository<Movimiento, Integer>
 	 */
 	@Query("SELECT new com.binance.web.movimientos.MovimientoDTO(" +
 	       "m.id, m.tipo, m.fecha, m.monto, " +
-	       "co.name, cd.name, cj.name, cjd.name, pc.nombre, COALESCE(pp.name, po.name), m.motivo) " +
+	       "co.name, cd.name, cj.name, cjd.name, COALESCE(pc.nombre, cor.nombre), COALESCE(pp.name, po.name), m.motivo) " +
 	       "FROM Movimiento m " +
 	       "LEFT JOIN m.cuentaOrigen co " +
 	       "LEFT JOIN m.cuentaDestino cd " +
 	       "LEFT JOIN m.caja cj " +
 	       "LEFT JOIN m.cajaDestino cjd " +
 	       "LEFT JOIN m.pagoCliente pc " +
+	       "LEFT JOIN m.clienteOrigen cor " +
 	       "LEFT JOIN m.pagoProveedor pp " +
 	       "LEFT JOIN m.proveedorOrigen po " +
 	       "WHERE cj.id = :cajaId OR cjd.id = :cajaId " +
@@ -51,13 +51,14 @@ public interface MovimientoRepository extends JpaRepository<Movimiento, Integer>
 	/** Igual que findMovimientosCajaLite pero acotado a un rango de fechas (para el bot de Telegram). */
 	@Query("SELECT new com.binance.web.movimientos.MovimientoDTO(" +
 	       "m.id, m.tipo, m.fecha, m.monto, " +
-	       "co.name, cd.name, cj.name, cjd.name, pc.nombre, COALESCE(pp.name, po.name), m.motivo) " +
+	       "co.name, cd.name, cj.name, cjd.name, COALESCE(pc.nombre, cor.nombre), COALESCE(pp.name, po.name), m.motivo) " +
 	       "FROM Movimiento m " +
 	       "LEFT JOIN m.cuentaOrigen co " +
 	       "LEFT JOIN m.cuentaDestino cd " +
 	       "LEFT JOIN m.caja cj " +
 	       "LEFT JOIN m.cajaDestino cjd " +
 	       "LEFT JOIN m.pagoCliente pc " +
+	       "LEFT JOIN m.clienteOrigen cor " +
 	       "LEFT JOIN m.pagoProveedor pp " +
 	       "LEFT JOIN m.proveedorOrigen po " +
 	       "WHERE (cj.id = :cajaId OR cjd.id = :cajaId) AND m.fecha BETWEEN :desde AND :hasta " +
@@ -78,6 +79,12 @@ public interface MovimientoRepository extends JpaRepository<Movimiento, Integer>
     List<Movimiento> findByAjusteProveedor_IdOrderByFechaDesc(Integer proveedorId);
     List<Movimiento> findByAjusteCuentaCop_IdOrderByFechaDesc(Integer cuentaId);
     List<Movimiento> findByPagoProveedor_IdOrProveedorOrigen_IdOrderByFechaDesc(Integer pagoProveedorId, Integer proveedorOrigenId);
+
+    /** Movimientos del proveedor (destino u origen) acotados a un rango de fechas — para el resumen del día. */
+    @Query("SELECT m FROM Movimiento m WHERE (m.pagoProveedor.id = :provId OR m.proveedorOrigen.id = :provId) " +
+           "AND m.fecha >= :desde AND m.fecha < :hasta ORDER BY m.fecha DESC")
+    List<Movimiento> findMovimientosProveedorEntreFechas(@Param("provId") Integer provId,
+            @Param("desde") LocalDateTime desde, @Param("hasta") LocalDateTime hasta);
     List<Movimiento> findByAjusteCliente_IdAndFechaBetween(
             Integer clienteId,
             LocalDateTime desde,

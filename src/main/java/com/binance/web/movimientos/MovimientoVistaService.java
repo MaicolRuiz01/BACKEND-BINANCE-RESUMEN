@@ -320,23 +320,21 @@ public class MovimientoVistaService {
 		LocalDateTime inicio = hoy.atStartOfDay();
 		LocalDateTime fin = hoy.plusDays(1).atStartOfDay();
 
-		List<MovimientoVistaDTO> vista = vistaPorProveedor(proveedorId);
+		// Solo los movimientos de HOY del proveedor (antes se cargaba todo el historial y se filtraba en Java).
+		List<Movimiento> movsHoy = movimientoRepo.findMovimientosProveedorEntreFechas(proveedorId, inicio, fin);
 
 		double entradas = 0.0;
 		double salidas = 0.0;
 
-		for (MovimientoVistaDTO v : vista) {
-			if (!v.getFecha().toLocalDate().equals(hoy))
-				continue;
-
-			if (v.getTipo() != null && v.getTipo().toUpperCase().startsWith("AJUSTE_SALDO")) {
+		for (Movimiento m : movsHoy) {
+			if (m.getTipo() != null && m.getTipo().toUpperCase().startsWith("AJUSTE_SALDO")) {
 				continue;
 			}
-
-			if (v.isEntrada()) {
-				entradas += v.getMontoSigned() != null ? v.getMontoSigned() : 0.0;
-			} else if (v.isSalida()) {
-				salidas += Math.abs(v.getMontoSigned() != null ? v.getMontoSigned() : 0.0);
+			double signed = signoYMontoParaProveedor(proveedorId, m);
+			if (signed > 0) {
+				entradas += signed;
+			} else if (signed < 0) {
+				salidas += Math.abs(signed);
 			}
 		}
 
@@ -350,15 +348,15 @@ public class MovimientoVistaService {
 			return 0.0;
 		}).sum();
 
-		// ➜ COMPRAS de dólares del proveedor (BuyDollars) HOY
-		double comprasUsdt = buyDollarsRepository.findBySupplier_IdOrderByDateDesc(proveedorId).stream()
-				.filter(b -> esHoy(b.getDate(), hoy)).mapToDouble(b -> b.getPesos() != null ? b.getPesos()
+		// ➜ COMPRAS de dólares del proveedor (BuyDollars) HOY — acotado en BD, no todo el historial.
+		double comprasUsdt = buyDollarsRepository.findBySupplier_IdAndDateBetween(proveedorId, inicio, fin).stream()
+				.mapToDouble(b -> b.getPesos() != null ? b.getPesos()
 						: (b.getAmount() != null && b.getTasa() != null ? b.getAmount() * b.getTasa() : 0.0))
 				.sum();
 
-		// ➜ VENTAS de dólares del proveedor (SellDollars) HOY
-		double ventasUsdt = sellDollarsRepository.findBySupplier_IdOrderByDateDesc(proveedorId).stream()
-				.filter(s -> esHoy(s.getDate(), hoy)).mapToDouble(s -> s.getPesos() != null ? s.getPesos()
+		// ➜ VENTAS de dólares del proveedor (SellDollars) HOY — acotado en BD.
+		double ventasUsdt = sellDollarsRepository.findBySupplier_IdAndDateBetween(proveedorId, inicio, fin).stream()
+				.mapToDouble(s -> s.getPesos() != null ? s.getPesos()
 						: (s.getDollars() != null && s.getTasa() != null ? s.getDollars() * s.getTasa() : 0.0))
 				.sum();
 

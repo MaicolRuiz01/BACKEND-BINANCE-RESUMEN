@@ -21,6 +21,8 @@ public interface BuyDollarsRepository extends JpaRepository<BuyDollars, Integer>
 	List<BuyDollars> findNoAsignadasHoy(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
 	List<BuyDollars> findByCliente_IdOrderByDateDesc(Integer clienteId);
 	List<BuyDollars> findBySupplier_IdOrderByDateDesc(Integer supplierId);
+	/** Compras del proveedor acotadas a un rango de fechas (para el resumen del día — rápido). */
+	List<BuyDollars> findBySupplier_IdAndDateBetween(Integer supplierId, LocalDateTime desde, LocalDateTime hasta);
 	Optional<BuyDollars> findByDedupeKey(String dedupeKey);
 	List<BuyDollars> findByAsignadaFalseAndDateBetween(LocalDateTime start, LocalDateTime end);
 	List<BuyDollars> findByAsignadaFalseOrderByDateDesc();

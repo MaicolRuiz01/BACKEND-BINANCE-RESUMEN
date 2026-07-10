@@ -600,6 +600,10 @@ public class MovimientoServiceImplement implements MovimientoService {
 		efectivoRepository.save(cajaDestino);
 		clienteRepository.save(clienteOrigen);
 
+		// El cliente nos da efectivo → ENTRA a la caja (sin 4x1000, es efectivo).
+		pagoCaja.setTipo("PAGO CLIENTE A CAJA");
+		pagoCaja.setFecha(LocalDateTime.now());
+		pagoCaja.setComision(0.0);
 		pagoCaja.setCaja(cajaDestino);
 		pagoCaja.setClienteOrigen(clienteOrigen);
 		pagoCaja.setMonto(monto);
@@ -1063,6 +1067,22 @@ public class MovimientoServiceImplement implements MovimientoService {
 	            Supplier po = m.getProveedorOrigen();
 	            po.setBalance((po.getBalance() != null ? po.getBalance() : 0.0) - monto);
 	            supplierRepository.save(po);
+	        }
+	        movimientoRepository.delete(m);
+	        return;
+	    }
+
+	    if ("PAGO CLIENTE A CAJA".equals(tipo)) {
+	        // Revertir: sale de la caja y se revierte el saldo del cliente origen.
+	        if (m.getCaja() != null) {
+	            Efectivo caja = m.getCaja();
+	            caja.setSaldo(round2((caja.getSaldo() != null ? caja.getSaldo() : 0.0) - monto));
+	            efectivoRepository.save(caja);
+	        }
+	        if (m.getClienteOrigen() != null) {
+	            Cliente cl = m.getClienteOrigen();
+	            cl.setSaldo((cl.getSaldo() != null ? cl.getSaldo() : 0.0) - monto);
+	            clienteRepository.save(cl);
 	        }
 	        movimientoRepository.delete(m);
 	        return;

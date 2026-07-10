@@ -241,17 +241,24 @@ public class SpotOrdersController {
 
                     LocalDateTime fecha = parseFecha(tsStr);
                     if (fecha != null && fecha.toLocalDate().isEqual(hoy)) {
+                        // El depósito de Binance NO trae el remitente; se resuelve on-chain por txId.
+                        String remitente = resolverRemitenteOnChain(txId, network);
+
+                        // Si el remitente es UNA DE NUESTRAS wallets (ej. la wallet TRON que solo
+                        // reenvía a Binance el dinero que vino de Bybit), es un traspaso INTERNO,
+                        // NO una compra → se omite. Así deja de contarse como compra.
+                        if (remitente != null && ownAddrsLower.contains(remitente.trim().toLowerCase())) {
+                            continue;
+                        }
+
                         BuyDollarsDto dto = new BuyDollarsDto();
                         dto.setIdDeposit(id);
                         dto.setNameAccount(account);
                         dto.setDate(fecha);
                         dto.setAmount(amount);
                         dto.setCryptoSymbol(coin);
-                        // El depósito de Binance no trae el remitente; se resuelve on-chain por txId
-                        // para detectar si viene de la wallet Bybit (traspaso, no compra).
-                        dto.setContraparteAddress(resolverRemitenteOnChain(txId, network));
-                        // si tu dto tiene txId, también:
-                        // dto.setTxId(txId);
+                        // Bybit → el servicio lo tratará como traspaso; otro externo → compra.
+                        dto.setContraparteAddress(remitente);
                         resultado.add(dto);
                     }
                 }
