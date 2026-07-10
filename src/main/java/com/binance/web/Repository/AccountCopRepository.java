@@ -64,4 +64,28 @@ public interface AccountCopRepository extends JpaRepository<AccountCop, Integer>
 		Double getCupoCorresponsalDisponibleHoy();
 	}
 
+	/** Proyección liviana para la vista P2P (ventas en curso): solo lo que pinta la mini-card y el
+	 *  dropdown de asignación — SIN cargar las llaves Brebe (EAGER) que hacían pesada la entidad. */
+	@Query("""
+		SELECT a.id AS id, a.name AS name, a.balance AS balance, a.bankType AS bankType,
+		       a.cupoTipoP2P AS cupoTipoP2P, a.activaParaP2P AS activaParaP2P,
+		       a.cupoCajeroDisponibleHoy AS cupoCajeroDisponibleHoy,
+		       a.cupoCorresponsalDisponibleHoy AS cupoCorresponsalDisponibleHoy,
+		       a.cupoDisponibleHoy AS cupoDisponibleHoy
+		FROM AccountCop a
+	""")
+	List<P2PView> findAllP2PView();
+
+	interface P2PView {
+		Integer getId();
+		String getName();
+		Double getBalance();
+		com.binance.web.Entity.BankType getBankType();
+		String getCupoTipoP2P();
+		Boolean getActivaParaP2P();
+		Double getCupoCajeroDisponibleHoy();
+		Double getCupoCorresponsalDisponibleHoy();
+		Double getCupoDisponibleHoy();
+	}
+
 }

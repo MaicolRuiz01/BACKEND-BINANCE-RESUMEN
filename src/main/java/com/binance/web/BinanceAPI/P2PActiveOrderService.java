@@ -72,18 +72,20 @@ public class P2PActiveOrderService {
      */
     public List<ActiveP2POrderDto> getAllActiveOrders() {
         List<AccountBinance> accounts = accountBinanceRepository.findByTipoAndActivaTrue("BINANCE");
-        List<ActiveP2POrderDto> result = new ArrayList<>();
 
-        for (AccountBinance account : accounts) {
-            if (account.getApiKey() == null || account.getApiSecret() == null) continue;
-            try {
-                result.addAll(getActiveOrdersForAccount(account.getName()));
-            } catch (Exception e) {
-                log.warn("[ActiveOrders] Error en cuenta {}: {}", account.getName(), e.getMessage());
-            }
-        }
-
-        return result;
+        // Antes se consultaba Binance cuenta por cuenta EN SECUENCIA (se sumaban todas las esperas).
+        // Ahora en PARALELO: el tiempo total pasa a ser ~el de la cuenta más lenta, no la suma.
+        return accounts.parallelStream()
+                .filter(a -> a.getApiKey() != null && a.getApiSecret() != null)
+                .flatMap(a -> {
+                    try {
+                        return getActiveOrdersForAccount(a.getName()).stream();
+                    } catch (Exception e) {
+                        log.warn("[ActiveOrders] Error en cuenta {}: {}", a.getName(), e.getMessage());
+                        return java.util.stream.Stream.empty();
+                    }
+                })
+                .collect(java.util.stream.Collectors.toList());
     }
 
     /**

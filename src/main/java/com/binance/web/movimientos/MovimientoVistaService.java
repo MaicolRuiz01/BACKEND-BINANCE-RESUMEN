@@ -40,6 +40,11 @@ public class MovimientoVistaService {
 	}
 
 	private double signoYMontoParaCliente(Integer clienteId, Movimiento m) {
+		// El cliente nos PAGA a una caja → su saldo baja (debe/debemos). En su vista: salida.
+		if ("PAGO CLIENTE A CAJA".equalsIgnoreCase(m.getTipo()) && m.getClienteOrigen() != null
+				&& m.getClienteOrigen().getId().equals(clienteId)) {
+			return -(m.getMonto() != null ? m.getMonto() : 0.0);
+		}
 		if (m.getClienteOrigen() != null && m.getClienteOrigen().getId().equals(clienteId)) {
 			double v = basePesosCliente(m, true);
 			return +v;
@@ -71,6 +76,11 @@ public class MovimientoVistaService {
 	private double signoYMontoParaProveedor(Integer proveedorId, Movimiento m) {
 		if ("PAGO PROVEEDOR".equalsIgnoreCase(m.getTipo()) && m.getPagoProveedor() != null
 				&& m.getPagoProveedor().getId().equals(proveedorId)) {
+			return -(m.getMonto() != null ? m.getMonto() : 0.0);
+		}
+		// El proveedor nos PAGA a una caja → su saldo baja (debe/debemos). En su vista: salida.
+		if ("PAGO PROVEEDOR A CAJA".equalsIgnoreCase(m.getTipo()) && m.getProveedorOrigen() != null
+				&& m.getProveedorOrigen().getId().equals(proveedorId)) {
 			return -(m.getMonto() != null ? m.getMonto() : 0.0);
 		}
 		if ("PAGO EN USDT CLIENTE PROVEEDOR".equalsIgnoreCase(m.getTipo()) && m.getPagoProveedor() != null

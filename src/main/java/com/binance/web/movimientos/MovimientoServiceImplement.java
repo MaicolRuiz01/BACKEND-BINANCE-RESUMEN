@@ -330,8 +330,8 @@ public class MovimientoServiceImplement implements MovimientoService {
 		caja.setSaldo((caja.getSaldo() != null ? caja.getSaldo() : 0.0) + monto);
 		efectivoRepository.save(caja);
 
-		// El proveedor nos fronteó efectivo → le debemos más (saldo = debe).
-		proveedor.setBalance((proveedor.getBalance() != null ? proveedor.getBalance() : 0.0) + monto);
+		// El proveedor/cliente nos PAGA (nos da efectivo) → su saldo DISMINUYE (debe/debemos).
+		proveedor.setBalance((proveedor.getBalance() != null ? proveedor.getBalance() : 0.0) - monto);
 		supplierRepository.save(proveedor);
 
 		Movimiento mov = new Movimiento();
@@ -341,6 +341,41 @@ public class MovimientoServiceImplement implements MovimientoService {
 		mov.setComision(0.0);
 		mov.setCaja(caja);                 // entra a esta caja
 		mov.setProveedorOrigen(proveedor); // el proveedor es el origen del dinero
+		return movimientoRepository.save(mov);
+	}
+
+	/**
+	 * El CLIENTE nos DA efectivo → ENTRA a una caja. Sin 4x1000 (es efectivo).
+	 * El saldo del cliente es un "debe/debemos": si nos paga, su saldo DISMINUYE.
+	 */
+	@Override
+	@Transactional
+	public Movimiento registrarPagoClienteACaja(Integer clienteId, Integer cajaId, Double monto) {
+		if (clienteId == null || cajaId == null)
+			throw new IllegalArgumentException("Debe indicar el cliente y la caja.");
+		if (monto == null || monto <= 0)
+			throw new IllegalArgumentException("El monto debe ser mayor a 0.");
+
+		Cliente cliente = clienteRepository.findById(clienteId)
+				.orElseThrow(() -> new RuntimeException("Cliente no encontrado."));
+		Efectivo caja = efectivoRepository.findById(cajaId)
+				.orElseThrow(() -> new RuntimeException("Caja no encontrada."));
+
+		// Entra a la caja (sin comisión).
+		caja.setSaldo((caja.getSaldo() != null ? caja.getSaldo() : 0.0) + monto);
+		efectivoRepository.save(caja);
+
+		// El cliente nos PAGA → su saldo DISMINUYE (debe/debemos).
+		cliente.setSaldo((cliente.getSaldo() != null ? cliente.getSaldo() : 0.0) - monto);
+		clienteRepository.save(cliente);
+
+		Movimiento mov = new Movimiento();
+		mov.setTipo("PAGO CLIENTE A CAJA");
+		mov.setFecha(LocalDateTime.now());
+		mov.setMonto(monto);
+		mov.setComision(0.0);
+		mov.setCaja(caja);                 // entra a esta caja
+		mov.setClienteOrigen(cliente);     // el cliente es el origen del dinero
 		return movimientoRepository.save(mov);
 	}
 
@@ -1057,7 +1092,8 @@ public class MovimientoServiceImplement implements MovimientoService {
 	    double monto = m.getMonto() != null ? m.getMonto() : 0.0;
 
 	    if ("PAGO PROVEEDOR A CAJA".equals(tipo)) {
-	        // Revertir: sale de la caja y el proveedor vuelve a deber menos.
+	        // Revertir EXACTO lo que hizo el registro: sale de la caja (entró) y el saldo del
+	        // proveedor vuelve a SUBIR (al pagar bajó).
 	        if (m.getCaja() != null) {
 	            Efectivo caja = m.getCaja();
 	            caja.setSaldo(round2((caja.getSaldo() != null ? caja.getSaldo() : 0.0) - monto));
@@ -1065,8 +1101,24 @@ public class MovimientoServiceImplement implements MovimientoService {
 	        }
 	        if (m.getProveedorOrigen() != null) {
 	            Supplier po = m.getProveedorOrigen();
-	            po.setBalance((po.getBalance() != null ? po.getBalance() : 0.0) - monto);
+	            po.setBalance((po.getBalance() != null ? po.getBalance() : 0.0) + monto);
 	            supplierRepository.save(po);
+	        }
+	        movimientoRepository.delete(m);
+	        return;
+	    }
+
+	    if ("PAGO CLIENTE A CAJA".equals(tipo)) {
+	        // Revertir: sale de la caja (entró) y el saldo del cliente vuelve a SUBIR (al pagar bajó).
+	        if (m.getCaja() != null) {
+	            Efectivo caja = m.getCaja();
+	            caja.setSaldo(round2((caja.getSaldo() != null ? caja.getSaldo() : 0.0) - monto));
+	            efectivoRepository.save(caja);
+	        }
+	        if (m.getClienteOrigen() != null) {
+	            Cliente cl = m.getClienteOrigen();
+	            cl.setSaldo((cl.getSaldo() != null ? cl.getSaldo() : 0.0) + monto);
+	            clienteRepository.save(cl);
 	        }
 	        movimientoRepository.delete(m);
 	        return;

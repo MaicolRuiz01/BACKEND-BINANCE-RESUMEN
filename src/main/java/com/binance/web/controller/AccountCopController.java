@@ -80,6 +80,13 @@ public class AccountCopController {
 		return ResponseEntity.ok(AccountCopService.findAllSaldos());
 	}
 
+	/** Consulta liviana para la vista P2P (ventas en curso): nombre, banco, saldo, cupos y estado P2P,
+	 *  SIN las llaves Brebe. Mucho más rápida que traer la entidad completa. */
+	@GetMapping(value = "/p2p", produces = "application/json")
+	public ResponseEntity<List<com.binance.web.Repository.AccountCopRepository.P2PView>> getP2PView() {
+		return ResponseEntity.ok(accountCopRepository.findAllP2PView());
+	}
+
 	/**
 	 * Cuánto dinero de cada cuenta ya está "comprometido" en solicitudes de
 	 * retiro enviadas pero aún no confirmadas por el retirador (SIN_ASIGNAR o

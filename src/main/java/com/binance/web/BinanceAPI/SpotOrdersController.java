@@ -12,7 +12,9 @@ import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -48,6 +50,7 @@ import com.binance.web.model.BuyDollarsDto;
 import com.binance.web.model.SellDollarsDto;
 import com.binance.web.transacciones.TransaccionesDTO;
 import com.binance.web.transacciones.TransaccionesRepository;
+import com.binance.web.util.TraspasoWalletService;
 @RestController
 @RequestMapping("/api/spot-orders")
 @RequiredArgsConstructor
@@ -59,6 +62,7 @@ public class SpotOrdersController {
     private final AccountBinanceRepository accountBinanceRepository;
     private final TransaccionesRepository transaccionesRepository;
     private final TronScanService tronScanService;
+    private final TraspasoWalletService traspasoWalletService;
 
     private static final DateTimeFormatter FORMATO_FECHA = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -395,6 +399,124 @@ public class SpotOrdersController {
         } catch (Exception e) {
             return ResponseEntity.status(500).body(new ArrayList<>());
         }
+    }
+
+    /**
+     * ENDPOINT DE PRUEBA (no guarda nada en BD). Trae los depósitos y retiros de AYER de una
+     * cuenta (por defecto Luis) y clasifica cada uno como TRASPASO / COMPRA / VENTA aplicando la
+     * MISMA lógica del import real (remitente on-chain, wallet Bybit, direcciones propias).
+     * Sirve para verificar la detección sin efectos secundarios.
+     * GET /api/spot-orders/diagnostico-ayer?account=Luis
+     */
+    @GetMapping("/diagnostico-ayer")
+    public ResponseEntity<Map<String, Object>> diagnosticoAyer(
+            @RequestParam(defaultValue = "Luis") String account,
+            @RequestParam(defaultValue = "100") int limit) {
+
+        ZoneId zone = ZoneId.of("America/Bogota");
+        LocalDate ayer = LocalDate.now(zone).minusDays(1);
+        LocalDateTime inicio = ayer.atStartOfDay();
+        LocalDateTime fin = ayer.plusDays(1).atStartOfDay();
+
+        // Direcciones propias (normalizadas) para detectar traspasos internos.
+        Set<String> ownAddrs = accountBinanceRepository.findAll().stream()
+                .map(AccountBinance::getAddress)
+                .filter(Objects::nonNull)
+                .map(a -> a.trim().toLowerCase())
+                .collect(Collectors.toSet());
+
+        ObjectMapper mapper = new ObjectMapper();
+        List<Map<String, Object>> movimientos = new ArrayList<>();
+
+        // ===== DEPÓSITOS (entradas) =====
+        try {
+            JsonNode root = mapper.readTree(binanceService.getSpotDeposits(account, limit));
+            JsonNode arr = root.isArray() ? root : root.path("data");
+            if (arr.isArray()) {
+                for (JsonNode dep : arr) {
+                    LocalDateTime fecha = parseFecha(dep.path("insertTime").asText(null));
+                    if (fecha == null || fecha.isBefore(inicio) || !fecha.isBefore(fin)) continue; // solo ayer
+
+                    String txId = dep.path("txId").asText(null);
+                    String network = dep.path("network").asText(null);
+                    String remitente = resolverRemitenteOnChain(txId, network);
+
+                    String tipo, razon;
+                    if (remitente != null && traspasoWalletService.esWalletTraspaso(remitente)) {
+                        tipo = "TRASPASO";
+                        razon = "Depósito que VIENE de la wallet Bybit";
+                    } else if (remitente != null && ownAddrs.contains(remitente.trim().toLowerCase())) {
+                        tipo = "TRASPASO INTERNO";
+                        razon = "Viene de una wallet nuestra";
+                    } else {
+                        tipo = "COMPRA";
+                        razon = (remitente == null)
+                                ? "No se pudo resolver el remitente on-chain → se tomaría como compra"
+                                : "Remitente externo desconocido → compra";
+                    }
+
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("direccion", "ENTRADA (depósito)");
+                    m.put("fecha", fecha.toString());
+                    m.put("coin", dep.path("coin").asText(""));
+                    m.put("monto", dep.path("amount").asDouble(0));
+                    m.put("txId", txId);
+                    m.put("remitente", remitente);
+                    m.put("clasificacion", tipo);
+                    m.put("razon", razon);
+                    movimientos.add(m);
+                }
+            }
+        } catch (Exception e) {
+            movimientos.add(Map.<String, Object>of("error_depositos", String.valueOf(e.getMessage())));
+        }
+
+        // ===== RETIROS (salidas) =====
+        try {
+            JsonNode root = mapper.readTree(binanceService.getSpotWithdrawals(account, limit));
+            JsonNode arr = root.isArray() ? root : root.path("data");
+            if (arr.isArray()) {
+                for (JsonNode wd : arr) {
+                    LocalDateTime fecha = parseFecha(wd.path("applyTime").asText(null));
+                    if (fecha == null || fecha.isBefore(inicio) || !fecha.isBefore(fin)) continue; // solo ayer
+
+                    String destino = wd.path("address").asText(null);
+
+                    String tipo, razon;
+                    if (destino != null && traspasoWalletService.esWalletTraspaso(destino)) {
+                        tipo = "TRASPASO";
+                        razon = "Retiro que VA a la wallet Bybit";
+                    } else if (destino != null && ownAddrs.contains(destino.trim().toLowerCase())) {
+                        tipo = "TRASPASO INTERNO";
+                        razon = "Va a una wallet nuestra";
+                    } else {
+                        tipo = "VENTA";
+                        razon = "Destino externo desconocido → venta";
+                    }
+
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("direccion", "SALIDA (retiro)");
+                    m.put("fecha", fecha.toString());
+                    m.put("coin", wd.path("coin").asText(""));
+                    m.put("monto", wd.path("amount").asDouble(0));
+                    m.put("txId", wd.path("txId").asText(null));
+                    m.put("destino", destino);
+                    m.put("clasificacion", tipo);
+                    m.put("razon", razon);
+                    movimientos.add(m);
+                }
+            }
+        } catch (Exception e) {
+            movimientos.add(Map.<String, Object>of("error_retiros", String.valueOf(e.getMessage())));
+        }
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("cuenta", account);
+        out.put("fecha", ayer.toString());
+        out.put("nota", "Solo diagnóstico — NO se guardó nada en la BD.");
+        out.put("total", movimientos.size());
+        out.put("movimientos", movimientos);
+        return ResponseEntity.ok(out);
     }
 
     /**

@@ -31,6 +31,9 @@ public interface MovimientoService {
 
 	/** El proveedor nos da efectivo → ENTRA a una caja (sin 4x1000). */
 	Movimiento registrarPagoProveedorACaja(Integer proveedorId, Integer cajaId, Double monto);
+
+	/** El cliente nos da efectivo → ENTRA a una caja (sin 4x1000). Baja el saldo del cliente. */
+	Movimiento registrarPagoClienteACaja(Integer clienteId, Integer cajaId, Double monto);
 	List<Movimiento> listarPagosProveedorPorId(Integer proveedorId);
 	List<Movimiento> listarMovimientosPorCliente(Integer clienteId);
 	Movimiento registrarPagoCaja(Integer clienteId, Integer cajaId, Double monto);

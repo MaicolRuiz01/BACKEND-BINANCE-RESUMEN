@@ -22,14 +22,23 @@ public class TraspasoWalletService {
         this.wallets = (walletsCsv == null || walletsCsv.isBlank())
                 ? new HashSet<>()
                 : Arrays.stream(walletsCsv.split(","))
-                        .map(w -> w.trim().toLowerCase())
+                        .map(TraspasoWalletService::normalizar)
                         .filter(w -> !w.isEmpty())
                         .collect(Collectors.toSet());
     }
 
-    /** ¿La dirección es una wallet de traspaso conocida (Bybit)? */
+    /** ¿La dirección es una wallet de traspaso conocida (Bybit)? Compara en formato normalizado
+     *  (sin "0x", en minúsculas), y la config trae Base58 y hex, así coincide venga en el formato
+     *  que venga de la API de TRON. */
     public boolean esWalletTraspaso(String address) {
         if (address == null || address.isBlank()) return false;
-        return wallets.contains(address.trim().toLowerCase());
+        return wallets.contains(normalizar(address));
+    }
+
+    private static String normalizar(String w) {
+        if (w == null) return "";
+        String s = w.trim().toLowerCase();
+        if (s.startsWith("0x")) s = s.substring(2);
+        return s;
     }
 }
