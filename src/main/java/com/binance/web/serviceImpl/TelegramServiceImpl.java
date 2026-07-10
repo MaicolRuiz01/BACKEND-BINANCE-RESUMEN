@@ -133,6 +133,47 @@ public class TelegramServiceImpl implements TelegramService {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // sendMessageWithButtons — mensaje NUEVO con N botones dinámicos (uno por fila)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Override
+    public Integer sendMessageWithButtons(String chatId, String text, Map<String, String> buttonsData) {
+        if (!isConfigured(chatId))
+            return null;
+        try {
+            List<List<Map<String, Object>>> inlineKeyboard = new java.util.ArrayList<>();
+            for (Map.Entry<String, String> entry : buttonsData.entrySet()) {
+                Map<String, Object> button = new HashMap<>();
+                button.put("text", entry.getKey());
+                button.put("callback_data", entry.getValue());
+                inlineKeyboard.add(List.of(button));
+            }
+
+            Map<String, Object> replyMarkup = new HashMap<>();
+            replyMarkup.put("inline_keyboard", inlineKeyboard);
+
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("chat_id", chatId);
+            payload.put("text", text);
+            payload.put("parse_mode", "Markdown");
+            payload.put("reply_markup", replyMarkup);
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> response = (Map<String, Object>) post("/sendMessage", payload);
+            if (response != null && Boolean.TRUE.equals(response.get("ok"))) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> result = (Map<String, Object>) response.get("result");
+                Integer messageId = (Integer) result.get("message_id");
+                log.info("[Telegram] Mensaje con botones dinámicos enviado a {}, message_id={}", chatId, messageId);
+                return messageId;
+            }
+        } catch (Exception e) {
+            log.error("[Telegram] Error al enviar mensaje con botones dinámicos: {}", e.getMessage());
+        }
+        return null;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // editMessage — edita texto de un mensaje existente (mantiene botones)
     // ─────────────────────────────────────────────────────────────────────────
 

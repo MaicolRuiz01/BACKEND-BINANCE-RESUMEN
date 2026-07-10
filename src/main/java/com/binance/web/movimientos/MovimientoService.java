@@ -1,6 +1,7 @@
 package com.binance.web.movimientos;
 
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import com.binance.web.Entity.Movimiento;
@@ -48,6 +49,11 @@ public interface MovimientoService {
 	List<Movimiento> listarAjustesProveedor(Integer proveedorId);
 	List<Movimiento> listarAjustesCuentaCop(Integer cuentaId);
 	List<Movimiento> listarAjustesCaja(Integer cajaId);
+
+	/** Igual que listarMovimientosCajaLite pero acotado a un rango de fechas (para el bot de Telegram). */
+	List<MovimientoDTO> listarMovimientosCajaLiteEntreFechas(Integer cajaId, LocalDateTime desde, LocalDateTime hasta);
+	/** Igual que listarAjustesCaja pero acotado a un rango de fechas (para el bot de Telegram). */
+	List<Movimiento> listarAjustesCajaEntreFechas(Integer cajaId, LocalDateTime desde, LocalDateTime hasta);
 
 	/** Elimina un movimiento revirtiendo sus efectos de saldo (solo PAGO PROVEEDOR por ahora). */
 	void eliminarMovimiento(Integer id);

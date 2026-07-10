@@ -89,6 +89,7 @@ public class GastoServiceImplement implements GastoService{
                     .cuentaOrigen(cuenta)
                     .comision(comision)
                     .comisionAplicada(!esBanco)
+                    .motivo(nuevoGasto.getDescripcion())
                     .build());
             nuevoGasto.setMovimientoId(mov.getId());
         }
@@ -108,6 +109,7 @@ public class GastoServiceImplement implements GastoService{
                     .caja(caja)
                     .comision(0.0)
                     .comisionAplicada(true)
+                    .motivo(nuevoGasto.getDescripcion())
                     .build());
             nuevoGasto.setMovimientoId(mov.getId());
         }

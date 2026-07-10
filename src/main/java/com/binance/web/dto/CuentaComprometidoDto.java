@@ -16,5 +16,9 @@ import java.util.List;
 public class CuentaComprometidoDto {
     private Integer cuentaCopId;
     private Double montoComprometido;
+    /** Solo la parte de montoComprometido que es por CAJERO (para netear el cupo diario de cajero). */
+    private Double montoCajeroComprometido;
+    /** Solo la parte de montoComprometido que es por CORRESPONSAL (para netear el cupo diario de corresponsal). */
+    private Double montoCorresponsalComprometido;
     private List<SolicitudComprometidaDto> solicitudes;
 }

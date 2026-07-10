@@ -18,6 +18,9 @@ public interface SolicitudRetiroRepository extends JpaRepository<SolicitudRetiro
 
     List<SolicitudRetiro> findByEstadoOrderByFechaCreacionDesc(EstadoSolicitud estado);
 
+    /** Solicitudes aún sin confirmar (SIN_ASIGNAR o PENDIENTE) creadas antes del límite dado — para expirarlas automáticamente. */
+    List<SolicitudRetiro> findByEstadoInAndFechaCreacionBefore(List<EstadoSolicitud> estados, LocalDateTime limite);
+
     /** Top retiradores de la semana: suma de totalMonto de solicitudes COMPLETADAS entre fechas */
     @Query("""
         SELECT s.retirador.id, SUM(s.totalMonto)
