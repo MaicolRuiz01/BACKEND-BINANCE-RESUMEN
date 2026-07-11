@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.client.RestTemplate;
+import com.binance.web.util.HttpClientFactory;
 
 import com.binance.web.Repository.AccountBinanceRepository;
 import com.binance.web.Repository.BuyDollarsRepository;
@@ -129,7 +130,7 @@ public class SolanaController {
 	        String url = "https://api.helius.xyz/v0/addresses/" + address + 
 	                     "/transactions?api-key=9609e311-f36d-429b-a403-8499591b6583&limit=2";
 	        
-	        RestTemplate rt = new RestTemplate();
+	        RestTemplate rt = HttpClientFactory.timed();
 	        String raw = rt.getForObject(url, String.class);
 	        
 	        return ResponseEntity.ok(raw);

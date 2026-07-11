@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestTemplate;
+import com.binance.web.util.HttpClientFactory;
 import org.springframework.web.util.UriComponentsBuilder;
 import org.springframework.web.util.UriUtils;
 
@@ -24,7 +25,7 @@ import java.util.stream.Collectors;
 @Service
 public class SolscanService {
 
-	private final RestTemplate restTemplate = new RestTemplate();
+	private final RestTemplate restTemplate = HttpClientFactory.timed();
 	private final ObjectMapper objectMapper = new ObjectMapper();
 
 	@Value("${solscan.apiKey:}")

@@ -14,6 +14,7 @@ import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
+import com.binance.web.util.HttpClientFactory;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -37,7 +38,7 @@ public class BinanceService {
 	private final ObjectMapper mapper = new ObjectMapper();
 
 	/** RestTemplate compartido — configura timeouts en HttpClientConfig si lo necesitas */
-	private final RestTemplate restTemplate = new RestTemplate();
+	private final RestTemplate restTemplate = HttpClientFactory.timed();
 
 	@Autowired
 	private AccountBinanceRepository accountRepo;

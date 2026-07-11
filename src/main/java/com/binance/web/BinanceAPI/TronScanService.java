@@ -18,6 +18,7 @@ import java.util.Set;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+import com.binance.web.util.HttpClientFactory;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -35,7 +36,7 @@ import org.springframework.http.HttpMethod;
 @Service
 public class TronScanService {
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate = HttpClientFactory.timed();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     // Lee las keys desde application.properties (si no están, queda vacío y no se envía header).
