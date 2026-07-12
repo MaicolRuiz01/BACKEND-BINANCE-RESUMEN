@@ -493,18 +493,9 @@ public class BinanceService {
 				}
 			} catch (Exception ex) { log.warn("Error Spot balance: {}", ex.getMessage()); }
 
-			// Futures
-			try {
-				String futUrl = "https://fapi.binance.com/fapi/v2/balance?" + q + "&signature=" + hmacSha256(creds[1], q);
-				String futRaw = binanceGet(futUrl, creds[0]);
-				JsonNode futNode = mapper.readTree(futRaw);
-				if (futNode.isArray()) {
-					for (JsonNode b : futNode) {
-						Double price = priceMap.get(b.path("asset").asText());
-						if (price != null) total += b.path("balance").asDouble() * price;
-					}
-				}
-			} catch (Exception ex) { log.warn("Error Futures balance: {}", ex.getMessage()); }
+			// Futures: NO se usa. El negocio mueve USDT en spot/funding, no en futuros.
+			// Además las API keys no tienen permiso de futures (daba 401 en bucle y no aportaba
+			// nada al total). Se elimina la llamada para no presionar la app con requests inútiles.
 
 			// Funding
 			try { total += getFundingAssetBalance(account, "USDT"); }

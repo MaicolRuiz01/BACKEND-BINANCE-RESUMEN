@@ -20,6 +20,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.bind.annotation.GetMapping;
 
 import com.binance.web.BinanceAPI.BinanceService;
+import com.binance.web.BinanceAPI.BybitService;
 import com.binance.web.BinanceAPI.SolscanService;
 import com.binance.web.BinanceAPI.TronScanService;
 import com.binance.web.Entity.AccountBinance;
@@ -47,6 +48,7 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
 	@Autowired
 	private AccountCryptoBalanceRepository accountCryptoBalanceRepository;
 	private final SolscanService solscanService;
+	private final BybitService bybitService;
 	private volatile Set<String> dynamicStables = new HashSet<>(Set.of("USDT"));
 	private volatile long dynamicStablesTs = 0L;
 	private static final long STABLES_TTL_MS = 5 * 60 * 1000; // 5 min
@@ -56,11 +58,12 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
 	private static final ZoneId ZONE_BOGOTA = ZoneId.of("America/Bogota");
 
 	public AccountBinanceServiceImpl(AccountBinanceRepository accountBinanceRepository, BinanceService binanceService,
-			TronScanService tronScanService, SolscanService solscanService) {
+			TronScanService tronScanService, SolscanService solscanService, BybitService bybitService) {
 		this.accountBinanceRepository = accountBinanceRepository;
 		this.binanceService = binanceService;
 		this.tronScanService = tronScanService;
 		this.solscanService = solscanService;
+		this.bybitService = bybitService;
 	}
 
 	private AccountCryptoBalance findOrCreate(AccountBinance account, String cryptoSymbol) {
@@ -518,6 +521,9 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
 			if (addrSol == null || addrSol.isBlank())
 				throw new RuntimeException("Wallet address vacío para " + name);
 			return solscanService.getBalancesByAsset(addrSol);
+		case "BYBIT":
+			// Bybit es un exchange: el saldo se lee por API (Unified + Funding), NO on-chain.
+			return bybitService.getBalancesByAsset(acc.getApiKey(), acc.getApiSecret());
 		default:
 			return Collections.emptyMap();
 		}
