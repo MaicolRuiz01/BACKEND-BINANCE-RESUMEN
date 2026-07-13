@@ -35,6 +35,7 @@ import com.binance.web.model.TransaccionesDTO;
 import com.binance.web.Entity.Transacciones;
 import com.binance.web.transacciones.TransaccionesRepository;
 import com.binance.web.util.TraspasoWalletService;
+import com.binance.web.util.TraspasoBybitService;
 import com.binance.web.service.AccountBinanceService;
 import com.binance.web.service.AverageRateService;
 import com.binance.web.service.BuyDollarsService;
@@ -73,6 +74,8 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 	private TransaccionesRepository transaccionesRepository;
 	@Autowired
 	private TraspasoWalletService traspasoWalletService;
+	@Autowired
+	private TraspasoBybitService traspasoBybitService;
 	@Autowired
 	private SolanaController solanaController;
 
@@ -211,21 +214,32 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
                     continue;
                   }
 
-                // 🔁 Wallet Bybit (u otra externa) → es un TRASPASO, NO una compra.
-                // El cripto real sí entró (se ajusta el saldo), pero se registra como
-                // Transacción/traspaso y NO como BuyDollars (no afecta proveedores/clientes).
-                if (traspasoWalletService.esWalletTraspaso(dto.getContraparteAddress())) {
+                // 🔁 ¿Es un TRASPASO (no una compra)? Detección REAL por HASH on-chain:
+                //    si el hash de este depósito coincide con un RETIRO de una de tus cuentas Bybit,
+                //    es un traspaso interno y SABEMOS de qué cuenta salió (cuentaFrom real → "Javier").
+                //    Se prueban ambos identificadores (txId e idDeposit) porque según la fuente uno
+                //    u otro trae el hash on-chain.
+                //    Fallback TEMPORAL: la wallet hardcodeada (esWalletTraspaso). Se quitará cuando
+                //    el match por hash esté verificado con datos reales.
+                AccountBinance origenBybit = traspasoBybitService.cuentaOrigenPorHash(dto.getTxId());
+                if (origenBybit == null) origenBybit = traspasoBybitService.cuentaOrigenPorHash(dto.getIdDeposit());
+                boolean esTraspaso = origenBybit != null
+                        || traspasoWalletService.esWalletTraspaso(dto.getContraparteAddress());
+
+                if (esTraspaso) {
+                    // El cripto real sí entró (se ajusta el saldo), pero se registra como
+                    // Transacción/traspaso y NO como BuyDollars (no afecta proveedores/clientes).
                     accountBinanceService.updateOrCreateCryptoBalance(account.getId(), dto.getCryptoSymbol(), dto.getAmount());
                     String txHash = dto.getIdDeposit();
                     if (txHash == null || !transaccionesRepository.existsByTxId(txHash)) {
                         Transacciones t = new Transacciones();
-                        t.setIdtransaccion("TRASPASO-BYBIT-" + txHash);
+                        t.setIdtransaccion("TRASPASO-" + (origenBybit != null ? "BYBIT-" : "EXT-") + txHash);
                         t.setTxId(txHash);
                         t.setCantidad(dto.getAmount());     // crudo (USDT reales)
                         t.setFecha(dto.getDate());
                         t.setTipo(dto.getCryptoSymbol());
                         t.setCuentaTo(account);             // entró a nuestra cuenta
-                        t.setCuentaFrom(null);              // Bybit no es cuenta nuestra
+                        t.setCuentaFrom(origenBybit);       // ← cuenta Bybit REAL si se detectó por hash; null si solo por wallet
                         transaccionesRepository.save(t);
                     }
                     existentes.add(dto.getIdDeposit());

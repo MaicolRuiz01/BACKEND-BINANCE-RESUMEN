@@ -25,8 +25,10 @@ public class TransaccionesDTO {
         return new TransaccionesDTO(
             t.getCantidad(),               // monto
             t.getIdtransaccion(),          // idtransaccion
-            t.getCuentaTo().getName(),     // cuentaTo
-            t.getCuentaFrom().getName(),   // cuentaFrom
+            // null-safe: si la cuenta es externa (no registrada, ej. una wallet de Bybit),
+            // cuentaTo/cuentaFrom pueden ser null → se deja null (el front lo muestra como "Externa").
+            t.getCuentaTo() != null ? t.getCuentaTo().getName() : null,     // cuentaTo
+            t.getCuentaFrom() != null ? t.getCuentaFrom().getName() : null, // cuentaFrom
             t.getFecha(),                  // fecha
             t.getTipo(),                    // tipo
             t.getTxId()

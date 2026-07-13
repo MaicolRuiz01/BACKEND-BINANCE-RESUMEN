@@ -29,7 +29,7 @@ public interface TransaccionesRepository extends JpaRepository<Transacciones, In
 	 */
 	@Query(value = """
 			SELECT t.fecha AS fecha, t.cantidad AS cantidad, t.tipo AS moneda,
-			       cf.name AS deQuien, ct.name AS aQuien, t.idtransaccion AS idtransaccion
+			       cf.name AS origen, ct.name AS destino, t.idtransaccion AS idtransaccion
 			FROM Transacciones t
 			LEFT JOIN t.cuentaFrom cf
 			LEFT JOIN t.cuentaTo ct
@@ -38,13 +38,15 @@ public interface TransaccionesRepository extends JpaRepository<Transacciones, In
 			countQuery = "SELECT COUNT(t) FROM Transacciones t")
 	Page<TraspasoListItem> findTraspasosPaginados(Pageable pageable);
 
-	/** Proyección liviana para el listado de traspasos. */
+	/** Proyección liviana para el listado de traspasos.
+	 *  OJO: nombres de método SIN dos mayúsculas seguidas (getAQuien mapea mal a "AQuien"
+	 *  por la regla de JavaBeans). Por eso se usan origen/destino. */
 	interface TraspasoListItem {
 		LocalDateTime getFecha();
 		Double getCantidad();
 		String getMoneda();
-		String getDeQuien();
-		String getAQuien();
+		String getOrigen();
+		String getDestino();
 		String getIdtransaccion();
 	}
 

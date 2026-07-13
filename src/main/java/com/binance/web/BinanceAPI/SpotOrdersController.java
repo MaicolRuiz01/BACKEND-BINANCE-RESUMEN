@@ -257,6 +257,10 @@ public class SpotOrdersController {
 
                         BuyDollarsDto dto = new BuyDollarsDto();
                         dto.setIdDeposit(id);
+                        // Guardar el HASH on-chain del depósito. Es clave para detectar traspasos:
+                        // este mismo hash aparece en el RETIRO de la cuenta Bybit que lo envió, y así
+                        // se cruzan (antes se descartaba y por eso nunca matcheaba → salía "Externa").
+                        dto.setTxId(txId);
                         dto.setNameAccount(account);
                         dto.setDate(fecha);
                         dto.setAmount(amount);

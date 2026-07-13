@@ -91,6 +91,16 @@ public class TraspasoReconciliacionService {
             AccountBinance destino = accountRepo.findByName(match.getNameAccount());
             String symbol = match.getCryptoSymbol() != null ? match.getCryptoSymbol() : "USDT";
 
+            // Si NO se identifica NINGUNA de las dos cuentas, no es un traspaso útil: quedaría
+            // "Externa → Externa" (un registro basura del que no se sabe origen ni destino).
+            // Se deja la compra/venta SIN tocar (no se crea el traspaso ni se borran) para que,
+            // cuando las cuentas estén bien registradas, se pueda resolver de verdad.
+            if (origen == null && destino == null) {
+                log.warn("[ReconTraspaso] Par {}/{} sin cuentas identificadas ({} / {}) → NO se registra como traspaso.",
+                        sell.getNameAccount(), match.getNameAccount(), sell.getDollars(), match.getAmount());
+                continue;
+            }
+
             // La compra ya sumó el cripto en destino al importarse. Falta restarlo en origen.
             if (origen != null) {
                 // dollars está en miles; el saldo cripto va en USDT reales → ×1000.

@@ -1,7 +1,9 @@
 package com.binance.web.BinanceAPI;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import javax.crypto.Mac;
@@ -68,6 +70,31 @@ public class BybitService {
             log.warn("[Bybit] No se pudo leer Funding: {}", e.getMessage());
         }
 
+        return out;
+    }
+
+    /**
+     * Hashes on-chain (txID) de los RETIROS recientes de esta cuenta Bybit (últimos 7 días).
+     * Es la base de la detección REAL de traspasos: si un depósito entrante trae un hash que
+     * está en esta lista, ese depósito salió de ESTA cuenta Bybit → es un traspaso interno,
+     * no una compra externa. Reemplaza el enfoque de "wallets hardcodeadas" (Bybit rota wallets).
+     * Defensivo: si falla, devuelve lista vacía (nunca throw, nunca null).
+     */
+    public List<String> getWithdrawalTxIds(String apiKey, String apiSecret) {
+        List<String> out = new ArrayList<>();
+        if (apiKey == null || apiSecret == null || apiKey.isBlank() || apiSecret.isBlank()) return out;
+        try {
+            long end = System.currentTimeMillis();
+            long start = end - 7L * 24 * 3600 * 1000; // últimos 7 días
+            String query = "startTime=" + start + "&endTime=" + end + "&limit=50";
+            JsonNode root = signedGet("/v5/asset/withdraw/query-record", query, apiKey, apiSecret);
+            for (JsonNode w : root.path("result").path("rows")) {
+                String txId = w.path("txID").asText(null);
+                if (txId != null && !txId.isBlank()) out.add(txId.trim());
+            }
+        } catch (Exception e) {
+            log.warn("[Bybit] No se pudieron leer los retiros: {}", e.getMessage());
+        }
         return out;
     }
 

@@ -522,6 +522,7 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
 				throw new RuntimeException("Wallet address vacío para " + name);
 			return solscanService.getBalancesByAsset(addrSol);
 		case "BYBIT":
+		case "BYBIP": // typo común — se acepta igual
 			// Bybit es un exchange: el saldo se lee por API (Unified + Funding), NO on-chain.
 			return bybitService.getBalancesByAsset(acc.getApiKey(), acc.getApiSecret());
 		default:
