@@ -50,6 +50,8 @@ public class EfectivoController {
         } catch (DataIntegrityViolationException e) {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
                 "error", "La caja tiene movimientos o gastos asociados y no se puede eliminar."));
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", e.getMessage()));
         }
     }
 

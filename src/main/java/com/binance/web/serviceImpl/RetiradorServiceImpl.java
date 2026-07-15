@@ -114,28 +114,30 @@ public class RetiradorServiceImpl implements RetiradorService {
     }
 
     @Override
+    @Transactional
     public void delete(Long id) {
         Retirador retirador = findById(id);
 
-        List<SolicitudRetiro> solicitudes = solicitudRepository.findByRetiradorIdOrderByFechaCreacionDesc(id);
-        for (SolicitudRetiro s : solicitudes) {
-            if (s.getEstado() == EstadoSolicitud.COMPLETADO) {
-                throw new RuntimeException("No se puede eliminar el retirador porque ya tiene retiros completados.");
-            } else {
-                s.setRetirador(null);
-                s.setEstado(EstadoSolicitud.SIN_ASIGNAR);
-                solicitudRepository.save(s);
-            }
-        }
+        // El retirador SIEMPRE se puede eliminar, sin condiciones — se preserva
+        // todo el historial: los Movimiento ya registrados quedan intactos (no
+        // referencian al retirador, sino a la caja), y las SolicitudRetiro no se
+        // borran, solo se les quita la referencia al retirador que ya no existe.
+        // Las que quedaron sin resolver (no completadas ni canceladas) vuelven a
+        // SIN_ASIGNAR para que otro retirador pueda tomarlas; las ya completadas
+        // o canceladas se dejan tal cual, como registro histórico.
+        //
+        // Se usa un UPDATE directo (no cargar+guardar cada SolicitudRetiro en
+        // memoria) a propósito: guardarlas una por una en un ciclo, justo antes
+        // de borrar la fila del retirador al que apuntaban, hacía que Hibernate
+        // lanzara un TransientObjectException al hacer commit (una validación
+        // interna de sus referencias en caché, no una regla de negocio real).
+        solicitudRepository.desvincularSolicitudesAbiertasDeRetirador(id);
+        solicitudRepository.desvincularSolicitudesCerradasDeRetirador(id);
 
-        Efectivo caja = retirador.getEfectivo();
-        if (caja != null) {
-            retirador.setEfectivo(null);
-            caja.setRetirador(null);
-            retiradorRepository.save(retirador); // Guardar para romper la llave foranea
-            efectivoRepository.delete(caja); // Eliminar la caja huerfana
-        }
-
+        // La caja NO se toca ni se borra aquí: queda huérfana (sin retirador),
+        // con su saldo y su historial de movimientos intactos. Solo se puede
+        // eliminar aparte, y solo si ya no tiene ningún retirador vinculado
+        // (ver EfectivoServiceImpl.eliminarCaja).
         retiradorRepository.delete(retirador);
     }
 

@@ -13,6 +13,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -49,19 +51,31 @@ public class Retiro4x1000Test {
 
     @BeforeEach
     void setUp() {
+        // OJO: CupoDiarioRules.asegurarCupoHoy() RESETEA cupoCajero/CorresponsalDisponibleHoy
+        // a los máximos reales del banco (ej. Nequi: $2.700 cajero / $5.000 corresponsal)
+        // cada vez que se llama, A MENOS que cupoFecha ya sea la fecha de HOY. Si no fijamos
+        // cupoFecha=hoy aquí, cualquier valor "grande" que pongamos en cupoCajero/CorresponsalDisponibleHoy
+        // (como el 50.000 de abajo) se pisa silenciosamente con el máximo real del banco tan
+        // pronto como confirmarInterno llama asegurarCupoHoy() — lo que rompía, sin que nadie
+        // se diera cuenta (nunca se corrieron estas pruebas), los tests de $10.000 que asumían
+        // cupo disponible ilimitado.
+        LocalDate hoy = LocalDate.now(ZoneId.of("America/Bogota"));
+
         cuentaNoBanco = new AccountCop();
         cuentaNoBanco.setId(1);
         cuentaNoBanco.setName("Nequi");
         cuentaNoBanco.setBankType(com.binance.web.Entity.BankType.NEQUI);
         cuentaNoBanco.setBalance(20000.0);
+        cuentaNoBanco.setCupoFecha(hoy);
         cuentaNoBanco.setCupoCajeroDisponibleHoy(50000.0);
         cuentaNoBanco.setCupoCorresponsalDisponibleHoy(50000.0);
-        
+
         cuentaBancolombia = new AccountCop();
         cuentaBancolombia.setId(2);
         cuentaBancolombia.setName("Bancolombia");
         cuentaBancolombia.setBankType(com.binance.web.Entity.BankType.BANCOLOMBIA);
         cuentaBancolombia.setBalance(20000.0);
+        cuentaBancolombia.setCupoFecha(hoy);
         cuentaBancolombia.setCupoCajeroDisponibleHoy(50000.0);
         cuentaBancolombia.setCupoCorresponsalDisponibleHoy(50000.0);
 

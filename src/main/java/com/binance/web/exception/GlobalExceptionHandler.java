@@ -40,8 +40,10 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<Map<String, String>> handleRuntime(RuntimeException ex) {
-        // La mayoría de los "no encontrado" del proyecto se lanzan como RuntimeException genérica.
-        log.warn("[GlobalExceptionHandler] {}", ex.getMessage());
+        // La mayoría de los "no encontrado" del proyecto se lanzan como RuntimeException genérica,
+        // pero también caen acá excepciones inesperadas de Hibernate/JPA (ej. TransientObjectException)
+        // que sí necesitan el stacktrace completo para diagnosticarse — con solo el mensaje no alcanza.
+        log.error("[GlobalExceptionHandler] RuntimeException no específica: {}", ex.getMessage(), ex);
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(Map.of("message", ex.getMessage() != null ? ex.getMessage() : "Ocurrió un error inesperado."));
     }

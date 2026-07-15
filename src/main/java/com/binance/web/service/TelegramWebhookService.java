@@ -339,11 +339,110 @@ public class TelegramWebhookService {
         // que se van encontrando, para el resumen de totales.
         java.util.LinkedHashMap<String, Double> totalesPorTipo = new java.util.LinkedHashMap<>();
 
+        // ── Retiros COMPLETO (botón "Total"): un mismo retiro genera DOS movimientos
+        // (RETIRO CAJERO + RETIRO CORRESPONSAL) sobre la misma cuenta, que pueden
+        // confirmarse con algunos minutos de diferencia (ej. corresponsal ahora,
+        // cajero 5 minutos después). Para cada cuenta, emparejamos cada CAJERO con
+        // el CORRESPONSAL más cercano en el tiempo (el que menos minutos de
+        // diferencia tenga), siempre que esa diferencia no pase de la ventana
+        // permitida — así no se emparejan por accidente dos retiros realmente
+        // distintos de la misma cuenta hechos con horas de diferencia.
+        // Solo en este reporte de Telegram se muestran unificados — la plataforma
+        // web sigue mostrándolos como dos movimientos separados, sin cambios ahí.
+        final long VENTANA_MINUTOS = 15;
+
+        java.util.Map<String, java.util.List<com.binance.web.movimientos.MovimientoDTO>> cajerosPorCuenta = new java.util.HashMap<>();
+        java.util.Map<String, java.util.List<com.binance.web.movimientos.MovimientoDTO>> corresponsalesPorCuenta = new java.util.HashMap<>();
+        for (var m : movimientos) {
+            String tipo = m.getTipo() != null ? m.getTipo() : "";
+            if ("RETIRO CAJERO".equals(tipo)) {
+                cajerosPorCuenta.computeIfAbsent(String.valueOf(m.getCuentaOrigen()), k -> new java.util.ArrayList<>()).add(m);
+            } else if ("RETIRO CORRESPONSAL".equals(tipo)) {
+                corresponsalesPorCuenta.computeIfAbsent(String.valueOf(m.getCuentaOrigen()), k -> new java.util.ArrayList<>()).add(m);
+            }
+        }
+
+        java.util.Map<com.binance.web.movimientos.MovimientoDTO, com.binance.web.movimientos.MovimientoDTO> parejaDe = new java.util.IdentityHashMap<>();
+        java.util.Set<com.binance.web.movimientos.MovimientoDTO> yaUnificados = java.util.Collections
+                .newSetFromMap(new java.util.IdentityHashMap<>());
+        java.util.Set<com.binance.web.movimientos.MovimientoDTO> yaEmitidos = java.util.Collections
+                .newSetFromMap(new java.util.IdentityHashMap<>());
+
+        for (var entry : cajerosPorCuenta.entrySet()) {
+            java.util.List<com.binance.web.movimientos.MovimientoDTO> corresponsalesDisponibles =
+                    new java.util.ArrayList<>(corresponsalesPorCuenta.getOrDefault(entry.getKey(), java.util.Collections.emptyList()));
+            for (var cajero : entry.getValue()) {
+                if (cajero.getFecha() == null) continue;
+                com.binance.web.movimientos.MovimientoDTO mejor = null;
+                long mejorDiff = Long.MAX_VALUE;
+                for (var corr : corresponsalesDisponibles) {
+                    if (corr.getFecha() == null) continue;
+                    long diff = Math.abs(java.time.Duration.between(cajero.getFecha(), corr.getFecha()).toMinutes());
+                    if (diff <= VENTANA_MINUTOS && diff < mejorDiff) {
+                        mejor = corr;
+                        mejorDiff = diff;
+                    }
+                }
+                if (mejor != null) {
+                    corresponsalesDisponibles.remove(mejor);
+                    parejaDe.put(cajero, mejor);
+                    parejaDe.put(mejor, cajero);
+                    yaUnificados.add(cajero);
+                    yaUnificados.add(mejor);
+                }
+            }
+        }
+
         for (var m : movimientos) {
             String tipo = m.getTipo() != null ? m.getTipo() : "MOVIMIENTO";
             String tipoCorto = tipoParaMostrar(tipo);
             double monto = m.getMonto() != null ? m.getMonto() : 0.0;
             totalesPorTipo.merge(tipoCorto, monto, Double::sum);
+
+            if (yaUnificados.contains(m)) {
+                if (yaEmitidos.contains(m)) {
+                    continue; // su pareja ya generó el bloque unificado
+                }
+                var par = parejaDe.get(m);
+                yaEmitidos.add(m);
+                yaEmitidos.add(par);
+
+                var cajeroMov = "RETIRO CAJERO".equals(m.getTipo()) ? m : par;
+                var corresponsalMov = "RETIRO CORRESPONSAL".equals(m.getTipo()) ? m : par;
+                double montoCajero = cajeroMov.getMonto() != null ? cajeroMov.getMonto() : 0.0;
+                double montoCorresponsal = corresponsalMov.getMonto() != null ? corresponsalMov.getMonto() : 0.0;
+
+                // Orden cronológico: el que ocurrió primero (sea cajero o corresponsal)
+                // se muestra primero, con su hora en el reloj; si el segundo quedó en
+                // un minuto distinto, su hora se agrega al lado con una flecha.
+                boolean cajeroEsPrimero = cajeroMov.getFecha() != null && corresponsalMov.getFecha() != null
+                        ? !cajeroMov.getFecha().isAfter(corresponsalMov.getFecha())
+                        : true;
+                var primero = cajeroEsPrimero ? cajeroMov : corresponsalMov;
+                var segundo = cajeroEsPrimero ? corresponsalMov : cajeroMov;
+                String horaPrimero = primero.getFecha() != null ? primero.getFecha().format(fmtHora) : "?";
+                String horaSegundo = segundo.getFecha() != null ? segundo.getFecha().format(fmtHora) : "?";
+
+                StringBuilder linea = new StringBuilder();
+                linea.append("🕐 *").append(horaPrimero).append("* → *").append(horaSegundo).append("*\n");
+                linea.append(tipoParaMostrar(primero.getTipo())).append(" — $")
+                        .append(String.format("%,.0f", primero.getMonto() != null ? primero.getMonto() : 0.0)).append("\n");
+                linea.append(tipoParaMostrar(segundo.getTipo())).append(" — $")
+                        .append(String.format("%,.0f", segundo.getMonto() != null ? segundo.getMonto() : 0.0)).append("\n");
+                linea.append("Total — $").append(String.format("%,.0f", montoCajero + montoCorresponsal));
+
+                if (m.getCuentaOrigen() != null) {
+                    linea.append("\n").append(m.getCuentaOrigen());
+                }
+                if (primero.getMotivo() != null && !primero.getMotivo().isBlank()) {
+                    linea.append("\n").append(tipoParaMostrar(primero.getTipo())).append(": ").append(primero.getMotivo());
+                }
+                if (segundo.getMotivo() != null && !segundo.getMotivo().isBlank()) {
+                    linea.append("\n").append(tipoParaMostrar(segundo.getTipo())).append(": ").append(segundo.getMotivo());
+                }
+                entradas.add(new java.util.AbstractMap.SimpleEntry<>(primero.getFecha(), linea.toString()));
+                continue;
+            }
 
             StringBuilder linea = new StringBuilder();
             linea.append("🕐 *").append(m.getFecha() != null ? m.getFecha().format(fmtHora) : "?").append("*\n");

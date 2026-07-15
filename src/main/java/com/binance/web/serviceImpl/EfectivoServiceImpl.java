@@ -29,6 +29,18 @@ public class EfectivoServiceImpl implements EfectivoService{
 
     @Override
     public void eliminarCaja(Integer id) {
+        Efectivo caja = efectivoRepo.findById(id)
+                .orElseThrow(() -> new RuntimeException("Caja no encontrada: " + id));
+
+        // Regla explícita: una caja solo se puede eliminar si ya no tiene NINGÚN
+        // retirador vinculado (primero hay que eliminar o desvincular al retirador).
+        if (caja.getRetirador() != null) {
+            throw new IllegalStateException(
+                    "No se puede eliminar la caja porque todavía está vinculada al retirador '"
+                            + caja.getRetirador().getNombre()
+                            + "'. Elimina primero ese retirador (la caja queda huérfana automáticamente) e inténtalo de nuevo.");
+        }
+
         // Si la caja tiene movimientos/gastos asociados, la FK lanzará
         // DataIntegrityViolationException y el controller lo traduce a un 409.
         efectivoRepo.deleteById(id);

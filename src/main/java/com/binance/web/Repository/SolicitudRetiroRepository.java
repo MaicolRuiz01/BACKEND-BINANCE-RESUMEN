@@ -4,6 +4,7 @@ import com.binance.web.Entity.DetalleRetiro;
 import com.binance.web.Entity.EstadoSolicitud;
 import com.binance.web.Entity.SolicitudRetiro;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -17,6 +18,29 @@ public interface SolicitudRetiroRepository extends JpaRepository<SolicitudRetiro
     List<SolicitudRetiro> findByRetiradorIdOrderByFechaCreacionDesc(Long retiradorId);
 
     List<SolicitudRetiro> findByEstadoOrderByFechaCreacionDesc(EstadoSolicitud estado);
+
+    /**
+     * Desvincula (retirador = null) las solicitudes AÚN NO resueltas de un retirador
+     * que se va a eliminar, y las devuelve al pool (SIN_ASIGNAR) para que otro las tome.
+     * Usa un UPDATE directo (no toca objetos en memoria) para evitar que Hibernate
+     * intente revisar/cascadear el objeto Retirador justo antes de borrarlo.
+     */
+    @Modifying
+    @Query("UPDATE SolicitudRetiro s SET s.retirador = null, s.estado = com.binance.web.Entity.EstadoSolicitud.SIN_ASIGNAR " +
+           "WHERE s.retirador.id = :retiradorId " +
+           "AND s.estado NOT IN (com.binance.web.Entity.EstadoSolicitud.COMPLETADO, com.binance.web.Entity.EstadoSolicitud.CANCELADO)")
+    int desvincularSolicitudesAbiertasDeRetirador(@Param("retiradorId") Long retiradorId);
+
+    /**
+     * Desvincula (retirador = null) las solicitudes YA COMPLETADAS o CANCELADAS de un
+     * retirador que se va a eliminar, preservando el registro histórico tal cual
+     * (mismo estado, solo sin el vínculo a un retirador que ya no existe).
+     */
+    @Modifying
+    @Query("UPDATE SolicitudRetiro s SET s.retirador = null " +
+           "WHERE s.retirador.id = :retiradorId " +
+           "AND s.estado IN (com.binance.web.Entity.EstadoSolicitud.COMPLETADO, com.binance.web.Entity.EstadoSolicitud.CANCELADO)")
+    int desvincularSolicitudesCerradasDeRetirador(@Param("retiradorId") Long retiradorId);
 
     /** Solicitudes aún sin confirmar (SIN_ASIGNAR o PENDIENTE) creadas antes del límite dado — para expirarlas automáticamente. */
     List<SolicitudRetiro> findByEstadoInAndFechaCreacionBefore(List<EstadoSolicitud> estados, LocalDateTime limite);
