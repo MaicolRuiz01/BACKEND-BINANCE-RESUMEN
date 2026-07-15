@@ -157,7 +157,7 @@ public class AccountBinanceController {
 		}
 		return AccountBinanceDTO.builder().id(a.getId()).name(a.getName()).referenceAccount(a.getReferenceAccount())
 				.correo(a.getCorreo()).userBinance(a.getUserBinance()).address(a.getAddress()).tipo(a.getTipo())
-				.balance(balanceUsd != null ? balanceUsd : 0.0).build();
+				.balance(balanceUsd != null ? balanceUsd : 0.0).activa(a.getActiva()).build();
 	}
 	
 	@GetMapping("/balances-internos")

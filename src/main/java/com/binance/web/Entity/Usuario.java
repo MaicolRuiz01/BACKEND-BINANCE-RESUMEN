@@ -30,6 +30,14 @@ public class Usuario implements UserDetails {
     @Column(nullable = false)
     private String password;
 
+    /**
+     * Contraseña en texto plano para poder compartir credenciales desde el panel de admin.
+     * (La seguridad no es prioridad en esta app; permite el botón "copiar credenciales").
+     * Puede ser null en usuarios antiguos hasta que el admin restablezca su clave.
+     */
+    @Column(length = 128)
+    private String passwordPlano;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)
     private Rol rol;

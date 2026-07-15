@@ -97,18 +97,18 @@ public class MovimientoController {
 		return movimientoService.registrarPagoProveedor(cuentaId, caja, proveedorOrigen, proveedor, clienteId, monto);
 	}
 
-	/** El proveedor nos da efectivo → ENTRA a una caja (sin 4x1000, es efectivo). */
-	@PostMapping("/pago-proveedor-a-caja")
-	public Movimiento pagoProveedorACaja(@RequestParam Integer proveedor, @RequestParam Integer cajaId,
+	/** El proveedor nos PRESTA efectivo → ENTRA a una caja (sin 4x1000, es efectivo). Sube la deuda. */
+	@PostMapping("/prestamo-proveedor-a-caja")
+	public Movimiento prestamoProveedorACaja(@RequestParam Integer proveedor, @RequestParam Integer cajaId,
 			@RequestParam Double monto) {
-		return movimientoService.registrarPagoProveedorACaja(proveedor, cajaId, monto);
+		return movimientoService.registrarPrestamoProveedorACaja(proveedor, cajaId, monto);
 	}
 
-	/** El cliente nos da efectivo → ENTRA a una caja (sin 4x1000). Baja el saldo del cliente. */
-	@PostMapping("/pago-cliente-a-caja")
-	public Movimiento pagoClienteACaja(@RequestParam Integer cliente, @RequestParam Integer cajaId,
+	/** El cliente nos PRESTA efectivo → ENTRA a una caja (sin 4x1000). Sube la deuda con el cliente. */
+	@PostMapping("/prestamo-cliente-a-caja")
+	public Movimiento prestamoClienteACaja(@RequestParam Integer cliente, @RequestParam Integer cajaId,
 			@RequestParam Double monto) {
-		return movimientoService.registrarPagoClienteACaja(cliente, cajaId, monto);
+		return movimientoService.registrarPrestamoClienteACaja(cliente, cajaId, monto);
 	}
 
 	@PostMapping("/pago-caja")

@@ -69,6 +69,7 @@ public class AuthController {
         Usuario nuevo = Usuario.builder()
                 .username(request.username())
                 .password(passwordEncoder.encode(request.password()))
+                .passwordPlano(request.password())
                 .rol(request.rol())
                 .build();
         usuarioRepository.save(nuevo);
@@ -95,7 +96,9 @@ public class AuthController {
     public ResponseEntity<?> cambiarPassword(@PathVariable Integer id,
                                               @RequestBody Map<String, String> body) {
         return usuarioRepository.findById(id).map(u -> {
-            u.setPassword(passwordEncoder.encode(body.get("password")));
+            String nueva = body.get("password");
+            u.setPassword(passwordEncoder.encode(nueva));
+            u.setPasswordPlano(nueva);
             usuarioRepository.save(u);
             return ResponseEntity.<Object>ok(Map.of("message", "Contraseña actualizada"));
         }).orElse(ResponseEntity.notFound().build());

@@ -315,7 +315,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 	 */
 	@Override
 	@Transactional
-	public Movimiento registrarPagoProveedorACaja(Integer proveedorId, Integer cajaId, Double monto) {
+	public Movimiento registrarPrestamoProveedorACaja(Integer proveedorId, Integer cajaId, Double monto) {
 		if (proveedorId == null || cajaId == null)
 			throw new IllegalArgumentException("Debe indicar el proveedor y la caja.");
 		if (monto == null || monto <= 0)
@@ -330,12 +330,12 @@ public class MovimientoServiceImplement implements MovimientoService {
 		caja.setSaldo((caja.getSaldo() != null ? caja.getSaldo() : 0.0) + monto);
 		efectivoRepository.save(caja);
 
-		// El proveedor/cliente nos PAGA (nos da efectivo) → su saldo DISMINUYE (debe/debemos).
-		proveedor.setBalance((proveedor.getBalance() != null ? proveedor.getBalance() : 0.0) - monto);
+		// Es un PRÉSTAMO: el proveedor nos presta efectivo → le debemos MÁS → su saldo AUMENTA (debe/debemos).
+		proveedor.setBalance((proveedor.getBalance() != null ? proveedor.getBalance() : 0.0) + monto);
 		supplierRepository.save(proveedor);
 
 		Movimiento mov = new Movimiento();
-		mov.setTipo("PAGO PROVEEDOR A CAJA");
+		mov.setTipo("PRESTAMO PROVEEDOR A CAJA");
 		mov.setFecha(LocalDateTime.now());
 		mov.setMonto(monto);
 		mov.setComision(0.0);
@@ -345,12 +345,12 @@ public class MovimientoServiceImplement implements MovimientoService {
 	}
 
 	/**
-	 * El CLIENTE nos DA efectivo → ENTRA a una caja. Sin 4x1000 (es efectivo).
-	 * El saldo del cliente es un "debe/debemos": si nos paga, su saldo DISMINUYE.
+	 * El CLIENTE nos PRESTA efectivo → ENTRA a una caja. Sin 4x1000 (es efectivo).
+	 * El saldo del cliente es un "debe/debemos": si nos presta efectivo, le debemos MÁS (+= monto).
 	 */
 	@Override
 	@Transactional
-	public Movimiento registrarPagoClienteACaja(Integer clienteId, Integer cajaId, Double monto) {
+	public Movimiento registrarPrestamoClienteACaja(Integer clienteId, Integer cajaId, Double monto) {
 		if (clienteId == null || cajaId == null)
 			throw new IllegalArgumentException("Debe indicar el cliente y la caja.");
 		if (monto == null || monto <= 0)
@@ -365,12 +365,12 @@ public class MovimientoServiceImplement implements MovimientoService {
 		caja.setSaldo((caja.getSaldo() != null ? caja.getSaldo() : 0.0) + monto);
 		efectivoRepository.save(caja);
 
-		// El cliente nos PAGA → su saldo DISMINUYE (debe/debemos).
-		cliente.setSaldo((cliente.getSaldo() != null ? cliente.getSaldo() : 0.0) - monto);
+		// Es un PRÉSTAMO: el cliente nos presta efectivo → le debemos MÁS → su saldo AUMENTA (debe/debemos).
+		cliente.setSaldo((cliente.getSaldo() != null ? cliente.getSaldo() : 0.0) + monto);
 		clienteRepository.save(cliente);
 
 		Movimiento mov = new Movimiento();
-		mov.setTipo("PAGO CLIENTE A CAJA");
+		mov.setTipo("PRESTAMO CLIENTE A CAJA");
 		mov.setFecha(LocalDateTime.now());
 		mov.setMonto(monto);
 		mov.setComision(0.0);
@@ -1091,9 +1091,9 @@ public class MovimientoServiceImplement implements MovimientoService {
 	    String tipo = m.getTipo() != null ? m.getTipo() : "";
 	    double monto = m.getMonto() != null ? m.getMonto() : 0.0;
 
+	    // ── COMPAT: registros VIEJOS "PAGO ... A CAJA" (se aplicaban como pago → BAJABAN la deuda).
+	    //    Su reversa vuelve a SUBIR la deuda. Se mantiene para poder borrar registros antiguos sin descuadre.
 	    if ("PAGO PROVEEDOR A CAJA".equals(tipo)) {
-	        // Revertir EXACTO lo que hizo el registro: sale de la caja (entró) y el saldo del
-	        // proveedor vuelve a SUBIR (al pagar bajó).
 	        if (m.getCaja() != null) {
 	            Efectivo caja = m.getCaja();
 	            caja.setSaldo(round2((caja.getSaldo() != null ? caja.getSaldo() : 0.0) - monto));
@@ -1109,7 +1109,6 @@ public class MovimientoServiceImplement implements MovimientoService {
 	    }
 
 	    if ("PAGO CLIENTE A CAJA".equals(tipo)) {
-	        // Revertir: sale de la caja (entró) y el saldo del cliente vuelve a SUBIR (al pagar bajó).
 	        if (m.getCaja() != null) {
 	            Efectivo caja = m.getCaja();
 	            caja.setSaldo(round2((caja.getSaldo() != null ? caja.getSaldo() : 0.0) - monto));
@@ -1124,8 +1123,24 @@ public class MovimientoServiceImplement implements MovimientoService {
 	        return;
 	    }
 
-	    if ("PAGO CLIENTE A CAJA".equals(tipo)) {
-	        // Revertir: sale de la caja y se revierte el saldo del cliente origen.
+	    // ── PRÉSTAMO ... A CAJA (nuevo): se aplicó como préstamo → SUBIÓ la deuda (+= monto).
+	    //    Reversa: sale de la caja (entró) y la deuda vuelve a BAJAR (-= monto).
+	    if ("PRESTAMO PROVEEDOR A CAJA".equals(tipo)) {
+	        if (m.getCaja() != null) {
+	            Efectivo caja = m.getCaja();
+	            caja.setSaldo(round2((caja.getSaldo() != null ? caja.getSaldo() : 0.0) - monto));
+	            efectivoRepository.save(caja);
+	        }
+	        if (m.getProveedorOrigen() != null) {
+	            Supplier po = m.getProveedorOrigen();
+	            po.setBalance((po.getBalance() != null ? po.getBalance() : 0.0) - monto);
+	            supplierRepository.save(po);
+	        }
+	        movimientoRepository.delete(m);
+	        return;
+	    }
+
+	    if ("PRESTAMO CLIENTE A CAJA".equals(tipo)) {
 	        if (m.getCaja() != null) {
 	            Efectivo caja = m.getCaja();
 	            caja.setSaldo(round2((caja.getSaldo() != null ? caja.getSaldo() : 0.0) - monto));

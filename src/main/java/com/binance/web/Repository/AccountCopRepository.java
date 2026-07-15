@@ -73,6 +73,7 @@ public interface AccountCopRepository extends JpaRepository<AccountCop, Integer>
 		       a.cupoCorresponsalDisponibleHoy AS cupoCorresponsalDisponibleHoy,
 		       a.cupoDisponibleHoy AS cupoDisponibleHoy
 		FROM AccountCop a
+		WHERE (a.bloqueada = false OR a.bloqueada IS NULL)
 	""")
 	List<P2PView> findAllP2PView();
 

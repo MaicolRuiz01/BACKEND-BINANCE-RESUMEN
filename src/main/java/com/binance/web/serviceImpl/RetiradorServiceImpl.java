@@ -14,6 +14,7 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
+import com.binance.web.util.HttpClientFactory;
 
 import java.time.*;
 import java.util.*;
@@ -34,7 +35,7 @@ public class RetiradorServiceImpl implements RetiradorService {
     private final AccountCopRepository accountCopRepository;
     private final EfectivoRepository efectivoRepository;
     private final MovimientoRepository movimientoRepository;
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate = HttpClientFactory.timed();
     private final TelegramService telegramService;
 
     // Mapa para recordar el message_id del último recordatorio enviado a cada

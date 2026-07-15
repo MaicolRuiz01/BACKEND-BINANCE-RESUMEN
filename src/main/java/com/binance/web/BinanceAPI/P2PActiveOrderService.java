@@ -108,14 +108,34 @@ public class P2PActiveOrderService {
         JsonNode data = root.path("data");
 
         if (data.isArray()) {
+            int totalTraidas = data.size();
             for (JsonNode obj : data) {
-                String status = obj.path("orderStatus").asText("");
-                if (!ACTIVE_STATUSES.contains(status.toUpperCase())) continue;
-                if (!"SELL".equalsIgnoreCase(obj.path("tradeType").asText())) continue;
-                if (!"USDT".equalsIgnoreCase(obj.path("asset").asText())) continue;
+                String status    = obj.path("orderStatus").asText("");
+                String tradeType = obj.path("tradeType").asText("");
+                String asset     = obj.path("asset").asText("");
+                String orderNo   = obj.path("orderNumber").asText("");
+
+                // ── DIAGNÓSTICO temporal: registra por qué se descarta cada orden ──
+                if (!ACTIVE_STATUSES.contains(status.toUpperCase())) {
+                    log.info("[ActiveOrders][{}] Omitida {} → estado='{}' (tradeType={}, asset={})",
+                            accountName, orderNo, status, tradeType, asset);
+                    continue;
+                }
+                if (!"SELL".equalsIgnoreCase(tradeType)) {
+                    log.info("[ActiveOrders][{}] Omitida {} → tradeType='{}' (estado={}, asset={})",
+                            accountName, orderNo, tradeType, status, asset);
+                    continue;
+                }
+                if (!"USDT".equalsIgnoreCase(asset)) {
+                    log.info("[ActiveOrders][{}] Omitida {} → asset='{}' (estado={}, tradeType={})",
+                            accountName, orderNo, asset, status, tradeType);
+                    continue;
+                }
 
                 orders.add(buildDto(obj, accountName));
             }
+            log.info("[ActiveOrders][{}] Binance devolvió {} orden(es) en la ventana de 4h; {} activa(s) tras el filtro.",
+                    accountName, totalTraidas, orders.size());
         }
 
         return orders;

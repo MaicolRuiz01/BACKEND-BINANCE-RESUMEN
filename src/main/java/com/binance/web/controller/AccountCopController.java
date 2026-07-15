@@ -161,8 +161,33 @@ public class AccountCopController {
 		AccountCop cuenta = AccountCopService.findByIdAccountCop(id);
 		if (cuenta == null) return ResponseEntity.notFound().build();
 
+		// Una cuenta BLOQUEADA no puede activarse para P2P.
+		if (Boolean.TRUE.equals(cuenta.getBloqueada())) {
+			return ResponseEntity.badRequest().body(cuenta);
+		}
+
 		boolean nuevoEstado = !Boolean.TRUE.equals(cuenta.getActivaParaP2P());
 		cuenta.setActivaParaP2P(nuevoEstado);
+		AccountCopService.updateAccountCop(id, cuenta);
+		return ResponseEntity.ok(cuenta);
+	}
+
+	/**
+	 * PATCH /cuenta-cop/{id}/toggle-bloqueo
+	 * Bloquea / desbloquea la cuenta. Bloqueada = no aparece ni es seleccionable en ningún
+	 * lado (movimientos, formularios, P2P, ventas en curso, retiradores, gastos, pagos).
+	 * Al bloquear, se desactiva de P2P automáticamente.
+	 */
+	@PatchMapping("/{id}/toggle-bloqueo")
+	public ResponseEntity<AccountCop> toggleBloqueo(@PathVariable Integer id) {
+		AccountCop cuenta = AccountCopService.findByIdAccountCop(id);
+		if (cuenta == null) return ResponseEntity.notFound().build();
+
+		boolean nuevoEstado = !Boolean.TRUE.equals(cuenta.getBloqueada());
+		cuenta.setBloqueada(nuevoEstado);
+		if (nuevoEstado) {
+			cuenta.setActivaParaP2P(false); // bloqueada no puede estar activa en P2P
+		}
 		AccountCopService.updateAccountCop(id, cuenta);
 		return ResponseEntity.ok(cuenta);
 	}

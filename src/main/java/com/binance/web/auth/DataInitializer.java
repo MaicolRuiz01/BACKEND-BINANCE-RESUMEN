@@ -33,13 +33,20 @@ public class DataInitializer implements ApplicationRunner {
     }
 
     private void crearSiNoExiste(String username, String password, Rol rol) {
-        if (!usuarioRepository.existsByUsername(username)) {
+        usuarioRepository.findByUsername(username).ifPresentOrElse(existente -> {
+            // Rellena la clave plana en usuarios por defecto antiguos (para "copiar credenciales").
+            if (existente.getPasswordPlano() == null || existente.getPasswordPlano().isBlank()) {
+                existente.setPasswordPlano(password);
+                usuarioRepository.save(existente);
+            }
+        }, () -> {
             usuarioRepository.save(Usuario.builder()
                     .username(username)
                     .password(passwordEncoder.encode(password))
+                    .passwordPlano(password)
                     .rol(rol)
                     .build());
             log.info("[Auth] Usuario '{}' creado con rol {}", username, rol);
-        }
+        });
     }
 }

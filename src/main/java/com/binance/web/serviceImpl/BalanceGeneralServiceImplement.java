@@ -118,22 +118,18 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
             // 3) demás componentes del balance
             List<SellDollars> ventasGenerales = sellDollarsService.obtenerVentasPorFecha(fecha);
 
-            // Cuentas COP para el balance:
-            //  - Nequi/Daviplata: su saldo tal cual (el 4x1000 ya se descuenta al instante).
-            //  - BANCOLOMBIA: (a) se le aplica el 4x1000 pendiente (el que se cobraría al día
-            //    siguiente por los retiros de hoy), y (b) al total resultante se le saca el 4x1000
-            //    y se le resta a ese mismo total (impuesto a futuro para sacar lo que queda).
+            // Cuentas COP para el balance: DEBE dar EXACTAMENTE lo mismo que el "TOTAL COP DISPONIBLE"
+            // (endpoint /cuenta-cop/total-disponible). Fórmula única para que nunca se descuadren:
+            //   Σ saldos de TODAS las cuentas COP
+            //   − 4x1000 diferido pendiente (el de Bancolombia que se cobraría al día siguiente)
+            //   y a ese neto se le saca el 4x1000 de sacarlo (× 0.996) sobre TODAS las cuentas.
+            // NOTA: si cambias esta fórmula, cambia también AccountCopController.getTotalCopDisponible().
             java.util.List<AccountCop> todasCop = accountCopRepo.findAll();
-            double saldoCopOtros = todasCop.stream()
-                .filter(a -> a.getBankType() != com.binance.web.Entity.BankType.BANCOLOMBIA)
-                .mapToDouble(a -> a.getBalance() != null ? a.getBalance() : 0.0).sum();
-            double saldoBcol = todasCop.stream()
-                .filter(a -> a.getBankType() == com.binance.web.Entity.BankType.BANCOLOMBIA)
+            double sumaSaldosCop = todasCop.stream()
                 .mapToDouble(a -> a.getBalance() != null ? a.getBalance() : 0.0).sum();
             double pendiente4x1000Bcol = movimientoRepository.sumComisionPendienteBancolombia();
-            double saldoBcolAjustado = saldoBcol - pendiente4x1000Bcol;      // (a)
-            double saldoBcolFinal = saldoBcolAjustado - (saldoBcolAjustado * 0.004); // (b)
-            Double saldoCop = saldoCopOtros + saldoBcolFinal;
+            double netoCop = sumaSaldosCop - pendiente4x1000Bcol;
+            Double saldoCop = netoCop * 0.996; // 4x1000 para sacarlo
 
             Double saldoProveedores = accountProveedorRepo.findAll().stream()
                 .mapToDouble(Supplier::getBalance).sum();

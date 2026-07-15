@@ -14,5 +14,6 @@ public class AccountBinanceDTO {
     private String userBinance;
     private String address;
     private String tipo;
-    private Double balance; // saldo interno en USD
+    private Double balance;
+    private Boolean activa;
 }
