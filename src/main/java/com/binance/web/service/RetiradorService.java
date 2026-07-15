@@ -17,6 +17,18 @@ public interface RetiradorService {
     // ── Solicitud con retirador pre-asignado ──────────────────────
     SolicitudRetiro crearSolicitud(SolicitudRetiroRequestDto request);
     SolicitudRetiro confirmarSolicitud(Long solicitudId);
+
+    /**
+     * Confirma una solicitud igual que {@link #confirmarSolicitud}, pero
+     * usando un monto REAL distinto al que se había solicitado (ej: el
+     * corresponsal no dejó retirar exactamente $9.500, sino $9.400). Solo
+     * aplica a solicitudes con un único detalle (una cuenta, un canal) — que
+     * es como se envían todas las solicitudes hoy en día. El monto real queda
+     * anotado en el Movimiento generado para trazabilidad, y es el que se
+     * descuenta de la cuenta y se acredita a la caja, no el solicitado.
+     */
+    SolicitudRetiro confirmarSolicitudConMontoReal(Long solicitudId, Double montoReal);
+
     List<SolicitudRetiro> historialPorRetirador(Long retiradorId);
 
     /**
