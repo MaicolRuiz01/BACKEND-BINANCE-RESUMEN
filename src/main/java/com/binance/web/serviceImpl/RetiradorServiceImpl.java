@@ -291,39 +291,89 @@ public class RetiradorServiceImpl implements RetiradorService {
         if (solicitud.getRetirador() == null)
             throw new IllegalStateException("La solicitud aún no tiene un retirador asignado.");
 
+        return confirmarInterno(solicitud);
+    }
+
+    @Override
+    @Transactional
+    public SolicitudRetiro confirmarSolicitudConMontoReal(Long solicitudId, Double montoReal) {
+        SolicitudRetiro solicitud = solicitudRepository.findById(solicitudId)
+                .orElseThrow(() -> new RuntimeException("Solicitud no encontrada: " + solicitudId));
+
+        if (solicitud.getEstado() == EstadoSolicitud.COMPLETADO)
+            throw new IllegalStateException("La solicitud ya fue confirmada.");
+        if (solicitud.getEstado() == EstadoSolicitud.CANCELADO)
+            throw new IllegalStateException("Esta solicitud fue cancelada, no se puede confirmar.");
+        if (solicitud.getRetirador() == null)
+            throw new IllegalStateException("La solicitud aún no tiene un retirador asignado.");
+        if (montoReal == null || montoReal <= 0)
+            throw new IllegalStateException("El monto debe ser mayor a $0.");
+        if (solicitud.getDetalles().size() != 1)
+            throw new IllegalStateException(
+                    "Esta solicitud tiene varias cuentas/canales; no se puede registrar un solo monto distinto. Avisa al administrador.");
+
+        DetalleRetiro detalle = solicitud.getDetalles().get(0);
+        if (detalle.getTipoRetiro() == TipoRetiro.CAJERO) {
+            detalle.setMontoCajeroReal(montoReal);
+        } else if (detalle.getTipoRetiro() == TipoRetiro.CORRESPONSAL) {
+            detalle.setMontoCorresponsalReal(montoReal);
+        } else {
+            throw new IllegalStateException("Tipo de retiro no soportado para registrar un monto distinto.");
+        }
+
+        return confirmarInterno(solicitud);
+    }
+
+    /**
+     * Lógica común de confirmación: valida saldo/cupo, descuenta de la(s)
+     * cuenta(s) COP, acredita la caja del retirador, registra el/los
+     * Movimiento(s) de auditoría y marca la solicitud como COMPLETADO.
+     *
+     * Usa SIEMPRE el monto "final" de cada detalle (ver {@link DetalleRetiro#totalDetalleFinal()}):
+     * el monto REAL si el retirador registró uno distinto al solicitado (botón
+     * "Otra cifra" en Telegram), o el monto solicitado si no. Así, si a un
+     * retirador el corresponsal solo le dejó sacar $9.400 de los $9.500
+     * pedidos, es esa cifra real la que se descuenta de la cuenta y se
+     * acredita a la caja — nunca la solicitada originalmente.
+     */
+    private SolicitudRetiro confirmarInterno(SolicitudRetiro solicitud) {
         // Validar saldo Y cupo diario suficiente en TODAS las cuentas antes de restar nada.
         // El cupo se revalida acá (no solo al crear la solicitud) porque puede haber
         // pasado tiempo entre que se creó y se confirma, y mientras tanto el cupo
         // pudo haberse gastado por otro retiro (directo o de otra solicitud).
         for (DetalleRetiro detalle : solicitud.getDetalles()) {
             AccountCop cuenta = detalle.getCuentaCop();
-            if (cuenta.getBalance() < detalle.totalDetalle()) {
+            double montoCajeroUsar = detalle.montoCajeroFinal();
+            double montoCorresponsalUsar = detalle.montoCorresponsalFinal();
+            double totalUsar = montoCajeroUsar + montoCorresponsalUsar;
+
+            if (cuenta.getBalance() < totalUsar) {
                 throw new IllegalStateException(
                         "Saldo insuficiente en la cuenta " + cuenta.getName() + " (disponible: $"
                                 + String.format("%,.0f", cuenta.getBalance()) + ", requerido: $"
-                                + String.format("%,.0f", detalle.totalDetalle()) + ")");
+                                + String.format("%,.0f", totalUsar) + ")");
             }
 
             // Cuentas sin banco configurado (ej: cuentas de prueba viejas) no tienen
             // regla de cupo diario que aplicarles — no bloqueamos por esto.
             if (cuenta.getBankType() != null) {
                 CupoDiarioRules.asegurarCupoHoy(cuenta);
-                if (detalle.getMontoCajero() != null && detalle.getMontoCajero() > 0) {
+                if (montoCajeroUsar > 0) {
                     double disp = cuenta.getCupoCajeroDisponibleHoy() != null ? cuenta.getCupoCajeroDisponibleHoy() : 0.0;
-                    if (detalle.getMontoCajero() > disp) {
+                    if (montoCajeroUsar > disp) {
                         throw new IllegalStateException(
                                 "Cupo diario de CAJERO agotado en la cuenta " + cuenta.getName() + " (disponible: $"
                                         + String.format("%,.0f", disp) + ", requerido: $"
-                                        + String.format("%,.0f", detalle.getMontoCajero()) + ")");
+                                        + String.format("%,.0f", montoCajeroUsar) + ")");
                     }
                 }
-                if (detalle.getMontoCorresponsal() != null && detalle.getMontoCorresponsal() > 0) {
+                if (montoCorresponsalUsar > 0) {
                     double disp = cuenta.getCupoCorresponsalDisponibleHoy() != null ? cuenta.getCupoCorresponsalDisponibleHoy() : 0.0;
-                    if (detalle.getMontoCorresponsal() > disp) {
+                    if (montoCorresponsalUsar > disp) {
                         throw new IllegalStateException(
                                 "Cupo diario de CORRESPONSAL agotado en la cuenta " + cuenta.getName() + " (disponible: $"
                                         + String.format("%,.0f", disp) + ", requerido: $"
-                                        + String.format("%,.0f", detalle.getMontoCorresponsal()) + ")");
+                                        + String.format("%,.0f", montoCorresponsalUsar) + ")");
                     }
                 }
             }
@@ -332,26 +382,30 @@ public class RetiradorServiceImpl implements RetiradorService {
         Retirador retirador = solicitud.getRetirador();
         Efectivo caja = retirador.getEfectivo();
         LocalDateTime ahora = LocalDateTime.now(ZONE_BOGOTA);
+        double totalReal = 0.0;
 
         for (DetalleRetiro detalle : solicitud.getDetalles()) {
             AccountCop cuenta = detalle.getCuentaCop();
+            double montoCajeroUsar = detalle.montoCajeroFinal();
+            double montoCorresponsalUsar = detalle.montoCorresponsalFinal();
 
             // 4x1000 sobre la salida de cuenta COP. En BANCOLOMBIA se DIFIERE al día siguiente
             // (el scheduler lo aplica sobre los movimientos con comisionAplicada=false); en los
             // demás bancos se descuenta al instante. Mismo criterio que el retiro manual.
-            double montoDet = detalle.totalDetalle();
+            double montoDet = montoCajeroUsar + montoCorresponsalUsar;
+            totalReal += montoDet;
             boolean esBanco = "BANCOLOMBIA".equalsIgnoreCase(String.valueOf(cuenta.getBankType()));
             double deduccionHoy = esBanco ? montoDet : (montoDet + montoDet * 0.004);
             cuenta.setBalance(cuenta.getBalance() - deduccionHoy);
 
             if (cuenta.getBankType() != null) {
-                if (detalle.getMontoCajero() != null && detalle.getMontoCajero() > 0) {
+                if (montoCajeroUsar > 0) {
                     double disp = cuenta.getCupoCajeroDisponibleHoy() != null ? cuenta.getCupoCajeroDisponibleHoy() : 0.0;
-                    cuenta.setCupoCajeroDisponibleHoy(disp - detalle.getMontoCajero());
+                    cuenta.setCupoCajeroDisponibleHoy(disp - montoCajeroUsar);
                 }
-                if (detalle.getMontoCorresponsal() != null && detalle.getMontoCorresponsal() > 0) {
+                if (montoCorresponsalUsar > 0) {
                     double disp = cuenta.getCupoCorresponsalDisponibleHoy() != null ? cuenta.getCupoCorresponsalDisponibleHoy() : 0.0;
-                    cuenta.setCupoCorresponsalDisponibleHoy(disp - detalle.getMontoCorresponsal());
+                    cuenta.setCupoCorresponsalDisponibleHoy(disp - montoCorresponsalUsar);
                 }
                 // Sincronizar el campo legacy (suma de ambos cupos).
                 double cajeroRest = cuenta.getCupoCajeroDisponibleHoy() != null ? cuenta.getCupoCajeroDisponibleHoy() : 0.0;
@@ -361,40 +415,61 @@ public class RetiradorServiceImpl implements RetiradorService {
 
             accountCopRepository.save(cuenta);
 
+            // Si el retirador registró un monto real distinto al solicitado, dejarlo
+            // anotado en el motivo del Movimiento para que quede trazado en el
+            // historial (plataforma y reporte de Telegram).
+            String motivoCajero = null;
+            String motivoCorresponsal = null;
+            if (detalle.getMontoCajeroReal() != null
+                    && !detalle.getMontoCajeroReal().equals(detalle.getMontoCajero())) {
+                double solicitado = detalle.getMontoCajero() != null ? detalle.getMontoCajero() : 0.0;
+                motivoCajero = String.format("Solicitado $%,.0f — retirado $%,.0f", solicitado, detalle.getMontoCajeroReal());
+            }
+            if (detalle.getMontoCorresponsalReal() != null
+                    && !detalle.getMontoCorresponsalReal().equals(detalle.getMontoCorresponsal())) {
+                double solicitado = detalle.getMontoCorresponsal() != null ? detalle.getMontoCorresponsal() : 0.0;
+                motivoCorresponsal = String.format("Solicitado $%,.0f — retirado $%,.0f", solicitado, detalle.getMontoCorresponsalReal());
+            }
+
             // Registrar el/los movimiento(s) de RETIRO para que aparezcan en el historial de la
             // cuenta y de la caja. Antes NO se creaba movimiento → el saldo se movía "invisible".
-            if (detalle.getMontoCajero() != null && detalle.getMontoCajero() > 0) {
+            if (montoCajeroUsar > 0) {
                 movimientoRepository.save(Movimiento.builder()
                         .tipo("RETIRO CAJERO")
                         .fecha(ahora)
-                        .monto(detalle.getMontoCajero())
+                        .monto(montoCajeroUsar)
                         .cuentaOrigen(cuenta)
                         .caja(caja)
-                        .comision(detalle.getMontoCajero() * 0.004)
+                        .comision(montoCajeroUsar * 0.004)
                         .comisionAplicada(!esBanco)
+                        .motivo(motivoCajero)
                         .build());
             }
-            if (detalle.getMontoCorresponsal() != null && detalle.getMontoCorresponsal() > 0) {
+            if (montoCorresponsalUsar > 0) {
                 movimientoRepository.save(Movimiento.builder()
                         .tipo("RETIRO CORRESPONSAL")
                         .fecha(ahora)
-                        .monto(detalle.getMontoCorresponsal())
+                        .monto(montoCorresponsalUsar)
                         .cuentaOrigen(cuenta)
                         .caja(caja)
-                        .comision(detalle.getMontoCorresponsal() * 0.004)
+                        .comision(montoCorresponsalUsar * 0.004)
                         .comisionAplicada(!esBanco)
+                        .motivo(motivoCorresponsal)
                         .build());
             }
         }
 
         if (caja != null) {
-            caja.setSaldo(caja.getSaldo() + solicitud.getTotalMonto());
+            caja.setSaldo(caja.getSaldo() + totalReal);
             efectivoRepository.save(caja);
         }
 
         retirador.setSaldoPendiente(retirador.getSaldoPendiente() + solicitud.getPagoRetirador());
         retiradorRepository.save(retirador);
 
+        // totalMonto pasa a reflejar lo REALMENTE movido (igual al solicitado si
+        // nadie registró una cifra distinta), coherente con lo acreditado a caja.
+        solicitud.setTotalMonto(totalReal);
         solicitud.setEstado(EstadoSolicitud.COMPLETADO);
         return solicitudRepository.save(solicitud);
     }
@@ -723,13 +798,9 @@ public class RetiradorServiceImpl implements RetiradorService {
         boolean telegramEnviado = false;
         try {
             if (retirador.getTelegramChatId() != null) {
+                // Mensaje simple: sin encabezado "Nueva Solicitud #N" ni el nombre del
+                // retirador (ya se sabe que es él, es su chat privado).
                 StringBuilder sb = new StringBuilder();
-                sb.append("🔔 *Nueva Solicitud de Retiro #").append(solicitud.getId()).append("*\n");
-                sb.append("👤 *Retirador:* ").append(retirador.getNombre());
-                if (retirador.getTelegramUsername() != null && !retirador.getTelegramUsername().isBlank()) {
-                    sb.append(" (@").append(retirador.getTelegramUsername()).append(")");
-                }
-                sb.append("\n");
                 sb.append("💰 *Total:* $").append(String.format("%,.0f", solicitud.getTotalMonto()))
                         .append(" COP\n");
                 sb.append("🏦 ");

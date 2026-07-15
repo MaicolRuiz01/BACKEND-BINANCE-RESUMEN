@@ -59,6 +59,14 @@ public class TelegramWebhookService {
     private record PendingGasto(Integer messageId) {
     }
 
+    // Estado en memoria: retiradores que presionaron "✏️ Otra cifra" al
+    // confirmar un retiro y están escribiendo el monto que realmente
+    // retiraron (distinto al solicitado). Key = telegramUserId (chat_id privado).
+    private final Map<Long, PendingMontoReal> pendingMontosReales = new ConcurrentHashMap<>();
+
+    private record PendingMontoReal(Long solicitudId, Integer messageId) {
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Punto de entrada: procesar un update de Telegram
     // ─────────────────────────────────────────────────────────────────────────
@@ -106,6 +114,10 @@ public class TelegramWebhookService {
 
         if (data.startsWith("accept:")) {
             handleAccept(callbackQueryId, data, telegramUsername, telegramUserId);
+        } else if (data.startsWith("completed_todo:")) {
+            handleCompletedTodo(callbackQueryId, data, telegramUserId, messageId);
+        } else if (data.startsWith("completed_otra:")) {
+            handleCompletedOtra(callbackQueryId, data, telegramUserId, messageId);
         } else if (data.startsWith("completed:")) {
             handleCompleted(callbackQueryId, data, telegramUserId, messageId);
         } else if (data.startsWith("cancel:")) {
@@ -145,9 +157,10 @@ public class TelegramWebhookService {
             return;
         }
 
-        // Descartar cualquier flujo de entrega/gasto que hubiera quedado a medias
+        // Descartar cualquier flujo de entrega/gasto/monto-real que hubiera quedado a medias
         pendingEntregas.remove(telegramUserId);
         pendingGastos.remove(telegramUserId);
+        pendingMontosReales.remove(telegramUserId);
 
         // Construir mapa de botones (Nombre -> callback_data)
         java.util.LinkedHashMap<String, String> buttonsData = new java.util.LinkedHashMap<>();
@@ -196,8 +209,7 @@ public class TelegramWebhookService {
         pendingEntregas.put(telegramUserId, new PendingEntrega(proveedor.getId(), proveedor.getName(), messageId));
 
         String texto = String.format(
-                "💵 Vas a entregarle a *%s*.\n\nTu caja tiene *$%,.0f* disponibles.\n\n" +
-                        "Escribe el monto a entregar, o escribe *todo* para entregar el saldo completo.",
+                "💵 Vas a entregarle a *%s*.\n\nTienes en caja: *$%,.0f*\n\nEscribe el monto o *todo* para entregar toda la caja.",
                 proveedor.getName(), saldoDisponible);
 
         java.util.LinkedHashMap<String, String> buttonsData = new java.util.LinkedHashMap<>();
@@ -232,8 +244,9 @@ public class TelegramWebhookService {
             return;
         }
 
-        // Descartar cualquier flujo de entrega que hubiera quedado a medias
+        // Descartar cualquier flujo de entrega/monto-real que hubiera quedado a medias
         pendingEntregas.remove(telegramUserId);
+        pendingMontosReales.remove(telegramUserId);
         pendingGastos.put(telegramUserId, new PendingGasto(messageId));
 
         String texto = String.format(
@@ -304,6 +317,18 @@ public class TelegramWebhookService {
     }
 
     /** Arma el texto del reporte de movimientos, ordenado por fecha descendente. */
+    /** Nombre corto para mostrar en el reporte de Telegram: sin el prefijo "RETIRO"/"PAGO". */
+    private String tipoParaMostrar(String tipo) {
+        if (tipo == null)
+            return "MOVIMIENTO";
+        return switch (tipo) {
+            case "RETIRO CAJERO" -> "CAJERO";
+            case "RETIRO CORRESPONSAL" -> "CORRESPONSAL";
+            case "PAGO PROVEEDOR" -> "PROVEEDOR";
+            default -> tipo;
+        };
+    }
+
     private String buildReporteMovimientos(Retirador retirador,
             java.util.List<com.binance.web.movimientos.MovimientoDTO> movimientos,
             java.util.List<Movimiento> ajustes) {
@@ -316,29 +341,33 @@ public class TelegramWebhookService {
 
         for (var m : movimientos) {
             String tipo = m.getTipo() != null ? m.getTipo() : "MOVIMIENTO";
+            String tipoCorto = tipoParaMostrar(tipo);
             double monto = m.getMonto() != null ? m.getMonto() : 0.0;
-            totalesPorTipo.merge(tipo, monto, Double::sum);
+            totalesPorTipo.merge(tipoCorto, monto, Double::sum);
 
             StringBuilder linea = new StringBuilder();
             linea.append("🕐 *").append(m.getFecha() != null ? m.getFecha().format(fmtHora) : "?").append("*\n");
-            linea.append(tipo).append(" — $").append(String.format("%,.0f", monto));
+            linea.append(tipoCorto).append(" — $").append(String.format("%,.0f", monto));
 
+            // Nada de paréntesis (se ve mal en Telegram) — cada nombre va en su propia
+            // línea, abajo del todo. Si hay más de uno (ej. traspaso origen→destino),
+            // el segundo en adelante lleva una flechita para no perder el sentido.
             java.util.List<String> partes = new java.util.ArrayList<>();
             if (m.getCuentaOrigen() != null)
                 partes.add(m.getCuentaOrigen());
-            if (m.getPagoProveedor() != null)
-                partes.add("proveedor " + m.getPagoProveedor());
             if (m.getPagoCliente() != null)
                 partes.add(m.getPagoCliente());
             if (m.getCuentaDestino() != null)
                 partes.add(m.getCuentaDestino());
             if (m.getCajaDestino() != null)
                 partes.add(m.getCajaDestino());
-            if (!partes.isEmpty()) {
-                linea.append(" (").append(String.join(" → ", partes)).append(")");
+            if (m.getPagoProveedor() != null)
+                partes.add(m.getPagoProveedor());
+            for (int i = 0; i < partes.size(); i++) {
+                linea.append("\n").append(i > 0 ? "→ " : "").append(partes.get(i));
             }
             if (m.getMotivo() != null && !m.getMotivo().isBlank()) {
-                linea.append(" — ").append(m.getMotivo());
+                linea.append("\n").append(m.getMotivo());
             }
             entradas.add(new java.util.AbstractMap.SimpleEntry<>(m.getFecha(), linea.toString()));
         }
@@ -456,13 +485,14 @@ public class TelegramWebhookService {
             return;
         }
 
+        Gasto gastoGuardado;
         try {
             Gasto gasto = new Gasto();
             gasto.setDescripcion(descripcion);
             gasto.setMonto(monto);
             gasto.setPagoEfectivo(retirador.getEfectivo());
             gasto.setIdempotencyKey("telegram-gasto-" + telegramUserId + "-" + System.currentTimeMillis());
-            gastoService.saveGasto(gasto);
+            gastoGuardado = gastoService.saveGasto(gasto);
         } catch (Exception e) {
             log.error("[Webhook] Error registrando gasto", e);
             telegramService.sendMessage(String.valueOf(telegramUserId),
@@ -470,8 +500,27 @@ public class TelegramWebhookService {
             return;
         }
 
-        pendingGastos.remove(telegramUserId);
+        // Mismo resguardo que en "Entregar efectivo": releer la caja real de la BD
+        // en vez de confiar en un cálculo local, para nunca confirmar algo que no
+        // quedó realmente guardado.
+        Retirador retiradorActualizado = retiradorRepository.findByTelegramChatId(telegramUserId).orElse(null);
+        Double saldoReal = retiradorActualizado != null && retiradorActualizado.getEfectivo() != null
+                ? retiradorActualizado.getEfectivo().getSaldo()
+                : null;
         double restante = saldoActual - monto;
+        boolean seReflejoEnCaja = gastoGuardado != null && gastoGuardado.getId() != null
+                && saldoReal != null && Math.abs(saldoReal - restante) < 1.0;
+
+        if (!seReflejoEnCaja) {
+            log.error(
+                    "[Webhook] Gasto de ${} ({}) no se vio reflejado en la caja (esperado ${}, real {}). No se confirma al retirador.",
+                    monto, descripcion, restante, saldoReal);
+            telegramService.sendMessage(String.valueOf(telegramUserId),
+                    "⚠️ No se pudo confirmar que el gasto haya quedado registrado. Vuelve a intentar en un momento.");
+            return;
+        }
+
+        pendingGastos.remove(telegramUserId);
 
         String textoFinal = restante > 0
                 ? String.format("✅ Gasto registrado: *$%,.0f* — %s.\n\n💰 Caja: *$%,.0f*", monto, descripcion,
@@ -557,9 +606,10 @@ public class TelegramWebhookService {
             return;
         }
 
+        Movimiento movRegistrado;
         try {
-            movimientoService.registrarPagoProveedor(null, retirador.getEfectivo().getId(), null, proveedor.getId(),
-                    null, monto);
+            movRegistrado = movimientoService.registrarPagoProveedor(null, retirador.getEfectivo().getId(), null,
+                    proveedor.getId(), null, monto);
         } catch (Exception e) {
             log.error("[Webhook] Error entregando a proveedor", e);
             telegramService.sendMessage(String.valueOf(telegramUserId),
@@ -567,8 +617,29 @@ public class TelegramWebhookService {
             return;
         }
 
-        pendingEntregas.remove(telegramUserId);
+        // No confiamos en un cálculo local (saldoActual - monto) para el mensaje de
+        // éxito: releemos la caja YA GUARDADA en base de datos. Así, si por lo que
+        // sea la escritura no se reflejó de verdad (sin lanzar excepción — pasó una
+        // vez en producción: Telegram confirmó un pago que nunca quedó en la BD),
+        // no le confirmamos al retirador algo que no ocurrió.
+        Retirador retiradorActualizado = retiradorRepository.findByTelegramChatId(telegramUserId).orElse(null);
+        Double saldoReal = retiradorActualizado != null && retiradorActualizado.getEfectivo() != null
+                ? retiradorActualizado.getEfectivo().getSaldo()
+                : null;
         double restante = saldoActual - monto;
+        boolean seReflejoEnCaja = movRegistrado != null && movRegistrado.getId() != null
+                && saldoReal != null && Math.abs(saldoReal - restante) < 1.0;
+
+        if (!seReflejoEnCaja) {
+            log.error(
+                    "[Webhook] Pago de ${} a {} no se vio reflejado en la caja (esperado ${}, real {}). No se confirma al retirador.",
+                    monto, proveedor.getName(), restante, saldoReal);
+            telegramService.sendMessage(String.valueOf(telegramUserId),
+                    "⚠️ No se pudo confirmar que el pago haya quedado registrado. NO lo des por hecho — avisa al administrador antes de entregar el dinero, y vuelve a intentar.");
+            return;
+        }
+
+        pendingEntregas.remove(telegramUserId);
 
         String textoFinal = restante > 0
                 ? String.format(
@@ -664,6 +735,13 @@ public class TelegramWebhookService {
         }
     }
 
+    /**
+     * El retirador presionó "✅ Ya hice el retiro". Antes esto confirmaba de
+     * una vez con el monto solicitado; ahora primero preguntamos si retiró
+     * exactamente eso o le tocó con otra cifra (ej: el corresponsal solo dejó
+     * sacar $9.400 de los $9.500 pedidos), porque eso cambia lo que hay que
+     * descontar de la cuenta y acreditar a la caja.
+     */
     private void handleCompleted(String callbackQueryId, String data, Long telegramUserId, Integer messageId) {
         long solicitudId = Long.parseLong(data.substring("completed:".length()));
         SolicitudRetiro solicitud = solicitudRepository.findById(solicitudId).orElse(null);
@@ -674,32 +752,120 @@ public class TelegramWebhookService {
             return;
         }
 
-        // Confirmar la solicitud (esto actualiza balances)
+        telegramService.answerCallbackQuery(callbackQueryId, "");
+
+        if (messageId != null) {
+            String texto = "¿Retiraste todo?";
+            java.util.LinkedHashMap<String, String> buttonsData = new java.util.LinkedHashMap<>();
+            buttonsData.put("✅ Retiré todo", "completed_todo:" + solicitudId);
+            buttonsData.put("✏️ Otra cifra", "completed_otra:" + solicitudId);
+            telegramService.editMessageWithDynamicButtons(String.valueOf(telegramUserId), messageId, texto, buttonsData);
+        }
+    }
+
+    /** "✅ Retiré todo": confirma con el monto tal cual se solicitó (comportamiento de siempre). */
+    private void handleCompletedTodo(String callbackQueryId, String data, Long telegramUserId, Integer messageId) {
+        long solicitudId = Long.parseLong(data.substring("completed_todo:".length()));
+        SolicitudRetiro solicitud = solicitudRepository.findById(solicitudId).orElse(null);
+
+        if (solicitud == null || solicitud.getEstado() != EstadoSolicitud.PENDIENTE) {
+            telegramService.answerCallbackQuery(callbackQueryId,
+                    "⚠️ Esta solicitud ya no está pendiente (completada, cancelada, o no existe).");
+            return;
+        }
+
         try {
             retiradorService.confirmarSolicitud(solicitudId);
         } catch (IllegalStateException e) {
-            // Saldo insuficiente u otra validación de negocio: avisar y no continuar
             telegramService.answerCallbackQuery(callbackQueryId, "❌ " + e.getMessage());
             return;
         }
 
-        // Obtener el retirador actualizado (con su caja)
         Retirador retirador = retiradorRepository.findById(solicitud.getRetirador().getId()).orElse(null);
-
-        // Sin popup: el mensaje se edita abajo a "Retiro completado", ya es visible.
         telegramService.answerCallbackQuery(callbackQueryId, "");
 
-        // Editar el mensaje original para quitar los botones
         if (messageId != null) {
             telegramService.editMessageTextOnly(String.valueOf(telegramUserId), messageId,
                     "✅ *Retiro completado* (Solicitud #" + solicitudId + ")");
         }
 
-        // Refrescar el recordatorio de caja (botón "Entregar efectivo") para que
-        // quede como último mensaje del chat, reflejando el nuevo saldo acumulado.
         if (retirador != null && retirador.getEfectivo() != null) {
             retiradorService.enviarRecordatorioCaja(retirador);
         }
+    }
+
+    /** "✏️ Otra cifra": pide que escriba el monto que realmente retiró. */
+    private void handleCompletedOtra(String callbackQueryId, String data, Long telegramUserId, Integer messageId) {
+        long solicitudId = Long.parseLong(data.substring("completed_otra:".length()));
+        SolicitudRetiro solicitud = solicitudRepository.findById(solicitudId).orElse(null);
+
+        if (solicitud == null || solicitud.getEstado() != EstadoSolicitud.PENDIENTE) {
+            telegramService.answerCallbackQuery(callbackQueryId,
+                    "⚠️ Esta solicitud ya no está pendiente (completada, cancelada, o no existe).");
+            return;
+        }
+
+        telegramService.answerCallbackQuery(callbackQueryId, "");
+
+        pendingMontosReales.put(telegramUserId, new PendingMontoReal(solicitudId, messageId));
+
+        if (messageId != null) {
+            telegramService.editMessageTextOnly(String.valueOf(telegramUserId), messageId, "Escribe el monto");
+        }
+    }
+
+    /**
+     * Procesa el texto que el retirador escribió como respuesta a "✏️ Otra
+     * cifra": el monto REAL que le dejaron retirar, distinto al solicitado.
+     * Confirma la solicitud usando esa cifra en vez de la original.
+     */
+    private void handleMontoRealTexto(PendingMontoReal pending, Long telegramUserId, String textoRecibido) {
+        SolicitudRetiro solicitud = solicitudRepository.findById(pending.solicitudId()).orElse(null);
+        if (solicitud == null || solicitud.getEstado() != EstadoSolicitud.PENDIENTE) {
+            pendingMontosReales.remove(telegramUserId);
+            telegramService.sendMessage(String.valueOf(telegramUserId),
+                    "⚠️ Esta solicitud ya no está pendiente (completada, cancelada, o no existe).");
+            return;
+        }
+
+        double montoSolicitado = solicitud.getTotalMonto();
+        String soloNumeros = textoRecibido.trim().replace("$", "").replace(".", "").replace(",", "").replace(" ", "");
+        Double montoReal;
+        try {
+            montoReal = Double.parseDouble(soloNumeros);
+        } catch (NumberFormatException e) {
+            telegramService.sendMessage(String.valueOf(telegramUserId),
+                    "⚠️ No entendí ese monto. Escribe solo el número, ej: `9400`.");
+            return;
+        }
+
+        if (montoReal <= 0) {
+            telegramService.sendMessage(String.valueOf(telegramUserId), "⚠️ El monto debe ser mayor a $0.");
+            return;
+        }
+
+        try {
+            retiradorService.confirmarSolicitudConMontoReal(pending.solicitudId(), montoReal);
+        } catch (IllegalStateException e) {
+            telegramService.sendMessage(String.valueOf(telegramUserId), "❌ " + e.getMessage() + "\n\nEscribe otra vez el monto correcto.");
+            return;
+        }
+
+        pendingMontosReales.remove(telegramUserId);
+
+        Retirador retirador = retiradorRepository.findById(solicitud.getRetirador().getId()).orElse(null);
+
+        String textoFinal = String.format(
+                "✅ *Retiro registrado* (Solicitud #%d)\n\nSolicitado: *$%,.0f*\nRetiraste: *$%,.0f*\n\nQuedó anotado en movimientos.",
+                pending.solicitudId(), montoSolicitado, montoReal);
+        telegramService.sendMessage(String.valueOf(telegramUserId), textoFinal);
+
+        if (retirador != null && retirador.getEfectivo() != null) {
+            retiradorService.enviarRecordatorioCaja(retirador);
+        }
+
+        log.info("[Retiro] Solicitud #{} confirmada con monto REAL distinto: solicitado ${} → real ${}",
+                pending.solicitudId(), montoSolicitado, montoReal);
     }
 
     private void handleCancel(String callbackQueryId, String data, Long telegramUserId, Integer messageId) {
@@ -756,6 +922,11 @@ public class TelegramWebhookService {
             PendingGasto pendingGasto = pendingGastos.get(chatId);
             if (pendingGasto != null) {
                 handleGastoMonto(pendingGasto, chatId, text);
+                return;
+            }
+            PendingMontoReal pendingMontoReal = pendingMontosReales.get(chatId);
+            if (pendingMontoReal != null) {
+                handleMontoRealTexto(pendingMontoReal, chatId, text);
                 return;
             }
         }
@@ -825,22 +996,18 @@ public class TelegramWebhookService {
     }
 
     private String buildMensajePrivado(SolicitudRetiro solicitud, Retirador retirador) {
+        // Mismo formato simple que el retiro directo: solo monto y cuenta/banco,
+        // sin encabezado ni nombre del retirador (es su chat privado).
         StringBuilder sb = new StringBuilder();
-        sb.append("🎯 *¡Solicitud de Retiro #").append(solicitud.getId()).append(" asignada a ti!*\n\n");
-        sb.append("💰 *Monto Total:* $").append(String.format("%,.0f", solicitud.getTotalMonto())).append(" COP\n");
-        sb.append("💵 *Tu pago:* $").append(String.format("%,.0f", solicitud.getPagoRetirador())).append(" COP\n");
-        sb.append("🏦 *Detalles:*");
-        for (var d : solicitud.getDetalles()) {
-            double montoCajero = d.getMontoCajero() != null ? d.getMontoCajero() : 0.0;
-            double montoCorresponsal = d.getMontoCorresponsal() != null ? d.getMontoCorresponsal() : 0.0;
+        sb.append("💰 *Total:* $").append(String.format("%,.0f", solicitud.getTotalMonto())).append(" COP\n");
+        sb.append("🏦 ");
+        for (int i = 0; i < solicitud.getDetalles().size(); i++) {
+            DetalleRetiro d = solicitud.getDetalles().get(i);
+            if (i > 0)
+                sb.append(", ");
             String banco = d.getCuentaCop().getBankType() != null ? d.getCuentaCop().getBankType().name() : "?";
-            sb.append("\n  • ").append(d.getCuentaCop().getName())
-                    .append(" (").append(banco).append(")")
-                    .append(" | ").append(d.getTipoRetiro().name())
-                    .append(" | Cajero: $").append(String.format("%,.0f", montoCajero))
-                    .append(" | Corresponsal: $").append(String.format("%,.0f", montoCorresponsal));
+            sb.append(d.getCuentaCop().getName()).append(" (").append(banco).append(")");
         }
-        sb.append("\n\n⏰ *Presiona \"Ya hice el retiro\" cuando lo completes.*");
         return sb.toString();
     }
 
