@@ -80,6 +80,14 @@ public class AccountCop {
     @Column(name = "cupo_tipo_p2p")
     private String cupoTipoP2P = "AMBOS";
 
+    /**
+     * Cuenta BLOQUEADA: no aparece ni es seleccionable en ningún lado (movimientos, formularios,
+     * P2P, ventas en curso, retiradores, gastos, pagos). Solo se ve en la vista de Cuentas para
+     * poder desbloquearla. Default false para no afectar cuentas existentes.
+     */
+    @Column(name = "bloqueada", nullable = false)
+    private Boolean bloqueada = false;
+
     /** Llaves de Brebe asociadas a esta cuenta. Se serializan en el JSON. */
     @OneToMany(mappedBy = "accountCop", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
     private List<BrebeKey> brebeKeys = new ArrayList<>();
@@ -128,6 +136,7 @@ public class AccountCop {
     public String getCedula() { return cedula; }
     public Boolean getActivaParaP2P() { return activaParaP2P; }
     public String getCupoTipoP2P() { return cupoTipoP2P; }
+    public Boolean getBloqueada() { return bloqueada; }
     public List<BrebeKey> getBrebeKeys() { return brebeKeys; }
 
     // ==================== SETTERS ====================
@@ -148,6 +157,7 @@ public class AccountCop {
     public void setCedula(String cedula) { this.cedula = cedula; }
     public void setActivaParaP2P(Boolean activaParaP2P) { this.activaParaP2P = activaParaP2P; }
     public void setCupoTipoP2P(String cupoTipoP2P) { this.cupoTipoP2P = cupoTipoP2P; }
+    public void setBloqueada(Boolean bloqueada) { this.bloqueada = bloqueada; }
     public void setBrebeKeys(List<BrebeKey> brebeKeys) { this.brebeKeys = brebeKeys; }
 
     // ==================== equals / hashCode / toString ====================
