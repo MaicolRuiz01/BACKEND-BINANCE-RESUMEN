@@ -262,6 +262,14 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
 					total += tronScanService.getTotalAssetTokenOverview(account.getAddress());
 				} else if ("SOLANA".equals(tipo) || "PHANTOM".equals(tipo)) {
 					total += solscanService.getTotalAssetUsd(account.getAddress());
+				} else if ("BYBIT".equals(tipo) || "BYBIP".equals(tipo)) {
+					Map<String, Double> balances = bybitService.getBalancesByAsset(account.getApiKey(), account.getApiSecret());
+					Map<String, Double> priceCache = new HashMap<>();
+					for (Map.Entry<String, Double> e : balances.entrySet()) {
+						double qty = e.getValue() != null ? e.getValue() : 0.0;
+						if (qty <= 0) continue;
+						total += qty * usdtPrice(e.getKey(), priceCache);
+					}
 				}
 			} catch (Exception e) {
 				System.out.println("⚠️ Error con cuenta " + account.getName() + ": " + e.getMessage());
@@ -315,6 +323,16 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
 				return tronScanService.getTotalAssetTokenOverview(account.getAddress());
 			} else if ("SOLANA".equals(tipo) || "PHANTOM".equals(tipo)) {
 				return solscanService.getTotalAssetUsd(account.getAddress()); // USD ≈ USDT
+			} else if ("BYBIT".equals(tipo) || "BYBIP".equals(tipo)) {
+				Map<String, Double> balances = bybitService.getBalancesByAsset(account.getApiKey(), account.getApiSecret());
+				Map<String, Double> priceCache = new HashMap<>();
+				double total = 0.0;
+				for (Map.Entry<String, Double> e : balances.entrySet()) {
+					double qty = e.getValue() != null ? e.getValue() : 0.0;
+					if (qty <= 0) continue;
+					total += qty * usdtPrice(e.getKey(), priceCache);
+				}
+				return total;
 			} else {
 				return 0.0;
 			}

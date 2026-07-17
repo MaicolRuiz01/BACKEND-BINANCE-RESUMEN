@@ -58,17 +58,28 @@ public class P2PActiveOrderController {
      */
     @PostMapping("/pre-asignacion")
     public ResponseEntity<?> upsertPreAsignacion(@RequestBody Map<String, Object> body) {
+        String orderNumber    = (String) body.get("orderNumber");
+        Integer copId         = (Integer) body.get("copId");
+        String accountBinance = (String) body.get("accountBinance");
+
+        if (orderNumber == null || copId == null || accountBinance == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Faltan campos requeridos"));
+        }
+
         try {
-            String orderNumber   = (String) body.get("orderNumber");
-            Integer copId        = (Integer) body.get("copId");
-            String accountBinance = (String) body.get("accountBinance");
-
-            if (orderNumber == null || copId == null || accountBinance == null) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Faltan campos requeridos"));
-            }
-
             activeOrderService.upsertPreAsignacion(orderNumber, copId, accountBinance);
             return ResponseEntity.ok(Map.of("mensaje", "Pre-asignación guardada"));
+        } catch (org.springframework.dao.DataIntegrityViolationException dup) {
+            // CARRERA: otro hilo (o el auto-sync) insertó la misma orden a la vez → chocó el unique.
+            // Reintentamos: ahora la fila YA existe, así el upsert entra por la rama de UPDATE
+            // y no vuelve a insertar. Esto evita el error "Duplicate entry" al asignar órdenes.
+            try {
+                activeOrderService.upsertPreAsignacion(orderNumber, copId, accountBinance);
+                return ResponseEntity.ok(Map.of("mensaje", "Pre-asignación guardada"));
+            } catch (Exception e2) {
+                log.warn("[PreAsign] Reintento tras duplicado: {}", e2.getMessage());
+                return ResponseEntity.ok(Map.of("mensaje", "Pre-asignación ya existía"));
+            }
         } catch (Exception e) {
             log.error("[PreAsign] Error: {}", e.getMessage());
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
