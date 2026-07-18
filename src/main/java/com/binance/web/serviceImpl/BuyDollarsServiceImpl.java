@@ -78,6 +78,8 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 	private TraspasoBybitService traspasoBybitService;
 	@Autowired
 	private SolanaController solanaController;
+	@Autowired
+	private com.binance.web.BinanceAPI.BybitService bybitService;
 
 	@Override
 	public BuyDollars getLastBuyDollars() {
@@ -183,20 +185,47 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 
 	@Override
     public void registrarComprasAutomaticamente() {
+        registrarComprasAutomaticamente(0);
+    }
+
+    /** Igual que el automático, pero permite mirar depósitos de Bybit de hasta {diasAtras} días
+     *  atrás (0 = solo hoy). Solo afecta la fuente Bybit; las demás siguen siendo del día.
+     *  Uso manual para probar/reprocesar movimientos de días anteriores. */
+    @Override
+    public void registrarComprasAutomaticamente(int diasAtras) {
         try {
             // ✅ Modificación 1: Los controladores devuelven una lista de DTOs genéricos
             List<BuyDollarsDto> binancePay = binancePayController.getComprasNoRegistradas().getBody();
             List<BuyDollarsDto> spot = spotOrdersController.getComprasNoRegistradas(20).getBody();
             List<BuyDollarsDto> trust = tronScanController.getUSDTIncomingTransfers().getBody();
-           // List<BuyDollarsDto> sol = solanaController.getSolanaIncomingTransfers().getBody(); miton dijo que no interesaba las entradas de solana 
+           // List<BuyDollarsDto> sol = solanaController.getSolanaIncomingTransfers().getBody(); miton dijo que no interesaba las entradas de solana
             Set<String> existentes = buyDollarsRepository.findAll().stream()
                 .map(BuyDollars::getIdDeposit)
                 .collect(Collectors.toSet());
+
+            // Depósitos entrantes de las cuentas Bybit (antes no se consultaban en absoluto).
+            // Excluye internamente los que vengan de una wallet propia registrada (traspaso).
+            Set<String> ownAddresses = accountBinanceRepository.findAllAddresses();
+            java.time.LocalDate desde = java.time.LocalDate.now(java.time.ZoneId.of("America/Bogota"))
+                    .minusDays(Math.max(0, diasAtras));
+            List<BuyDollarsDto> bybit = new ArrayList<>();
+            int cuentasBybit = 0;
+            for (AccountBinance acc : accountBinanceRepository.findAll()) {
+                String tipo = acc.getTipo() != null ? acc.getTipo().trim().toUpperCase() : "";
+                if (!tipo.startsWith("BYBI")) continue; // BYBIT y el typo común BYBIP
+                if (!Boolean.TRUE.equals(acc.getActiva())) continue;
+                cuentasBybit++;
+                bybit.addAll(bybitService.getIncomingDeposits(
+                        acc.getApiKey(), acc.getApiSecret(), acc.getName(), existentes, ownAddresses, desde));
+            }
+            System.out.println("[Bybit][DIAG] registrarCompras: " + cuentasBybit + " cuenta(s) Bybit activa(s), "
+                    + bybit.size() + " depósito(s) candidato(s).");
 
             List<BuyDollarsDto> todas = new ArrayList<>();
             if (binancePay != null) todas.addAll(binancePay);
             if (spot != null) todas.addAll(spot);
             if (trust != null) todas.addAll(trust);
+            todas.addAll(bybit);
             //if (sol != null) todas.addAll(sol);
             todas.sort(Comparator.comparing(BuyDollarsDto::getDate));
 
@@ -219,12 +248,13 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
                 //    es un traspaso interno y SABEMOS de qué cuenta salió (cuentaFrom real → "Javier").
                 //    Se prueban ambos identificadores (txId e idDeposit) porque según la fuente uno
                 //    u otro trae el hash on-chain.
-                //    Fallback TEMPORAL: la wallet hardcodeada (esWalletTraspaso). Se quitará cuando
-                //    el match por hash esté verificado con datos reales.
+                //    Los traspasos hacia wallets propias ya se excluyen antes (por dirección propia),
+                //    así que aquí SOLO es traspaso si el hash matchea un retiro nuestro. Se quitó el
+                //    fallback hardcodeado (esWalletTraspaso) que marcaba como traspaso depósitos
+                //    externos reales (compras) solo porque la dirección estaba en una lista fija.
                 AccountBinance origenBybit = traspasoBybitService.cuentaOrigenPorHash(dto.getTxId());
                 if (origenBybit == null) origenBybit = traspasoBybitService.cuentaOrigenPorHash(dto.getIdDeposit());
-                boolean esTraspaso = origenBybit != null
-                        || traspasoWalletService.esWalletTraspaso(dto.getContraparteAddress());
+                boolean esTraspaso = origenBybit != null;
 
                 if (esTraspaso) {
                     // El cripto real sí entró (se ajusta el saldo), pero se registra como

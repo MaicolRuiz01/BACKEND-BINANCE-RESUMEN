@@ -22,6 +22,8 @@ public interface BuyDollarsService {
 
 	void registrarComprasAutomaticamente();
 
+	void registrarComprasAutomaticamente(int diasAtras);
+
 	List<BuyDollarsDto> getComprasNoAsignadasHoy();
 
 	BuyDollars asignarCompra(Integer id, BuyDollarsDto dto);

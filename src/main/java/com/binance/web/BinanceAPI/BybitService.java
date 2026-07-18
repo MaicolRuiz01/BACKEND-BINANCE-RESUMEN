@@ -1,10 +1,16 @@
 package com.binance.web.BinanceAPI;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -16,6 +22,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import com.binance.web.model.BuyDollarsDto;
+import com.binance.web.model.SellDollarsDto;
 import com.binance.web.util.HttpClientFactory;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -96,6 +104,187 @@ public class BybitService {
             log.warn("[Bybit] No se pudieron leer los retiros: {}", e.getMessage());
         }
         return out;
+    }
+
+    /**
+     * Depósitos entrantes de HOY a esta cuenta Bybit (on-chain, status=success), en el mismo
+     * formato genérico que usa TronScan para alimentar "registrar compras automáticamente".
+     * Excluye depósitos cuyo remitente sea una de NUESTRAS propias wallets registradas
+     * (eso es un traspaso interno, no una compra — igual que TronScanService con "propias").
+     * Defensivo: nunca lanza, nunca null.
+     */
+    public List<BuyDollarsDto> getIncomingDeposits(String apiKey, String apiSecret, String accountName,
+            Set<String> assignedIds, Set<String> ownAddresses) {
+        return getIncomingDeposits(apiKey, apiSecret, accountName, assignedIds, ownAddresses,
+                LocalDate.now(ZoneId.of("America/Bogota")));
+    }
+
+    /** Igual que arriba pero permitiendo elegir la fecha DESDE (inclusive) — para importaciones
+     *  manuales de días anteriores (prueba/reproceso). El automático usa siempre HOY. */
+    public List<BuyDollarsDto> getIncomingDeposits(String apiKey, String apiSecret, String accountName,
+            Set<String> assignedIds, Set<String> ownAddresses, LocalDate desde) {
+        List<BuyDollarsDto> out = new ArrayList<>();
+        if (apiKey == null || apiSecret == null || apiKey.isBlank() || apiSecret.isBlank()) {
+            log.warn("[Bybit][DIAG] Depósitos {}: cuenta sin apiKey/apiSecret → no se consulta.", accountName);
+            return out;
+        }
+
+        Set<String> propias = normalizarTodas(ownAddresses);
+        ZoneId zona = ZoneId.of("America/Bogota");
+
+        try {
+            long end = System.currentTimeMillis();
+            long start = desde.atStartOfDay(zona).toInstant().toEpochMilli();
+            String query = "startTime=" + start + "&endTime=" + end + "&limit=50";
+            JsonNode root = signedGet("/v5/asset/deposit/query-record", query, apiKey, apiSecret);
+
+            JsonNode rows = root.path("result").path("rows");
+            log.info("[Bybit][DIAG] Depósitos {}: Bybit devolvió {} fila(s) en la ventana de hoy.",
+                    accountName, rows.size());
+            for (JsonNode r : rows) {
+                int st = r.path("status").asInt(0);
+                if (st != 3) { // 3 = success
+                    log.info("[Bybit][DIAG] Depósito omitido ({}) → status={} (no success)", accountName, st);
+                    continue;
+                }
+                String txId = r.path("txID").asText(null);
+                if (txId == null || txId.isBlank()) { log.info("[Bybit][DIAG] Depósito omitido ({}) → sin txID", accountName); continue; }
+                if (assignedIds != null && assignedIds.contains(txId)) { log.info("[Bybit][DIAG] Depósito omitido ({}) → ya registrado txID={}", accountName, txId); continue; }
+
+                String from = r.path("fromAddress").asText(null);
+                if (from != null && !from.isBlank() && propias.contains(normalizar(from))) {
+                    log.info("[Bybit][DIAG] Depósito omitido ({}) → viene de wallet propia (traspaso) from={}", accountName, from);
+                    continue;
+                }
+
+                double amount = r.path("amount").asDouble(0.0);
+                if (amount <= 0) { log.info("[Bybit][DIAG] Depósito omitido ({}) → amount<=0", accountName); continue; }
+
+                long ts = parseLongSafe(r.path("successAt").asText(null));
+                if (ts <= 0) { log.info("[Bybit][DIAG] Depósito omitido ({}) → sin successAt", accountName); continue; }
+                LocalDate fecha = Instant.ofEpochMilli(ts).atZone(zona).toLocalDate();
+                if (fecha.isBefore(desde)) {
+                    log.info("[Bybit][DIAG] Depósito omitido ({}) → anterior a {} (fecha={}, txID={})", accountName, desde, fecha, txId);
+                    continue;
+                }
+                log.info("[Bybit][DIAG] Depósito ACEPTADO ({}) → {} {} txID={}", accountName, amount, r.path("coin").asText("USDT"), txId);
+
+                BuyDollarsDto dto = new BuyDollarsDto();
+                dto.setAmount(amount);
+                dto.setCryptoSymbol(r.path("coin").asText("USDT"));
+                dto.setTasa(0.0);
+                dto.setNameAccount(accountName);
+                dto.setIdDeposit(txId);
+                dto.setTxId(txId);
+                dto.setPesos(0.0);
+                dto.setDate(LocalDateTime.ofInstant(Instant.ofEpochMilli(ts), zona));
+                dto.setAsignada(false);
+                dto.setContraparteAddress(from);
+                out.add(dto);
+            }
+        } catch (Exception e) {
+            log.warn("[Bybit] No se pudieron leer depósitos entrantes de {}: {}", accountName, e.getMessage());
+        }
+        return out;
+    }
+
+    /**
+     * Retiros de HOY de esta cuenta Bybit (on-chain, status=success), en el mismo formato
+     * genérico que usa TronScan para "registrar ventas automáticamente".
+     * Excluye retiros hacia una de NUESTRAS propias wallets registradas (traspaso interno).
+     * Defensivo: nunca lanza, nunca null.
+     */
+    public List<SellDollarsDto> getOutgoingWithdrawals(String apiKey, String apiSecret, String accountName,
+            Set<String> assignedIds, Set<String> ownAddresses) {
+        return getOutgoingWithdrawals(apiKey, apiSecret, accountName, assignedIds, ownAddresses,
+                LocalDate.now(ZoneId.of("America/Bogota")));
+    }
+
+    /** Igual que arriba pero permitiendo elegir la fecha DESDE (inclusive) — para importaciones
+     *  manuales de días anteriores (prueba/reproceso). El automático usa siempre HOY. */
+    public List<SellDollarsDto> getOutgoingWithdrawals(String apiKey, String apiSecret, String accountName,
+            Set<String> assignedIds, Set<String> ownAddresses, LocalDate desde) {
+        List<SellDollarsDto> out = new ArrayList<>();
+        if (apiKey == null || apiSecret == null || apiKey.isBlank() || apiSecret.isBlank()) {
+            log.warn("[Bybit][DIAG] Retiros {}: cuenta sin apiKey/apiSecret → no se consulta.", accountName);
+            return out;
+        }
+
+        Set<String> propias = normalizarTodas(ownAddresses);
+        ZoneId zona = ZoneId.of("America/Bogota");
+
+        try {
+            long end = System.currentTimeMillis();
+            long start = desde.atStartOfDay(zona).toInstant().toEpochMilli();
+            String query = "startTime=" + start + "&endTime=" + end + "&limit=50";
+            JsonNode root = signedGet("/v5/asset/withdraw/query-record", query, apiKey, apiSecret);
+
+            JsonNode rows = root.path("result").path("rows");
+            log.info("[Bybit][DIAG] Retiros {}: Bybit devolvió {} fila(s) en la ventana de hoy.",
+                    accountName, rows.size());
+            for (JsonNode r : rows) {
+                String status = r.path("status").asText("");
+                if (!"success".equalsIgnoreCase(status)) { log.info("[Bybit][DIAG] Retiro omitido ({}) → status={} (no success)", accountName, status); continue; }
+                String txId = r.path("txID").asText(null);
+                if (txId == null || txId.isBlank()) { log.info("[Bybit][DIAG] Retiro omitido ({}) → sin txID", accountName); continue; }
+                if (assignedIds != null && assignedIds.contains(txId)) { log.info("[Bybit][DIAG] Retiro omitido ({}) → ya registrado txID={}", accountName, txId); continue; }
+
+                String to = r.path("toAddress").asText(null);
+                if (to != null && !to.isBlank() && propias.contains(normalizar(to))) {
+                    log.info("[Bybit][DIAG] Retiro omitido ({}) → va a wallet propia (traspaso) to={}", accountName, to);
+                    continue;
+                }
+
+                double amount = r.path("amount").asDouble(0.0);
+                if (amount <= 0) { log.info("[Bybit][DIAG] Retiro omitido ({}) → amount<=0", accountName); continue; }
+
+                long ts = parseLongSafe(r.path("updateTime").asText(null));
+                if (ts <= 0) ts = parseLongSafe(r.path("createTime").asText(null));
+                if (ts <= 0) { log.info("[Bybit][DIAG] Retiro omitido ({}) → sin fecha", accountName); continue; }
+                LocalDate fecha = Instant.ofEpochMilli(ts).atZone(zona).toLocalDate();
+                if (fecha.isBefore(desde)) {
+                    log.info("[Bybit][DIAG] Retiro omitido ({}) → anterior a {} (fecha={}, txID={})", accountName, desde, fecha, txId);
+                    continue;
+                }
+                log.info("[Bybit][DIAG] Retiro ACEPTADO ({}) → {} {} txID={}", accountName, amount, r.path("coin").asText("USDT"), txId);
+
+                SellDollarsDto dto = new SellDollarsDto();
+                dto.setIdWithdrawals(txId);
+                dto.setTxId(txId);
+                dto.setNameAccount(accountName);
+                dto.setDate(LocalDateTime.ofInstant(Instant.ofEpochMilli(ts), zona));
+                dto.setDollars(amount);
+                dto.setCryptoSymbol(r.path("coin").asText("USDT"));
+                dto.setTasa(0.0);
+                dto.setPesos(0.0);
+                dto.setComision(0.0);
+                dto.setContraparteAddress(to);
+                out.add(dto);
+            }
+        } catch (Exception e) {
+            log.warn("[Bybit] No se pudieron leer retiros salientes de {}: {}", accountName, e.getMessage());
+        }
+        return out;
+    }
+
+    private long parseLongSafe(String s) {
+        if (s == null || s.isBlank()) return 0L;
+        try { return Long.parseLong(s.trim()); } catch (NumberFormatException e) { return 0L; }
+    }
+
+    private Set<String> normalizarTodas(Set<String> addresses) {
+        Set<String> out = new HashSet<>();
+        if (addresses != null) for (String a : addresses) if (a != null) out.add(normalizar(a));
+        return out;
+    }
+
+    /** Normaliza direcciones para comparar entre formatos (igual criterio que TraspasoWalletService). */
+    private String normalizar(String w) {
+        if (w == null) return "";
+        String s = w.trim().toLowerCase();
+        if (s.startsWith("0x")) s = s.substring(2);
+        if (s.length() == 42 && s.startsWith("41")) s = s.substring(2);
+        return s;
     }
 
     /** GET /v5/account/wallet-balance?accountType=UNIFIED → result.list[].coin[] { coin, walletBalance }. */

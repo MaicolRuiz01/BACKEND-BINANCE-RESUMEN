@@ -84,8 +84,10 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 	private TraspasoWalletService traspasoWalletService;
 	@Autowired
 	private SolanaController solanaController;
-	
-	
+	@Autowired
+	private com.binance.web.BinanceAPI.BybitService bybitService;
+
+
 
 	@Override
 	@Transactional
@@ -539,11 +541,39 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 	@Override
 	@Transactional
 	public void registrarVentasAutomaticamente() {
+	  registrarVentasAutomaticamente(0);
+	}
+
+	/** Igual que el automático, pero permite mirar retiros de Bybit de hasta {diasAtras} días
+	 *  atrás (0 = solo hoy). Solo afecta la fuente Bybit; las demás siguen siendo del día.
+	 *  Uso manual para probar/reprocesar movimientos de días anteriores. */
+	@Override
+	@Transactional
+	public void registrarVentasAutomaticamente(int diasAtras) {
 	  try {
 	    List<SellDollarsDto> spot       = spotOrdersController.getVentasNoRegistradas(50).getBody();
 	    List<SellDollarsDto> binancePay = binancePayController.getVentasNoRegistradasBinancePay().getBody();
 	    List<SellDollarsDto> trust      = tronScanController.getUSDTOutgoingTransfers().getBody();
 	    List<SellDollarsDto> sol        = solanaController.getSolanaOutgoingTransfers().getBody();
+
+	    // Retiros salientes de las cuentas Bybit (antes no se consultaban en absoluto).
+	    // Excluye internamente los que vayan a una wallet propia registrada (traspaso).
+	    Set<String> assignedWithdrawalIds = sellDollarsRepository.findAllWithdrawalIds();
+	    Set<String> ownAddresses = accountBinanceRepository.findAllAddresses();
+	    java.time.LocalDate desde = java.time.LocalDate.now(java.time.ZoneId.of("America/Bogota"))
+	            .minusDays(Math.max(0, diasAtras));
+	    List<SellDollarsDto> bybit = new ArrayList<>();
+	    int cuentasBybit = 0;
+	    for (AccountBinance acc : accountBinanceRepository.findAll()) {
+	        String tipo = acc.getTipo() != null ? acc.getTipo().trim().toUpperCase() : "";
+	        if (!tipo.startsWith("BYBI")) continue; // BYBIT y el typo común BYBIP
+	        if (!Boolean.TRUE.equals(acc.getActiva())) continue;
+	        cuentasBybit++;
+	        bybit.addAll(bybitService.getOutgoingWithdrawals(
+	                acc.getApiKey(), acc.getApiSecret(), acc.getName(), assignedWithdrawalIds, ownAddresses, desde));
+	    }
+	    System.out.println("[Bybit][DIAG] registrarVentas: " + cuentasBybit + " cuenta(s) Bybit activa(s), "
+	            + bybit.size() + " retiro(s) candidato(s).");
 
 	    // Unifica
 	    List<SellDollarsDto> todas = new ArrayList<>();
@@ -551,6 +581,7 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 	    if (binancePay != null) todas.addAll(binancePay);
 	    if (trust != null)      todas.addAll(trust);
 	    if (sol != null)        todas.addAll(sol);
+	    todas.addAll(bybit);
 
 	    // Orden por fecha (nulls al final)
 	    todas.sort(Comparator.comparing(SellDollarsDto::getDate, Comparator.nullsLast(Comparator.naturalOrder())));

@@ -12,6 +12,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.binance.web.Entity.AccountBinance;
@@ -92,6 +94,15 @@ public class BuyDollarsController {
     @PostMapping("/importar-automatico")
     public ResponseEntity<Void> importarComprasAutomaticamente() {
         buyDollarsService.registrarComprasAutomaticamente();
+        return ResponseEntity.ok().build();
+    }
+
+    /** Importación manual mirando {dias} días atrás (0 = solo hoy). Solo para probar/reprocesar
+     *  depósitos de Bybit de días anteriores. Acepta GET y POST para poder llamarlo desde el
+     *  navegador. Ej: /buy-dollars/importar-bybit?dias=1 */
+    @RequestMapping(value = "/importar-bybit", method = { RequestMethod.GET, RequestMethod.POST })
+    public ResponseEntity<Void> importarBybitDiasAtras(@RequestParam(defaultValue = "1") int dias) {
+        buyDollarsService.registrarComprasAutomaticamente(dias);
         return ResponseEntity.ok().build();
     }
 
