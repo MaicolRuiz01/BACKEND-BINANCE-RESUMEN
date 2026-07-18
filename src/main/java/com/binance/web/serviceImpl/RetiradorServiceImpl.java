@@ -474,6 +474,28 @@ public class RetiradorServiceImpl implements RetiradorService {
         // nadie registró una cifra distinta), coherente con lo acreditado a caja.
         solicitud.setTotalMonto(totalReal);
         solicitud.setEstado(EstadoSolicitud.COMPLETADO);
+
+        // BUG FIX: si la solicitud se confirma desde la APP (botón "Confirmar" en
+        // el frontend) o desde el flujo de "Otra cifra", el mensaje privado de
+        // Telegram con los botones "✅ Ya hice el retiro" / "❌ Cancelar" se
+        // quedaba huérfano — nunca se editaba ni se le quitaban los botones. El
+        // retirador lo veía como si siguiera pendiente, lo tocaba, y le salía
+        // "Esta solicitud ya no está pendiente" (correcto, pero confuso, porque
+        // el mensaje nunca cambió a "Retiro completado"). Igual que
+        // cancelarSolicitud ya limpia su mensaje al cancelar, acá lo limpiamos al
+        // confirmar, sin importar por dónde se haya confirmado.
+        if (retirador.getTelegramChatId() != null && solicitud.getTelegramPrivateMessageId() != null) {
+            try {
+                telegramService.editMessageTextOnly(
+                        String.valueOf(retirador.getTelegramChatId()),
+                        solicitud.getTelegramPrivateMessageId(),
+                        "✅ *Retiro completado* (Solicitud #" + solicitud.getId() + ")");
+            } catch (Exception e) {
+                log.error("[Retiro] No se pudo limpiar el mensaje de Telegram al confirmar la solicitud #{}: {}",
+                        solicitud.getId(), e.getMessage());
+            }
+        }
+
         return solicitudRepository.save(solicitud);
     }
 
@@ -814,6 +836,18 @@ public class RetiradorServiceImpl implements RetiradorService {
                     sb.append(d.getCuentaCop().getName())
                             .append(" (").append(d.getCuentaCop().getBankType().name()).append(")");
                 }
+                // BUG FIX: si ya existía un mensaje anterior para esta misma solicitud
+                // (ej. porque se le dio "Reenviar" más de una vez), hay que borrarlo antes
+                // de mandar el nuevo — si no, el mensaje viejo se queda huérfano en el chat
+                // con sus botones "Ya hice el retiro"/"Cancelar" todavía activos, saturando
+                // el chat y dejando al retirador con más de un botón funcional para la
+                // misma solicitud.
+                if (solicitud.getTelegramPrivateMessageId() != null) {
+                    telegramService.deleteMessage(
+                            String.valueOf(retirador.getTelegramChatId()),
+                            solicitud.getTelegramPrivateMessageId());
+                }
+
                 Integer privateMessageId = telegramService.sendMessageWithTwoButtons(
                         String.valueOf(retirador.getTelegramChatId()),
                         sb.toString(),
@@ -954,6 +988,7 @@ public class RetiradorServiceImpl implements RetiradorService {
         buttonsData.put("✅ Entregar efectivo", "entregar_start");
         buttonsData.put("🧾 Registrar gasto", "gasto_start");
         buttonsData.put("📊 Movimientos", "movimientos_start");
+        buttonsData.put("💵 Cliente pagó", "cliente_pago_start");
         Integer newMessageId = telegramService.sendMessageWithButtons(
                 String.valueOf(retirador.getTelegramChatId()), msj, buttonsData);
 

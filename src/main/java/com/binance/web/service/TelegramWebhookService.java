@@ -1,6 +1,7 @@
 package com.binance.web.service;
 
 import com.binance.web.Entity.*;
+import com.binance.web.Repository.ClienteRepository;
 import com.binance.web.Repository.RetiradorRepository;
 import com.binance.web.Repository.SolicitudRetiroRepository;
 import com.binance.web.Repository.SupplierRepository;
@@ -34,6 +35,7 @@ public class TelegramWebhookService {
     private final SupplierRepository supplierRepository;
     private final MovimientoService movimientoService;
     private final GastoService gastoService;
+    private final ClienteRepository clienteRepository;
 
     @Value("${app.telegram.group-chat-id:}")
     private String groupChatId;
@@ -65,6 +67,15 @@ public class TelegramWebhookService {
     private final Map<Long, PendingMontoReal> pendingMontosReales = new ConcurrentHashMap<>();
 
     private record PendingMontoReal(Long solicitudId, Integer messageId) {
+    }
+
+    // Estado en memoria: retiradores que están en medio del flujo "Cliente
+    // pagó" (efectivo que un cliente le entregó por USDT ya vendido) y ya
+    // eligieron el cliente, esperando que escriban el monto.
+    // Key = telegramUserId (chat_id privado).
+    private final Map<Long, PendingClientePago> pendingClientePagos = new ConcurrentHashMap<>();
+
+    private record PendingClientePago(Integer clienteId, String clienteNombre, Integer messageId) {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -134,6 +145,12 @@ public class TelegramWebhookService {
             handleGastoCancel(callbackQueryId, telegramUserId, messageId);
         } else if (data.equals("movimientos_start")) {
             handleMovimientosStart(callbackQueryId, telegramUserId, messageId);
+        } else if (data.equals("cliente_pago_start")) {
+            handleClientePagoStart(callbackQueryId, telegramUserId, messageId);
+        } else if (data.startsWith("cliente_pago_sel:")) {
+            handleClientePagoSel(callbackQueryId, data, telegramUserId, messageId);
+        } else if (data.equals("cliente_pago_cancel")) {
+            handleClientePagoCancel(callbackQueryId, telegramUserId, messageId);
         }
     }
 
@@ -157,10 +174,11 @@ public class TelegramWebhookService {
             return;
         }
 
-        // Descartar cualquier flujo de entrega/gasto/monto-real que hubiera quedado a medias
+        // Descartar cualquier flujo de entrega/gasto/monto-real/cliente-pago que hubiera quedado a medias
         pendingEntregas.remove(telegramUserId);
         pendingGastos.remove(telegramUserId);
         pendingMontosReales.remove(telegramUserId);
+        pendingClientePagos.remove(telegramUserId);
 
         // Construir mapa de botones (Nombre -> callback_data)
         java.util.LinkedHashMap<String, String> buttonsData = new java.util.LinkedHashMap<>();
@@ -244,9 +262,10 @@ public class TelegramWebhookService {
             return;
         }
 
-        // Descartar cualquier flujo de entrega/monto-real que hubiera quedado a medias
+        // Descartar cualquier flujo de entrega/monto-real/cliente-pago que hubiera quedado a medias
         pendingEntregas.remove(telegramUserId);
         pendingMontosReales.remove(telegramUserId);
+        pendingClientePagos.remove(telegramUserId);
         pendingGastos.put(telegramUserId, new PendingGasto(messageId));
 
         String texto = String.format(
@@ -273,6 +292,95 @@ public class TelegramWebhookService {
 
         restaurarRecordatorio(telegramUserId, messageId, retirador);
         // Sin popup: el mensaje ya se restauró mostrando el estado actual de la caja.
+        telegramService.answerCallbackQuery(callbackQueryId, "");
+    }
+
+    /**
+     * Botón "Cliente pagó": el retirador recibió efectivo de un cliente al que
+     * ya se le vendió USDT (paga en efectivo en vez de transferencia). Pide
+     * elegir el cliente entre los registrados.
+     */
+    private void handleClientePagoStart(String callbackQueryId, Long telegramUserId, Integer messageId) {
+        Retirador retirador = retiradorRepository.findByTelegramChatId(telegramUserId).orElse(null);
+        if (retirador == null) {
+            telegramService.answerCallbackQuery(callbackQueryId, "⚠️ No estás registrado como retirador.");
+            return;
+        }
+        if (retirador.getEfectivo() == null) {
+            telegramService.answerCallbackQuery(callbackQueryId, "⚠️ No se encontró tu caja.");
+            return;
+        }
+
+        java.util.List<Cliente> clientes = clienteRepository.findAll();
+        if (clientes.isEmpty()) {
+            telegramService.answerCallbackQuery(callbackQueryId, "⚠️ No hay clientes registrados.");
+            return;
+        }
+
+        // Descartar cualquier flujo de entrega/gasto/monto-real/cliente-pago que hubiera quedado a medias
+        pendingEntregas.remove(telegramUserId);
+        pendingGastos.remove(telegramUserId);
+        pendingMontosReales.remove(telegramUserId);
+        pendingClientePagos.remove(telegramUserId);
+
+        java.util.LinkedHashMap<String, String> buttonsData = new java.util.LinkedHashMap<>();
+        for (Cliente cliente : clientes) {
+            buttonsData.put(cliente.getNombre(), "cliente_pago_sel:" + cliente.getId());
+        }
+
+        telegramService.editMessageWithDynamicButtons(
+                String.valueOf(telegramUserId),
+                messageId,
+                "👤 *Selecciona el cliente que te entregó el efectivo:*",
+                buttonsData);
+        telegramService.answerCallbackQuery(callbackQueryId, "");
+    }
+
+    private void handleClientePagoSel(String callbackQueryId, String data, Long telegramUserId, Integer messageId) {
+        Integer clienteId;
+        try {
+            clienteId = Integer.parseInt(data.substring("cliente_pago_sel:".length()));
+        } catch (NumberFormatException e) {
+            telegramService.answerCallbackQuery(callbackQueryId, "⚠️ Error en los datos del cliente.");
+            return;
+        }
+
+        Retirador retirador = retiradorRepository.findByTelegramChatId(telegramUserId).orElse(null);
+        if (retirador == null || retirador.getEfectivo() == null) {
+            telegramService.answerCallbackQuery(callbackQueryId, "⚠️ No se encontró tu caja.");
+            return;
+        }
+
+        Cliente cliente = clienteRepository.findById(clienteId).orElse(null);
+        if (cliente == null) {
+            telegramService.answerCallbackQuery(callbackQueryId, "⚠️ El cliente ya no existe.");
+            return;
+        }
+
+        // No registramos de inmediato: guardamos el estado y pedimos el monto.
+        pendingClientePagos.put(telegramUserId, new PendingClientePago(cliente.getId(), cliente.getNombre(), messageId));
+
+        String texto = String.format(
+                "💵 *%s* te entregó efectivo por USDT ya vendido.\n\nEscribe el monto que recibiste.",
+                cliente.getNombre());
+
+        java.util.LinkedHashMap<String, String> buttonsData = new java.util.LinkedHashMap<>();
+        buttonsData.put("❌ Cancelar", "cliente_pago_cancel");
+        telegramService.editMessageWithDynamicButtons(String.valueOf(telegramUserId), messageId, texto, buttonsData);
+        telegramService.answerCallbackQuery(callbackQueryId, "");
+    }
+
+    private void handleClientePagoCancel(String callbackQueryId, Long telegramUserId, Integer messageId) {
+        pendingClientePagos.remove(telegramUserId);
+
+        Retirador retirador = retiradorRepository.findByTelegramChatId(telegramUserId).orElse(null);
+        if (retirador == null || retirador.getEfectivo() == null || retirador.getEfectivo().getSaldo() <= 0) {
+            telegramService.editMessageTextOnly(String.valueOf(telegramUserId), messageId, "Registro cancelado.");
+            telegramService.answerCallbackQuery(callbackQueryId, "");
+            return;
+        }
+
+        restaurarRecordatorio(telegramUserId, messageId, retirador);
         telegramService.answerCallbackQuery(callbackQueryId, "");
     }
 
@@ -638,7 +746,7 @@ public class TelegramWebhookService {
     }
 
     /**
-     * Reconstruye el mensaje de recordatorio de caja con sus dos botones
+     * Reconstruye el mensaje de recordatorio de caja con sus botones
      * habituales.
      */
     private void restaurarRecordatorio(Long telegramUserId, Integer messageId, Retirador retirador) {
@@ -647,7 +755,68 @@ public class TelegramWebhookService {
         buttonsData.put("✅ Entregar efectivo", "entregar_start");
         buttonsData.put("🧾 Registrar gasto", "gasto_start");
         buttonsData.put("📊 Movimientos", "movimientos_start");
+        buttonsData.put("💵 Cliente pagó", "cliente_pago_start");
         telegramService.editMessageWithDynamicButtons(String.valueOf(telegramUserId), messageId, texto, buttonsData);
+    }
+
+    /**
+     * Procesa el monto que el retirador escribió como respuesta al flujo
+     * "Cliente pagó": efectivo que un cliente le entregó porque ya se le
+     * vendió USDT y decidió pagar en efectivo en vez de transferencia. No
+     * reinventa nada — usa la misma función que ya existía en Movimientos
+     * (movimientoService.registrarPagoCaja), la misma que ya usa la caja/el
+     * saldo del cliente en la plataforma web.
+     */
+    private void handleClientePagoMonto(PendingClientePago pending, Long telegramUserId, String textoRecibido) {
+        Retirador retirador = retiradorRepository.findByTelegramChatId(telegramUserId).orElse(null);
+        if (retirador == null || retirador.getEfectivo() == null) {
+            pendingClientePagos.remove(telegramUserId);
+            telegramService.sendMessage(String.valueOf(telegramUserId), "⚠️ No se encontró tu caja.");
+            return;
+        }
+
+        String soloNumeros = textoRecibido.trim().replace("$", "").replace(".", "").replace(",", "").replace(" ", "");
+        Double monto;
+        try {
+            monto = Double.parseDouble(soloNumeros);
+        } catch (NumberFormatException e) {
+            telegramService.sendMessage(String.valueOf(telegramUserId),
+                    "⚠️ No entendí ese monto. Escribe solo el número, ej: `50000`.");
+            return;
+        }
+
+        if (monto <= 0) {
+            telegramService.sendMessage(String.valueOf(telegramUserId), "⚠️ El monto debe ser mayor a $0.");
+            return;
+        }
+
+        try {
+            movimientoService.registrarPagoCaja(pending.clienteId(), retirador.getEfectivo().getId(), monto);
+        } catch (Exception e) {
+            log.error("[Webhook] Error registrando pago de cliente a caja", e);
+            telegramService.sendMessage(String.valueOf(telegramUserId),
+                    "⚠️ Hubo un error al registrar el pago. Intenta de nuevo.");
+            return;
+        }
+
+        pendingClientePagos.remove(telegramUserId);
+
+        telegramService.sendMessage(String.valueOf(telegramUserId), String.format(
+                "✅ Pago registrado: *$%,.0f* recibidos de *%s*.", monto, pending.clienteNombre()));
+
+        // Releemos el retirador fresco de la BD (mismo resguardo que usa "Registrar
+        // gasto") en vez de reusar el objeto cargado al principio del método, para
+        // no depender de que el saldo en memoria haya quedado sincronizado con el
+        // pago que se acaba de registrar.
+        Retirador retiradorActualizado = retiradorRepository.findByTelegramChatId(telegramUserId).orElse(retirador);
+        log.info("[Cliente Pago] Enviando recordatorio de caja tras el pago — retirador={}, cajaId={}, saldo={}",
+                retiradorActualizado.getNombre(),
+                retiradorActualizado.getEfectivo() != null ? retiradorActualizado.getEfectivo().getId() : null,
+                retiradorActualizado.getEfectivo() != null ? retiradorActualizado.getEfectivo().getSaldo() : null);
+        retiradorService.enviarRecordatorioCaja(retiradorActualizado);
+
+        log.info("[Cliente Pago] {} registró un pago en efectivo de ${} de {}",
+                retiradorActualizado.getNombre(), monto, pending.clienteNombre());
     }
 
     /**
@@ -1026,6 +1195,11 @@ public class TelegramWebhookService {
             PendingMontoReal pendingMontoReal = pendingMontosReales.get(chatId);
             if (pendingMontoReal != null) {
                 handleMontoRealTexto(pendingMontoReal, chatId, text);
+                return;
+            }
+            PendingClientePago pendingClientePago = pendingClientePagos.get(chatId);
+            if (pendingClientePago != null) {
+                handleClientePagoMonto(pendingClientePago, chatId, text);
                 return;
             }
         }
