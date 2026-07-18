@@ -5,6 +5,7 @@ import com.binance.web.Entity.Retirador;
 import com.binance.web.Entity.SolicitudRetiro;
 import com.binance.web.Repository.RetiradorRepository;
 import com.binance.web.Repository.SolicitudRetiroRepository;
+import com.binance.web.Repository.ClienteRepository;
 import com.binance.web.Repository.SupplierRepository;
 import com.binance.web.movimientos.MovimientoService;
 import com.binance.web.service.GastoService;
@@ -52,6 +53,7 @@ public class TelegramWebhookHandlersTest {
     @Mock private SupplierRepository supplierRepository;
     @Mock private MovimientoService movimientoService;
     @Mock private GastoService gastoService;
+    @Mock private ClienteRepository clienteRepository;
 
     private TelegramWebhookService webhookService;
 
@@ -67,7 +69,8 @@ public class TelegramWebhookHandlersTest {
     @BeforeEach
     void setUp() throws Exception {
         webhookService = new TelegramWebhookService(retiradorRepository, solicitudRepository,
-                telegramService, retiradorService, supplierRepository, movimientoService, gastoService);
+                telegramService, retiradorService, supplierRepository, movimientoService, gastoService,
+                clienteRepository);
 
         pendingMontoRealClass = Class.forName("com.binance.web.service.TelegramWebhookService$PendingMontoReal");
 
