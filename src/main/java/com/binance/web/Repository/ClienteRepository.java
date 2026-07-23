@@ -18,4 +18,7 @@ public interface ClienteRepository extends JpaRepository<Cliente, Integer> {
 	@Query("SELECT c FROM Cliente c WHERE c.binanceId IS NOT NULL")
 	java.util.List<Cliente> findByBinanceIdNotNull();
 
+	/** ¿Ya existe un cliente con esa wallet? (para avisar antes de chocar con el índice único). */
+	boolean existsByWallet(String wallet);
+
 }

@@ -10,10 +10,12 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.binance.web.Entity.JornadaTrabajo;
+import com.binance.web.Entity.ModoJornada;
 import com.binance.web.Entity.Usuario;
 import com.binance.web.Repository.JornadaTrabajoRepository;
 
@@ -32,9 +34,14 @@ public class JornadaController {
 
     private final JornadaTrabajoRepository jornadaRepository;
 
-    /** Inicia una jornada. Si ya hay una en curso, la devuelve (idempotente). */
+    /**
+     * Inicia una jornada. Si ya hay una en curso, la devuelve (idempotente).
+     * Body opcional: { "modo": "VENTA_USDT" | "CAJA" } — define qué vigilancia se le aplica.
+     * Si no se manda modo, la jornada queda sin vigilancia (comportamiento anterior).
+     */
     @PostMapping("/iniciar")
-    public ResponseEntity<Map<String, Object>> iniciar(@AuthenticationPrincipal Usuario user) {
+    public ResponseEntity<Map<String, Object>> iniciar(@AuthenticationPrincipal Usuario user,
+                                                      @RequestBody(required = false) Map<String, String> body) {
         if (user == null) return ResponseEntity.status(401).build();
 
         JornadaTrabajo jornada = jornadaRepository
@@ -46,9 +53,29 @@ public class JornadaController {
             jornada.setUsername(user.getUsername());
             jornada.setRol(user.getRol());
             jornada.setStartedAt(LocalDateTime.now());
+            jornada.setModo(parseModo(body));
             jornada = jornadaRepository.save(jornada);
+        } else if (jornada.getModo() == null) {
+            // Jornada ya abierta sin modo (o de antes de esta función): se le asigna el elegido.
+            ModoJornada modo = parseModo(body);
+            if (modo != null) {
+                jornada.setModo(modo);
+                jornada = jornadaRepository.save(jornada);
+            }
         }
         return ResponseEntity.ok(toMap(jornada));
+    }
+
+    /** Lee el modo del body de forma tolerante: si viene vacío o inválido, devuelve null. */
+    private ModoJornada parseModo(Map<String, String> body) {
+        if (body == null) return null;
+        String raw = body.get("modo");
+        if (raw == null || raw.isBlank()) return null;
+        try {
+            return ModoJornada.valueOf(raw.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     /** Termina la jornada en curso (si hay). */
@@ -96,6 +123,7 @@ public class JornadaController {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", j.getId());
         m.put("activa", activa);
+        m.put("modo", j.getModo() != null ? j.getModo().name() : null);
         m.put("startedAt", j.getStartedAt() != null ? j.getStartedAt().toString() : null);
         m.put("endedAt", j.getEndedAt() != null ? j.getEndedAt().toString() : null);
         m.put("transcurridoSegundos", seg);

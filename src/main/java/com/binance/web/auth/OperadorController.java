@@ -95,6 +95,65 @@ public class OperadorController {
         return ResponseEntity.ok(resultado);
     }
 
+    /**
+     * ADMIN: inicia la jornada de un operador (arranca su cronómetro), sin necesidad de que él
+     * mismo le dé al botón. Idempotente: si ya tiene una jornada en curso, la devuelve.
+     * Body opcional: { "modo": "VENTA_USDT" | "CAJA" }.
+     */
+    @PutMapping("/{id}/jornada/iniciar")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<?> iniciarJornadaDe(@org.springframework.web.bind.annotation.PathVariable Integer id,
+                                              @RequestBody(required = false) Map<String, String> body) {
+        Usuario u = usuarioRepository.findById(id).orElse(null);
+        if (u == null) return ResponseEntity.status(404).body(Map.of("error", "Operador no encontrado"));
+
+        JornadaTrabajo jornada = jornadaRepository
+                .findFirstByUsernameAndEndedAtIsNullOrderByStartedAtDesc(u.getUsername())
+                .orElse(null);
+        if (jornada == null) {
+            jornada = new JornadaTrabajo();
+            jornada.setUsername(u.getUsername());
+            jornada.setRol(u.getRol());
+            jornada.setStartedAt(LocalDateTime.now());
+            jornada.setModo(parseModo(body));
+            jornada = jornadaRepository.save(jornada);
+        }
+        return ResponseEntity.ok(Map.of(
+                "username", u.getUsername(),
+                "activa", true,
+                "modo", jornada.getModo() != null ? jornada.getModo().name() : null,
+                "startedAt", jornada.getStartedAt().toString()));
+    }
+
+    /** ADMIN: termina la jornada en curso de un operador (detiene su cronómetro). */
+    @PutMapping("/{id}/jornada/finalizar")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<?> finalizarJornadaDe(@org.springframework.web.bind.annotation.PathVariable Integer id) {
+        Usuario u = usuarioRepository.findById(id).orElse(null);
+        if (u == null) return ResponseEntity.status(404).body(Map.of("error", "Operador no encontrado"));
+
+        JornadaTrabajo jornada = jornadaRepository
+                .findFirstByUsernameAndEndedAtIsNullOrderByStartedAtDesc(u.getUsername())
+                .orElse(null);
+        if (jornada != null) {
+            jornada.setEndedAt(LocalDateTime.now());
+            jornadaRepository.save(jornada);
+        }
+        return ResponseEntity.ok(Map.of("username", u.getUsername(), "activa", false));
+    }
+
+    /** Lee el modo del body de forma tolerante: vacío/ inválido → null. */
+    private com.binance.web.Entity.ModoJornada parseModo(Map<String, String> body) {
+        if (body == null) return null;
+        String raw = body.get("modo");
+        if (raw == null || raw.isBlank()) return null;
+        try {
+            return com.binance.web.Entity.ModoJornada.valueOf(raw.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
     /** Tarifa por hora actual (COP). */
     @GetMapping("/tarifa")
     @PreAuthorize("hasRole('ADMIN')")

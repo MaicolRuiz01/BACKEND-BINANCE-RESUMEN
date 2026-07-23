@@ -34,8 +34,10 @@ public class P2PActiveOrderService {
     private static final ZoneId ZONE = ZoneId.of("America/Bogota");
     private static final DateTimeFormatter FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-    /** Estados de Binance que consideramos "activos" (no terminales). */
-    private static final Set<String> ACTIVE_STATUSES = Set.of("TRADING", "BUYER_PAYED", "PENDING");
+    /** Estados de Binance que consideramos "activos" (no terminales).
+     *  IN_APPEAL = venta en disputa/apelada: sigue "viva" (aún no se libera/cancela el cripto),
+     *  el cliente quiere verla en la vista P2P para gestionarla, así que la tratamos como activa. */
+    private static final Set<String> ACTIVE_STATUSES = Set.of("TRADING", "BUYER_PAYED", "PENDING", "IN_APPEAL");
 
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -228,6 +230,20 @@ public class P2PActiveOrderService {
         return getAllActiveOrders(); // siempre fresco desde Binance
     }
 
+    /**
+     * ¿Hay ventas P2P en curso ahora mismo? Lee el cache en memoria que ya mantiene
+     * detectStatusChanges() (poll cada 15s), así que NO hace llamadas extra a Binance.
+     * Lo usa el vigilante de jornada para saber si el operador está recibiendo órdenes.
+     */
+    public boolean hayOrdenesActivas() {
+        return !lastKnownStatus.isEmpty();
+    }
+
+    /** true si ya se hizo al menos un poll — para no alarmar antes de tener datos reales. */
+    public boolean yaHizoPrimerPoll() {
+        return firstPollDone;
+    }
+
     // ─────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────
@@ -279,6 +295,7 @@ public class P2PActiveOrderService {
             case "TRADING"     -> "En curso";
             case "BUYER_PAYED" -> "Pago recibido";
             case "PENDING"     -> "Pendiente";
+            case "IN_APPEAL"   -> "Apelada";
             default            -> status;
         };
     }

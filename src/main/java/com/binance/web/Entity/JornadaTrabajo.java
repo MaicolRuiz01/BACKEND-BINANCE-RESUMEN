@@ -47,4 +47,25 @@ public class JornadaTrabajo {
 
     /** null mientras la jornada sigue en curso. */
     private LocalDateTime endedAt;
+
+    /**
+     * En qué está trabajando: vendiendo USDT o haciendo caja. Lo elige el operador al
+     * iniciar la jornada y define qué vigilancia se le aplica (ver ModoJornada).
+     * Las jornadas viejas (anteriores a esta función) quedan en null y no se vigilan.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(length = 16)
+    private ModoJornada modo;
+
+    /**
+     * Última vez que el vigilante vio ventas P2P en curso. Es la referencia para contar
+     * los 5 minutos "en seco": si es null se cuenta desde startedAt.
+     */
+    private LocalDateTime ultimaVentaVistaAt;
+
+    /**
+     * Última vez que se mandó un aviso por Telegram de esta jornada. Sirve para no
+     * repetir el mensaje más seguido de la cuenta (cada 5 min en venta, cada hora en caja).
+     */
+    private LocalDateTime ultimaAlertaAt;
 }

@@ -24,11 +24,36 @@ public class ClienteServiceImpl implements ClienteService {
 	@Override
     public Cliente crearCliente(Cliente cliente) {
         cliente.setId(null); // asegúrate de que sea nuevo
+
+        // El nombre es lo único obligatorio.
+        if (cliente.getNombre() == null || cliente.getNombre().trim().isEmpty()) {
+            throw new IllegalArgumentException("El nombre del cliente es obligatorio");
+        }
+        cliente.setNombre(cliente.getNombre().trim());
+
+        // La wallet es UNIQUE en BD. Si viene vacía se guarda como null (múltiples null sí se
+        // permiten); si viniera como "" dos clientes sin wallet chocarían con el índice único.
+        cliente.setWallet(blankToNull(cliente.getWallet()));
+        cliente.setCorreo(blankToNull(cliente.getCorreo()));
+        cliente.setNameUser(blankToNull(cliente.getNameUser()));
+
+        // Si ya hay un cliente con esa wallet, avisamos claro (en vez de un 500 opaco).
+        if (cliente.getWallet() != null && clienteRepository.existsByWallet(cliente.getWallet())) {
+            throw new IllegalArgumentException("Ya existe un cliente con la wallet: " + cliente.getWallet());
+        }
+
         if (cliente.getSaldo() == null) {
             cliente.setSaldo(0.0);
         }
         cliente.setSaldoInicialDelDia(cliente.getSaldo());
         return clienteRepository.save(cliente);
+    }
+
+    /** Devuelve null si el texto es null o solo espacios; si no, lo recorta. */
+    private String blankToNull(String s) {
+        if (s == null) return null;
+        String t = s.trim();
+        return t.isEmpty() ? null : t;
     }
 
 	// (Si quieres conservar este helper, quítale cualquier anotación web)

@@ -40,9 +40,21 @@ public class SupplierController {
 	}
 
 	@PostMapping("/suppliers")
-	public ResponseEntity<Void> createSupplier(@RequestBody Supplier supplier) {
-    supplierService.saveSupplier(supplier);
-    return ResponseEntity.status(HttpStatus.CREATED).build();
+	public ResponseEntity<?> createSupplier(@RequestBody Supplier supplier) {
+    // Nombre obligatorio: se avisa claro en vez de dejar guardar un proveedor sin nombre.
+    if (supplier == null || supplier.getName() == null || supplier.getName().trim().isEmpty()) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(java.util.Map.of("message", "El nombre del proveedor es obligatorio"));
+    }
+    try {
+        supplier.setName(supplier.getName().trim());
+        supplierService.saveSupplier(supplier);
+        return ResponseEntity.status(HttpStatus.CREATED).body(supplier);
+    } catch (Exception e) {
+        String msg = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(java.util.Map.of("message", msg != null ? msg : "Error al crear el proveedor"));
+    }
 	}
 
 	@GetMapping("/{id}")

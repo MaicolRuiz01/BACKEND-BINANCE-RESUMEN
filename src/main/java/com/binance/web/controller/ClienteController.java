@@ -48,9 +48,18 @@ public class ClienteController {
 	}
 	
 	@PostMapping
-	public ResponseEntity<Cliente> crearCliente(@RequestBody Cliente cliente) {
-	    Cliente nuevo = clienteService.crearCliente(cliente);
-	    return ResponseEntity.status(HttpStatus.CREATED).body(nuevo);
+	public ResponseEntity<?> crearCliente(@RequestBody Cliente cliente) {
+	    try {
+	        Cliente nuevo = clienteService.crearCliente(cliente);
+	        return ResponseEntity.status(HttpStatus.CREATED).body(nuevo);
+	    } catch (IllegalArgumentException e) {
+	        // Validación de negocio (nombre faltante, wallet duplicada): mensaje claro al front.
+	        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", e.getMessage()));
+	    } catch (Exception e) {
+	        String msg = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
+	        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+	                .body(Map.of("message", msg != null ? msg : "Error al crear el cliente"));
+	    }
 	}
 
 	@PostMapping("/transferir")

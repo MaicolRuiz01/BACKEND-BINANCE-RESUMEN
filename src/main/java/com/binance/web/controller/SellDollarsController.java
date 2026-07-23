@@ -28,7 +28,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/sell-dollars")
 @RequiredArgsConstructor
@@ -111,8 +113,16 @@ public class SellDollarsController {
     }
     
     @PutMapping("/asignar/{id}")
-    public ResponseEntity<SellDollars> asignar(@PathVariable Integer id, @RequestBody SellDollarsDto dto) {
-        return ResponseEntity.ok(service.asignarVenta(id, dto));
+    public ResponseEntity<?> asignar(@PathVariable Integer id, @RequestBody SellDollarsDto dto) {
+        // Antes iba sin try/catch: cualquier fallo salía como un 500 opaco y el front
+        // mostraba "error" sin decir qué pasó. Ahora se devuelve el motivo real.
+        try {
+            return ResponseEntity.ok(service.asignarVenta(id, dto));
+        } catch (RuntimeException e) {
+            log.error("[asignarVenta] Error asignando venta {}: {}", id, e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("message", e.getMessage() != null ? e.getMessage() : "Error al asignar la venta"));
+        }
     }
     
     @PutMapping("/asignar-solana/{id}")

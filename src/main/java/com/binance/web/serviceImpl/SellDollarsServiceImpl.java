@@ -273,6 +273,11 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 	            clienteRepository.save(cliente);
 
 	        } else {
+	            // Si no vino ni cliente ni proveedor, antes se llamaba findById(null) y JPA
+	            // reventaba con un 500 opaco. Ahora se avisa claro qué falta.
+	            if (dto.getSupplier() == null) {
+	                throw new RuntimeException("Debe seleccionar un cliente o un proveedor para asignar la venta");
+	            }
 	            Supplier supplier = supplierRepository.findById(dto.getSupplier())
 	                    .orElseThrow(() -> new RuntimeException("Supplier no encontrado"));
 	            existing.setSupplier(supplier);

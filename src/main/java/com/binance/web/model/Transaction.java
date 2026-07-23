@@ -21,7 +21,13 @@ public class Transaction {
     private String orderId;
     @JsonProperty("transactionId")
     private String transactionId;
-    
+
+    // Tipo de orden de Binance Pay: PAY, PAY_REFUND, C2C, CRYPTO_BOX, PAYOUT, REMITTANCE, etc.
+    // Es la clave para identificar liquidaciones de apelaciones ("pago atrasado"), que NO son
+    // un C2C normal. Antes no se leía, por eso no se podían distinguir.
+    @JsonProperty("orderType")
+    private String orderType;
+
     // ✅ Agregado el campo 'currency' que contiene el símbolo de la criptomoneda
     @JsonProperty("currency")
     private String currency;

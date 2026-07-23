@@ -69,6 +69,73 @@ public class PaymentController {
 		}
 	}
 
+	/**
+	 * DIAGNÓSTICO (solo lectura): lista TODOS los movimientos de Binance Pay de una cuenta
+	 * (sin filtrar por día/tipo), con todos los campos relevantes. Sirve para inspeccionar
+	 * movimientos raros como el "pago atrasado" de una apelación resuelta y ver con qué
+	 * orderType / payer / receiver / id vienen, para luego construir el filtro correcto.
+	 * Ej: GET /api/binancepay-diagnostico?account=Luis
+	 */
+	@RequestMapping(value = "/binancepay-diagnostico", method = { RequestMethod.GET, RequestMethod.POST })
+	public ResponseEntity<List<Map<String, Object>>> diagnosticoBinancePay(@RequestParam(nameAccount) String account) {
+		List<Map<String, Object>> out = new ArrayList<>();
+		try {
+			for (Transaction tx : parseTransactions(binanceService.getPaymentHistory(account))) {
+				Map<String, Object> row = new java.util.LinkedHashMap<>();
+				row.put("fecha", tx.getTransactionTime());
+				row.put("monto", tx.getAmount());
+				row.put("moneda", tx.getCurrency());
+				row.put("orderType", tx.getOrderType());
+				row.put("orderId", tx.getOrderId());
+				row.put("transactionId", tx.getTransactionId());
+				row.put("payer", tx.getPayerInfo() != null ? tx.getPayerInfo().getName() : null);
+				row.put("receiver", tx.getReceiverInfo() != null ? tx.getReceiverInfo().getName() : null);
+				row.put("receiverBinanceId", tx.getReceiverInfo() != null ? tx.getReceiverInfo().getBinanceId() : null);
+				out.add(row);
+			}
+		} catch (Exception e) {
+			log.error("Error en diagnosticoBinancePay ({}): {}", account, e.getMessage(), e);
+			return ResponseEntity.status(500).body(out);
+		}
+		return ResponseEntity.ok(out);
+	}
+
+	/**
+	 * DIAGNÓSTICO (solo lectura): igual que el anterior pero barriendo TODAS las cuentas de una
+	 * sola vez, etiquetando de cuál viene cada movimiento. Sirve para localizar un movimiento
+	 * concreto (ej. el "pago atrasado" de −154.53) sin adivinar en qué cuenta está.
+	 * Ej: GET /api/binancepay-diagnostico-todas
+	 */
+	@RequestMapping(value = "/binancepay-diagnostico-todas", method = { RequestMethod.GET, RequestMethod.POST })
+	public ResponseEntity<List<Map<String, Object>>> diagnosticoBinancePayTodas() {
+		List<Map<String, Object>> out = new ArrayList<>();
+		try {
+			for (String cuenta : binanceService.getAllAccountNames()) {
+				try {
+					for (Transaction tx : parseTransactions(binanceService.getPaymentHistory(cuenta))) {
+						Map<String, Object> row = new java.util.LinkedHashMap<>();
+						row.put("cuenta", cuenta);
+						row.put("fecha", tx.getTransactionTime());
+						row.put("monto", tx.getAmount());
+						row.put("moneda", tx.getCurrency());
+						row.put("orderType", tx.getOrderType());
+						row.put("orderId", tx.getOrderId());
+						row.put("transactionId", tx.getTransactionId());
+						row.put("payer", tx.getPayerInfo() != null ? tx.getPayerInfo().getName() : null);
+						row.put("receiver", tx.getReceiverInfo() != null ? tx.getReceiverInfo().getName() : null);
+						out.add(row);
+					}
+				} catch (Exception e) {
+					log.warn("[DIAG] Binance Pay falló en cuenta {}: {}", cuenta, e.getMessage());
+				}
+			}
+		} catch (Exception e) {
+			log.error("Error en diagnosticoBinancePayTodas: {}", e.getMessage(), e);
+			return ResponseEntity.status(500).body(out);
+		}
+		return ResponseEntity.ok(out);
+	}
+
 	@GetMapping("/compras-binancepay")
 	public ResponseEntity<List<BuyDollarsDto>> getComprasNoRegistradas() {
 		List<BuyDollarsDto> resultados = new ArrayList<>();
