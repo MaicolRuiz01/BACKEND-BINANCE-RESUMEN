@@ -13,6 +13,9 @@ public interface JornadaTrabajoRepository extends JpaRepository<JornadaTrabajo, 
     /** Jornada EN CURSO de un usuario (la más reciente sin cerrar), si existe. */
     Optional<JornadaTrabajo> findFirstByUsernameAndEndedAtIsNullOrderByStartedAtDesc(String username);
 
+    /** TODAS las jornadas abiertas (sin cerrar) de un usuario — para cerrar duplicados/huérfanas. */
+    List<JornadaTrabajo> findByUsernameAndEndedAtIsNull(String username);
+
     /** Jornadas cuyo inicio cae dentro del rango [inicio, fin). Para el resumen por día. */
     List<JornadaTrabajo> findByStartedAtBetween(LocalDateTime inicio, LocalDateTime fin);
 
