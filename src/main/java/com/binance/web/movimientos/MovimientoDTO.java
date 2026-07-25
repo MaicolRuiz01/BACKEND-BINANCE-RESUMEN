@@ -28,10 +28,14 @@ public class MovimientoDTO {
     private Double saldoNuevo;
     private Double diferencia;
 
+    private Double saldoCajaResultante;
+    private Double saldoCajaDestinoResultante;
+
     /** Constructor liviano para la proyección JPQL de movimientos de caja (evita el N+1 del EAGER). */
     public MovimientoDTO(Integer id, String tipo, LocalDateTime fecha, Double monto,
                          String cuentaOrigen, String cuentaDestino, String caja, String cajaDestino,
-                         String pagoCliente, String pagoProveedor, String motivo) {
+                         String pagoCliente, String pagoProveedor, String motivo,
+                         Double saldoCajaResultante, Double saldoCajaDestinoResultante) {
         this.id = id;
         this.tipo = tipo;
         this.fecha = fecha;
@@ -43,6 +47,8 @@ public class MovimientoDTO {
         this.pagoCliente = pagoCliente;
         this.pagoProveedor = pagoProveedor;
         this.motivo = motivo;
+        this.saldoCajaResultante = saldoCajaResultante;
+        this.saldoCajaDestinoResultante = saldoCajaDestinoResultante;
     }
 
 }

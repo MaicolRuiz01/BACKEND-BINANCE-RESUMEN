@@ -347,7 +347,23 @@ public class MovimientoController {
         dto.setSaldoNuevo(movimiento.getSaldoNuevo());
         dto.setDiferencia(movimiento.getDiferencia());
 
+        // 🔹 Histórico de caja
+        dto.setSaldoCajaResultante(movimiento.getSaldoCajaResultante());
+        dto.setSaldoCajaDestinoResultante(movimiento.getSaldoCajaDestinoResultante());
+
         return dto;
+    }
+
+    /**
+     * Backfill de uso único: reconstruye el histórico de saldo de caja
+     * (saldoCajaResultante) de TODOS los movimientos existentes, para las cajas
+     * que ya tenían movimientos antes de que este campo existiera. Llamar una
+     * sola vez desde el navegador y ya.
+     */
+    @PostMapping("/admin/recalcular-historico-caja")
+    public ResponseEntity<?> recalcularHistoricoCaja() {
+        movimientoService.recalcularHistoricoCajaTodas();
+        return ResponseEntity.ok(Map.of("status", "ok"));
     }
     
     @GetMapping("/debug/time")

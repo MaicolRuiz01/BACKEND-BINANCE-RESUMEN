@@ -68,4 +68,23 @@ public class Movimiento {
      *  - null en movimientos viejos/otros tipos → se trata como "ya aplicado".
      */
     private Boolean comisionAplicada;
+
+    // ====== NUEVO: Histórico de caja ======
+    /**
+     * Saldo de la caja (campo "caja", es decir la caja ORIGEN/principal de este
+     * movimiento) INMEDIATAMENTE DESPUÉS de aplicar este movimiento. Se guarda al
+     * crear el movimiento, y se recalcula (junto con el de todos los movimientos
+     * posteriores en el tiempo de esa misma caja) si luego se edita o elimina este
+     * movimiento — así siempre queda un histórico confiable de cuánto tenía la
+     * caja en cada momento, para resolver discusiones de "se perdió dinero".
+     * Null en movimientos que no tocan ninguna caja, o en registros viejos aún no
+     * recalculados (ver backfill).
+     */
+    private Double saldoCajaResultante;
+
+    /**
+     * Igual que {@link #saldoCajaResultante} pero para la caja DESTINO
+     * (solo aplica a TRANSFERENCIA CAJA, que mueve dos cajas a la vez).
+     */
+    private Double saldoCajaDestinoResultante;
 }

@@ -58,7 +58,30 @@ public interface MovimientoService {
 	/** Igual que listarAjustesCaja pero acotado a un rango de fechas (para el bot de Telegram). */
 	List<Movimiento> listarAjustesCajaEntreFechas(Integer cajaId, LocalDateTime desde, LocalDateTime hasta);
 
+	/**
+	 * Saldo con el que cerró la caja ANTES de la fecha dada (normalmente medianoche de
+	 * hoy): es el saldoCajaResultante del último movimiento anterior a esa fecha, sin
+	 * importar a qué hora del día anterior haya ocurrido (9am, 10pm, 11pm, etc.).
+	 * Devuelve null si la caja no tiene movimientos previos con histórico calculado.
+	 * Se usa en el reporte de Telegram para mostrar el "saldo inicial del día".
+	 */
+	Double obtenerSaldoInicialDelDia(Integer cajaId, LocalDateTime desde);
+
 	/** Elimina un movimiento revirtiendo sus efectos de saldo (solo PAGO PROVEEDOR por ahora). */
 	void eliminarMovimiento(Integer id);
+
+	/**
+	 * Histórico de caja: propaga un delta de saldo a todos los movimientos de esa
+	 * caja (como origen o destino) que ocurrieron DESPUÉS de la fecha dada — nunca
+	 * toca los anteriores. Se usa cuando se edita o elimina un movimiento viejo que
+	 * afectaba esa caja, para que el histórico siga siendo consistente hacia adelante.
+	 */
+	void propagarDeltaCaja(Integer cajaId, LocalDateTime fechaDesde, double delta);
+
+	/** Recalcula desde cero el saldoCajaResultante de TODOS los movimientos de una caja (backfill / reparación). */
+	void recalcularHistoricoCaja(Integer cajaId);
+
+	/** Corre recalcularHistoricoCaja para todas las cajas existentes (backfill inicial, uso único). */
+	void recalcularHistoricoCajaTodas();
 
 }
