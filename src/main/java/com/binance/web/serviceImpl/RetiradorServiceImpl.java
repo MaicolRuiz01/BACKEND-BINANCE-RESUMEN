@@ -30,6 +30,10 @@ public class RetiradorServiceImpl implements RetiradorService {
     private static final double PAGO_COMPLETO = 4.0; // $4.000 COP (cajero + corresponsal)
     private static final ZoneId ZONE_BOGOTA = ZoneId.of("America/Bogota");
 
+    private static double round2(double v) {
+        return Math.round(v * 100.0) / 100.0;
+    }
+
     private final RetiradorRepository retiradorRepository;
     private final SolicitudRetiroRepository solicitudRepository;
     private final AccountCopRepository accountCopRepository;
@@ -183,7 +187,15 @@ public class RetiradorServiceImpl implements RetiradorService {
             AccountCop cuenta = detalle.getCuentaCop();
             double comprometido = solicitudRepository.sumComprometidoPorCuenta(cuenta.getId());
             double disponible = cuenta.getBalance() - comprometido;
-            if (disponible < detalle.totalDetalle()) {
+            // Tolerancia = 0.50, ni un peso más: en COP no existen los centavos, y el
+            // saldo se MUESTRA redondeado al peso más cercano (ej. $999.6 se ve como
+            // "$1.000"). Si no se permite ese margen, pedir exactamente lo que la
+            // pantalla muestra podría rechazarse por el redondeo de la vista — no es
+            // plata de más, es la definición exacta de "lo que dice la pantalla es lo
+            // que se puede retirar". La corrección real es que el saldo ahora se
+            // redondea SIEMPRE al descontarlo (ver confirmarInterno), así que este
+            // margen debería usarse cada vez menos.
+            if (disponible < detalle.totalDetalle() - 0.50) {
                 throw new IllegalArgumentException(
                         "Saldo insuficiente en la cuenta " + cuenta.getName() + " (saldo: $"
                                 + String.format("%,.0f", cuenta.getBalance())
@@ -221,7 +233,7 @@ public class RetiradorServiceImpl implements RetiradorService {
             double comprometidoCajero = solicitudRepository.sumMontoCajeroComprometidoPorCuenta(cuenta.getId());
             double cupoHoy = cuenta.getCupoCajeroDisponibleHoy() != null ? cuenta.getCupoCajeroDisponibleHoy() : 0.0;
             double disponibleCajero = cupoHoy - comprometidoCajero;
-            if (detalle.getMontoCajero() > disponibleCajero) {
+            if (detalle.getMontoCajero() > disponibleCajero + 0.5) {
                 throw new IllegalArgumentException(
                         "Cupo diario de CAJERO agotado en la cuenta " + cuenta.getName() + " (cupo de hoy: $"
                                 + String.format("%,.0f", cupoHoy)
@@ -236,7 +248,7 @@ public class RetiradorServiceImpl implements RetiradorService {
             double comprometidoCorresponsal = solicitudRepository.sumMontoCorresponsalComprometidoPorCuenta(cuenta.getId());
             double cupoHoy = cuenta.getCupoCorresponsalDisponibleHoy() != null ? cuenta.getCupoCorresponsalDisponibleHoy() : 0.0;
             double disponibleCorresponsal = cupoHoy - comprometidoCorresponsal;
-            if (detalle.getMontoCorresponsal() > disponibleCorresponsal) {
+            if (detalle.getMontoCorresponsal() > disponibleCorresponsal + 0.5) {
                 throw new IllegalArgumentException(
                         "Cupo diario de CORRESPONSAL agotado en la cuenta " + cuenta.getName() + " (cupo de hoy: $"
                                 + String.format("%,.0f", cupoHoy)
@@ -350,7 +362,8 @@ public class RetiradorServiceImpl implements RetiradorService {
             double montoCorresponsalUsar = detalle.montoCorresponsalFinal();
             double totalUsar = montoCajeroUsar + montoCorresponsalUsar;
 
-            if (cuenta.getBalance() < totalUsar) {
+            // Misma tolerancia mínima (solo ruido de coma flotante) que en validarSaldoSuficiente.
+            if (cuenta.getBalance() < totalUsar - 0.50) {
                 throw new IllegalStateException(
                         "Saldo insuficiente en la cuenta " + cuenta.getName() + " (disponible: $"
                                 + String.format("%,.0f", cuenta.getBalance()) + ", requerido: $"
@@ -383,9 +396,19 @@ public class RetiradorServiceImpl implements RetiradorService {
         }
 
         Retirador retirador = solicitud.getRetirador();
-        Efectivo caja = retirador.getEfectivo();
+        // Bloqueo exclusivo de la fila de la caja: si dos confirmaciones de retiro
+        // llegan casi al mismo tiempo (ej. botón "Todo" confirmando varias seguidas),
+        // la segunda espera a que la primera termine en vez de leer un saldo viejo y
+        // pisar la suma de la primera. Sin esto se perdían sumas de caja en silencio.
+        Efectivo caja = retirador.getEfectivo() != null
+                ? efectivoRepository.findByIdForUpdate(retirador.getEfectivo().getId()).orElse(retirador.getEfectivo())
+                : null;
         LocalDateTime ahora = LocalDateTime.now(ZONE_BOGOTA);
         double totalReal = 0.0;
+        // Histórico de caja: acumulador que va sumando lo que entra a la caja a
+        // medida que se crean los movimientos, para que cada uno quede con el
+        // saldo de caja que le correspondía EN ESE MOMENTO (no solo el total final).
+        double cajaSaldoAcumulado = caja != null && caja.getSaldo() != null ? caja.getSaldo() : 0.0;
 
         for (DetalleRetiro detalle : solicitud.getDetalles()) {
             AccountCop cuenta = detalle.getCuentaCop();
@@ -399,7 +422,7 @@ public class RetiradorServiceImpl implements RetiradorService {
             totalReal += montoDet;
             boolean esBanco = "BANCOLOMBIA".equalsIgnoreCase(String.valueOf(cuenta.getBankType()));
             double deduccionHoy = esBanco ? montoDet : (montoDet + montoDet * 0.004);
-            cuenta.setBalance(cuenta.getBalance() - deduccionHoy);
+            cuenta.setBalance(round2(cuenta.getBalance() - deduccionHoy));
 
             if (cuenta.getBankType() != null) {
                 if (montoCajeroUsar > 0) {
@@ -437,6 +460,7 @@ public class RetiradorServiceImpl implements RetiradorService {
             // Registrar el/los movimiento(s) de RETIRO para que aparezcan en el historial de la
             // cuenta y de la caja. Antes NO se creaba movimiento → el saldo se movía "invisible".
             if (montoCajeroUsar > 0) {
+                cajaSaldoAcumulado = round2(cajaSaldoAcumulado + montoCajeroUsar);
                 movimientoRepository.save(Movimiento.builder()
                         .tipo("RETIRO CAJERO")
                         .fecha(ahora)
@@ -446,9 +470,11 @@ public class RetiradorServiceImpl implements RetiradorService {
                         .comision(montoCajeroUsar * 0.004)
                         .comisionAplicada(!esBanco)
                         .motivo(motivoCajero)
+                        .saldoCajaResultante(cajaSaldoAcumulado)
                         .build());
             }
             if (montoCorresponsalUsar > 0) {
+                cajaSaldoAcumulado = round2(cajaSaldoAcumulado + montoCorresponsalUsar);
                 movimientoRepository.save(Movimiento.builder()
                         .tipo("RETIRO CORRESPONSAL")
                         .fecha(ahora)
@@ -458,6 +484,7 @@ public class RetiradorServiceImpl implements RetiradorService {
                         .comision(montoCorresponsalUsar * 0.004)
                         .comisionAplicada(!esBanco)
                         .motivo(motivoCorresponsal)
+                        .saldoCajaResultante(cajaSaldoAcumulado)
                         .build());
             }
         }
@@ -674,7 +701,7 @@ public class RetiradorServiceImpl implements RetiradorService {
             double deduccionHoy = esBanco ? dto.getMonto() : (dto.getMonto() + comision);
             if (cuenta.getBalance() < deduccionHoy)
                 throw new IllegalStateException("Saldo insuficiente en la cuenta COP");
-            cuenta.setBalance(cuenta.getBalance() - deduccionHoy);
+            cuenta.setBalance(round2(cuenta.getBalance() - deduccionHoy));
             accountCopRepository.save(cuenta);
 
             movimientoRepository.save(Movimiento.builder()
@@ -687,7 +714,7 @@ public class RetiradorServiceImpl implements RetiradorService {
                     .build());
 
         } else if ("CAJA".equalsIgnoreCase(dto.getFuente())) {
-            Efectivo caja = efectivoRepository.findById(dto.getCajaId())
+            Efectivo caja = efectivoRepository.findByIdForUpdate(dto.getCajaId())
                     .orElseThrow(() -> new RuntimeException("Caja no encontrada: " + dto.getCajaId()));
             if (caja.getSaldo() < dto.getMonto())
                 throw new IllegalStateException("Saldo insuficiente en la caja");
@@ -702,6 +729,7 @@ public class RetiradorServiceImpl implements RetiradorService {
                     .caja(caja)
                     .comision(0.0)
                     .comisionAplicada(true)
+                    .saldoCajaResultante(caja.getSaldo())
                     .build());
 
         } else {

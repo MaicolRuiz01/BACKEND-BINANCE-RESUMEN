@@ -32,6 +32,8 @@ public class GastoServiceImplement implements GastoService{
     private EfectivoRepository efectivoRepository;
     @Autowired
     private MovimientoRepository movimientoRepository;
+    @Autowired
+    private com.binance.web.movimientos.MovimientoService movimientoService;
 
     public List<Gasto> findAll() {
         return gastoRepository.findAll();
@@ -110,6 +112,7 @@ public class GastoServiceImplement implements GastoService{
                     .comision(0.0)
                     .comisionAplicada(true)
                     .motivo(nuevoGasto.getDescripcion())
+                    .saldoCajaResultante(caja.getSaldo())
                     .build());
             nuevoGasto.setMovimientoId(mov.getId());
         }
@@ -147,6 +150,12 @@ public class GastoServiceImplement implements GastoService{
 
             caja.setSaldo(caja.getSaldo() + monto);
             efectivoRepository.save(caja);
+
+            // Histórico de caja: el gasto restaba de la caja, así que al borrarlo hay
+            // que devolver ese monto a todos los movimientos posteriores (nunca a los anteriores).
+            if (mov != null) {
+                movimientoService.propagarDeltaCaja(caja.getId(), mov.getFecha(), monto);
+            }
         }
 
         // Borrar el movimiento asociado para que no quede colgado ni el scheduler lo procese.

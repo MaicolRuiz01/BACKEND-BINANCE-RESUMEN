@@ -407,8 +407,12 @@ public class TelegramWebhookService {
         java.util.List<com.binance.web.movimientos.MovimientoDTO> movimientos = movimientoService
                 .listarMovimientosCajaLiteEntreFechas(cajaId, desde, hasta);
         java.util.List<Movimiento> ajustes = movimientoService.listarAjustesCajaEntreFechas(cajaId, desde, hasta);
+        // Saldo con el que cerró la caja el día (o sesión) anterior: el saldoCajaResultante
+        // del último movimiento antes de medianoche de hoy, sea cual sea la hora en la que
+        // haya ocurrido (9am, 10pm, 11pm, etc.) — así el retirador siempre sabe con cuánto arrancó.
+        Double saldoInicialDelDia = movimientoService.obtenerSaldoInicialDelDia(cajaId, desde);
 
-        String reporte = buildReporteMovimientos(retirador, movimientos, ajustes);
+        String reporte = buildReporteMovimientos(retirador, movimientos, ajustes, saldoInicialDelDia);
         telegramService.sendMessage(String.valueOf(telegramUserId), reporte);
 
         // Sin popup: la respuesta ya se mandó como mensaje nuevo.
@@ -439,7 +443,8 @@ public class TelegramWebhookService {
 
     private String buildReporteMovimientos(Retirador retirador,
             java.util.List<com.binance.web.movimientos.MovimientoDTO> movimientos,
-            java.util.List<Movimiento> ajustes) {
+            java.util.List<Movimiento> ajustes,
+            Double saldoInicialDelDia) {
 
         java.time.format.DateTimeFormatter fmtHora = java.time.format.DateTimeFormatter.ofPattern("HH:mm");
         java.util.List<java.util.AbstractMap.SimpleEntry<java.time.LocalDateTime, String>> entradas = new java.util.ArrayList<>();
@@ -606,6 +611,10 @@ public class TelegramWebhookService {
 
         StringBuilder sb = new StringBuilder();
         sb.append("📊 *Movimientos de hoy (").append(fechaHoy).append(")*\n");
+        if (saldoInicialDelDia != null) {
+            sb.append("🌅 Caja inicial del día: *$").append(String.format("%,.0f", saldoInicialDelDia))
+                    .append("*\n");
+        }
         sb.append("💰 Caja actual: *$").append(String.format("%,.0f", retirador.getEfectivo().getSaldo()))
                 .append("*\n\n");
 

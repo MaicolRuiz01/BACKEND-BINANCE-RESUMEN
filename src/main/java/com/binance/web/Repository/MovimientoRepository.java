@@ -3,6 +3,7 @@ package com.binance.web.Repository;
 import java.time.LocalDateTime;
 import java.util.List;
 
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -34,7 +35,8 @@ public interface MovimientoRepository extends JpaRepository<Movimiento, Integer>
 	 */
 	@Query("SELECT new com.binance.web.movimientos.MovimientoDTO(" +
 	       "m.id, m.tipo, m.fecha, m.monto, " +
-	       "co.name, cd.name, cj.name, cjd.name, COALESCE(pc.nombre, cor.nombre), COALESCE(pp.name, po.name), m.motivo) " +
+	       "co.name, cd.name, cj.name, cjd.name, COALESCE(pc.nombre, cor.nombre), COALESCE(pp.name, po.name), m.motivo, " +
+	       "m.saldoCajaResultante, m.saldoCajaDestinoResultante) " +
 	       "FROM Movimiento m " +
 	       "LEFT JOIN m.cuentaOrigen co " +
 	       "LEFT JOIN m.cuentaDestino cd " +
@@ -51,7 +53,8 @@ public interface MovimientoRepository extends JpaRepository<Movimiento, Integer>
 	/** Igual que findMovimientosCajaLite pero acotado a un rango de fechas (para el bot de Telegram). */
 	@Query("SELECT new com.binance.web.movimientos.MovimientoDTO(" +
 	       "m.id, m.tipo, m.fecha, m.monto, " +
-	       "co.name, cd.name, cj.name, cjd.name, COALESCE(pc.nombre, cor.nombre), COALESCE(pp.name, po.name), m.motivo) " +
+	       "co.name, cd.name, cj.name, cjd.name, COALESCE(pc.nombre, cor.nombre), COALESCE(pp.name, po.name), m.motivo, " +
+	       "m.saldoCajaResultante, m.saldoCajaDestinoResultante) " +
 	       "FROM Movimiento m " +
 	       "LEFT JOIN m.cuentaOrigen co " +
 	       "LEFT JOIN m.cuentaDestino cd " +
@@ -109,5 +112,29 @@ public interface MovimientoRepository extends JpaRepository<Movimiento, Integer>
             LocalDateTime desde,
             LocalDateTime hasta
     );
+
+    // ── Histórico de caja: recalculo en cascada al editar/eliminar ──
+
+    /** Movimientos de esta caja (como origen) que pasaron DESPUÉS de la fecha dada — para propagar el delta hacia adelante. */
+    List<Movimiento> findByCaja_IdAndFechaAfterOrderByFechaAsc(Integer cajaId, LocalDateTime fecha);
+
+    /** Igual, pero para movimientos donde esta caja es la DESTINO (ej. TRANSFERENCIA CAJA). */
+    List<Movimiento> findByCajaDestino_IdAndFechaAfterOrderByFechaAsc(Integer cajaId, LocalDateTime fecha);
+
+    /** Todos los movimientos de una caja (origen o destino), del más viejo al más nuevo — para el backfill inicial. */
+    List<Movimiento> findByCaja_IdOrCajaDestino_IdOrderByFechaAsc(Integer cajaId1, Integer cajaId2);
+
+    /**
+     * Último movimiento de una caja (como origen o destino) ANTES de la fecha dada,
+     * el más reciente primero. Se usa Pageable en vez de un derivado "findFirstBy...Or...And..."
+     * porque la generación de queries de Spring Data mezcla mal el OR y el AND en un
+     * mismo nombre de método (quedaría "caja=? OR (cajaDestino=? AND fecha<?)" en vez
+     * de "(caja=? OR cajaDestino=?) AND fecha<?"). Con @Query se controla exacto.
+     * Se usa para saber con qué saldo cerró la caja el día (o sesión) anterior.
+     */
+    @Query("SELECT m FROM Movimiento m WHERE (m.caja.id = :cajaId OR m.cajaDestino.id = :cajaId) " +
+           "AND m.fecha < :fecha ORDER BY m.fecha DESC")
+    List<Movimiento> findUltimoMovimientoDeCajaAntesDe(@Param("cajaId") Integer cajaId,
+            @Param("fecha") LocalDateTime fecha, Pageable pageable);
 
 }
