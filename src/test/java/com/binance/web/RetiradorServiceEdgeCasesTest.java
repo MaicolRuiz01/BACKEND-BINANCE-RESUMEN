@@ -397,6 +397,55 @@ public class RetiradorServiceEdgeCasesTest {
                 "BUG confirmado: se creó una solicitud con monto total negativo");
     }
 
+    @Test
+    void crearSolicitud_saldoConRuidoDeComaFlotante_noRechazaUnRetiroPorElTotalExacto() {
+        // Caso real reportado por Milton: la cuenta MUESTRA $1.100 (formateado a
+        // enteros) pero por dentro, tras muchas sumas/restas de "double" (4x1000,
+        // etc.) sin redondear siempre, el balance real es algo como
+        // 1099.9999999998 en vez de 1100.0 exacto. Pedir un retiro por el saldo
+        // EXACTO que la app muestra ($1.100) se rechazaba con "saldo insuficiente"
+        // aunque "disponible" y "solicitado" se veían idénticos en el mensaje.
+        cuenta.setBalance(1099.9999999998);
+
+        SolicitudRetiroRequestDto request = new SolicitudRetiroRequestDto();
+        request.setRetiradorId(1L);
+        SolicitudRetiroRequestDto.DetalleDto dto = new SolicitudRetiroRequestDto.DetalleDto();
+        dto.setCuentaCopId(1);
+        dto.setTipoRetiro(TipoRetiro.CAJERO);
+        dto.setMontoCajero(1100.0);
+        request.setDetalles(List.of(dto));
+
+        when(retiradorRepository.findById(1L)).thenReturn(Optional.of(retirador));
+        when(accountCopRepository.findById(1)).thenReturn(Optional.of(cuenta));
+        when(solicitudRepository.sumComprometidoPorCuenta(anyInt())).thenReturn(0.0);
+        when(solicitudRepository.sumMontoCajeroComprometidoPorCuenta(anyInt())).thenReturn(0.0);
+        when(solicitudRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        SolicitudRetiro creada = assertDoesNotThrow(() -> retiradorService.crearSolicitud(request),
+                "una diferencia menor a $1 por ruido de coma flotante no debe rechazar el retiro");
+        assertEquals(1100.0, creada.getTotalMonto());
+    }
+
+    @Test
+    void crearSolicitud_saldoRealmenteInsuficiente_siSeRechaza() {
+        // Control: una diferencia real (no ruido) SÍ debe seguir rechazándose.
+        cuenta.setBalance(1000.0);
+
+        SolicitudRetiroRequestDto request = new SolicitudRetiroRequestDto();
+        request.setRetiradorId(1L);
+        SolicitudRetiroRequestDto.DetalleDto dto = new SolicitudRetiroRequestDto.DetalleDto();
+        dto.setCuentaCopId(1);
+        dto.setTipoRetiro(TipoRetiro.CAJERO);
+        dto.setMontoCajero(1100.0);
+        request.setDetalles(List.of(dto));
+
+        when(retiradorRepository.findById(1L)).thenReturn(Optional.of(retirador));
+        when(accountCopRepository.findById(1)).thenReturn(Optional.of(cuenta));
+        when(solicitudRepository.sumComprometidoPorCuenta(anyInt())).thenReturn(0.0);
+
+        assertThrows(IllegalArgumentException.class, () -> retiradorService.crearSolicitud(request));
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     // pagarRetirador — monto/fuente inválidos
     // ═══════════════════════════════════════════════════════════════════════

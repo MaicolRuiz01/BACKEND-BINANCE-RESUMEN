@@ -76,20 +76,20 @@ public class TelegramReporteMovimientosTest {
         retirador.setEfectivo(caja);
 
         buildReporteMovimientos = TelegramWebhookService.class.getDeclaredMethod(
-                "buildReporteMovimientos", Retirador.class, List.class, List.class);
+                "buildReporteMovimientos", Retirador.class, List.class, List.class, Double.class);
         buildReporteMovimientos.setAccessible(true);
     }
 
     private String reporte(List<MovimientoDTO> movimientos) throws Exception {
-        return (String) buildReporteMovimientos.invoke(webhookService, retirador, movimientos, Collections.emptyList());
+        return (String) buildReporteMovimientos.invoke(webhookService, retirador, movimientos, Collections.emptyList(), null);
     }
 
     private MovimientoDTO retiro(int id, String tipo, LocalDateTime fecha, double monto, String cuenta) {
-        return new MovimientoDTO(id, tipo, fecha, monto, cuenta, null, null, null, null, null, null);
+        return new MovimientoDTO(id, tipo, fecha, monto, cuenta, null, null, null, null, null, null, null, null);
     }
 
     private MovimientoDTO retiroConMotivo(int id, String tipo, LocalDateTime fecha, double monto, String cuenta, String motivo) {
-        return new MovimientoDTO(id, tipo, fecha, monto, cuenta, null, null, null, null, null, motivo);
+        return new MovimientoDTO(id, tipo, fecha, monto, cuenta, null, null, null, null, null, motivo, null, null);
     }
 
     @Test

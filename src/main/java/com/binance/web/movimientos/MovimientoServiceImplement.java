@@ -106,6 +106,8 @@ public class MovimientoServiceImplement implements MovimientoService {
 				.caja(origen)          // caja origen
 				.cajaDestino(destino)  // caja destino
 				.comision(0.0)
+				.saldoCajaResultante(origen.getSaldo())
+				.saldoCajaDestinoResultante(destino.getSaldo())
 				.build();
 
 		return movimientoRepository.save(mov);
@@ -190,6 +192,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 
 	    double saldoCaja = caja.getSaldo() != null ? caja.getSaldo() : 0.0;
 	    caja.setSaldo(round2(saldoCaja + monto));
+	    mov.setSaldoCajaResultante(caja.getSaldo());
 
 	    accountCopRepository.save(cuentaOrigen);
 	    efectivoRepository.save(caja);
@@ -208,6 +211,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 
 		cuentaDestino.setBalance(cuentaDestino.getBalance() + monto);
 		caja.setSaldo(caja.getSaldo() - monto);
+		mov.setSaldoCajaResultante(caja.getSaldo());
 		accountCopRepository.save(cuentaDestino);
 		efectivoRepository.save(caja);
 
@@ -278,6 +282,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 
 			// Crear el objeto Movimiento
 			pagoProveedor.setCaja(caja);
+			pagoProveedor.setSaldoCajaResultante(caja.getSaldo());
 			pagoProveedor.setComision(0.0); // No hay comisión por pagos en efectivo
 		} else if (proveedorOrigenId != null) {
 			Supplier proveedorOrigen = supplierRepository.findById(proveedorOrigenId)
@@ -341,6 +346,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 		mov.setComision(0.0);
 		mov.setCaja(caja);                 // entra a esta caja
 		mov.setProveedorOrigen(proveedor); // el proveedor es el origen del dinero
+		mov.setSaldoCajaResultante(caja.getSaldo());
 		return movimientoRepository.save(mov);
 	}
 
@@ -376,6 +382,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 		mov.setComision(0.0);
 		mov.setCaja(caja);                 // entra a esta caja
 		mov.setClienteOrigen(cliente);     // el cliente es el origen del dinero
+		mov.setSaldoCajaResultante(caja.getSaldo());
 		return movimientoRepository.save(mov);
 	}
 
@@ -427,6 +434,13 @@ public class MovimientoServiceImplement implements MovimientoService {
 
 		double montoViejo    = m.getMonto() != null ? m.getMonto() : 0.0;
 		double comisionVieja = m.getComision() != null ? m.getComision() : 0.0;
+
+		// Histórico de caja: snapshot ANTES de tocar nada, para poder calcular el
+		// delta exacto que hay que propagar hacia adelante en el tiempo.
+		Efectivo cajaOrigenAntes = m.getCaja();
+		Efectivo cajaDestinoAntes = m.getCajaDestino();
+		Double saldoCajaOrigenAntes = cajaOrigenAntes != null ? cajaOrigenAntes.getSaldo() : null;
+		Double saldoCajaDestinoAntes = cajaDestinoAntes != null ? cajaDestinoAntes.getSaldo() : null;
 
 		// ── 1) REVERTIR el efecto viejo sobre los saldos (mismo criterio que eliminarMovimiento) ──
 		if ("PAGO PROVEEDOR".equals(tipo)) {
@@ -593,6 +607,37 @@ public class MovimientoServiceImplement implements MovimientoService {
 			}
 		}
 
+		// ── 4) Histórico de caja: recalcular hacia adelante (NUNCA hacia atrás) ──
+		boolean cajaOrigenCambio = cajaOrigenAntes != null && m.getCaja() != null
+				&& !cajaOrigenAntes.getId().equals(m.getCaja().getId());
+		if (cajaOrigenCambio) {
+			// Caso raro: el movimiento se reasignó a OTRA caja. No tiene sentido un
+			// delta entre dos cajas distintas, así que recalculamos ambas por completo.
+			recalcularHistoricoCaja(cajaOrigenAntes.getId());
+			recalcularHistoricoCaja(m.getCaja().getId());
+		} else if (m.getCaja() != null && saldoCajaOrigenAntes != null) {
+			double deltaCaja = round2(m.getCaja().getSaldo() - saldoCajaOrigenAntes);
+			if (deltaCaja != 0.0) {
+				Double resultanteViejo = m.getSaldoCajaResultante();
+				double base = resultanteViejo != null ? resultanteViejo : saldoCajaOrigenAntes;
+				m.setSaldoCajaResultante(round2(base + deltaCaja));
+				propagarDeltaCaja(m.getCaja().getId(), m.getFecha(), deltaCaja);
+			} else if (m.getSaldoCajaResultante() == null) {
+				m.setSaldoCajaResultante(m.getCaja().getSaldo());
+			}
+		}
+		if (m.getCajaDestino() != null && saldoCajaDestinoAntes != null) {
+			double deltaCajaDestino = round2(m.getCajaDestino().getSaldo() - saldoCajaDestinoAntes);
+			if (deltaCajaDestino != 0.0) {
+				Double resultanteDestinoViejo = m.getSaldoCajaDestinoResultante();
+				double baseDestino = resultanteDestinoViejo != null ? resultanteDestinoViejo : saldoCajaDestinoAntes;
+				m.setSaldoCajaDestinoResultante(round2(baseDestino + deltaCajaDestino));
+				propagarDeltaCaja(m.getCajaDestino().getId(), m.getFecha(), deltaCajaDestino);
+			} else if (m.getSaldoCajaDestinoResultante() == null) {
+				m.setSaldoCajaDestinoResultante(m.getCajaDestino().getSaldo());
+			}
+		}
+
 		return movimientoRepository.save(m);
 	}
 
@@ -642,6 +687,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 		pagoCaja.setCaja(cajaDestino);
 		pagoCaja.setClienteOrigen(clienteOrigen);
 		pagoCaja.setMonto(monto);
+		pagoCaja.setSaldoCajaResultante(cajaDestino.getSaldo());
 		return movimientoRepository.save(pagoCaja);
 	}
 
@@ -708,6 +754,122 @@ public class MovimientoServiceImplement implements MovimientoService {
 		return Math.round(v * 100.0) / 100.0;
 	}
 
+	// ══════════════════════════════════════════════════════════════════
+	// Histórico de caja: saldoCajaResultante por movimiento
+	// ══════════════════════════════════════════════════════════════════
+
+	/**
+	 * Propaga un delta de saldo a todos los movimientos de una caja (como origen
+	 * o como destino) que ocurrieron DESPUÉS de la fecha dada. Se usa al editar o
+	 * eliminar un movimiento viejo: los movimientos ANTERIORES nunca se tocan
+	 * (ya eran un hecho histórico antes de la corrección), pero todo lo que pasó
+	 * después debe correrse por el mismo delta para que el histórico siga
+	 * cuadrando con el saldo real actual de la caja.
+	 */
+	@Override
+	@Transactional
+	public void propagarDeltaCaja(Integer cajaId, LocalDateTime fechaDesde, double delta) {
+		if (cajaId == null || fechaDesde == null || delta == 0.0) return;
+
+		List<Movimiento> comoOrigen = movimientoRepository.findByCaja_IdAndFechaAfterOrderByFechaAsc(cajaId, fechaDesde);
+		for (Movimiento post : comoOrigen) {
+			if (post.getSaldoCajaResultante() != null) {
+				post.setSaldoCajaResultante(round2(post.getSaldoCajaResultante() + delta));
+				movimientoRepository.save(post);
+			}
+		}
+		List<Movimiento> comoDestino = movimientoRepository.findByCajaDestino_IdAndFechaAfterOrderByFechaAsc(cajaId, fechaDesde);
+		for (Movimiento post : comoDestino) {
+			if (post.getSaldoCajaDestinoResultante() != null) {
+				post.setSaldoCajaDestinoResultante(round2(post.getSaldoCajaDestinoResultante() + delta));
+				movimientoRepository.save(post);
+			}
+		}
+	}
+
+	/**
+	 * Cuánto sumó/restó ESTE movimiento a la caja indicada (positivo = entró,
+	 * negativo = salió), usado solo para reconstruir el histórico desde cero
+	 * (backfill/reparación) — no para la operación normal de crear/editar.
+	 */
+	private double deltaParaCaja(Movimiento m, Integer cajaId) {
+		boolean esOrigen = m.getCaja() != null && cajaId.equals(m.getCaja().getId());
+		double monto = m.getMonto() != null ? m.getMonto() : 0.0;
+
+		if (!esOrigen) {
+			// Hoy solo TRANSFERENCIA CAJA usa cajaDestino, y siempre ENTRA a la caja destino.
+			return monto;
+		}
+
+		String tipo = m.getTipo() != null ? m.getTipo() : "";
+		switch (tipo) {
+			case "DEPOSITO":
+			case "TRANSFERENCIA CAJA":
+			case "PAGO PROVEEDOR":
+			case "PAGO RETIRADOR":
+			case "GASTO":
+				return -monto;
+			case "PRESTAMO PROVEEDOR A CAJA":
+			case "PRESTAMO CLIENTE A CAJA":
+			case "PAGO CLIENTE A CAJA":
+			case "PAGO PROVEEDOR A CAJA": // tipo legado
+				return monto;
+			case "AJUSTE_SALDO_CAJA":
+				return m.getDiferencia() != null ? m.getDiferencia() : 0.0;
+			default:
+				if (tipo.startsWith("RETIRO")) return monto;
+				return 0.0;
+		}
+	}
+
+	/**
+	 * Reconstruye desde cero el saldoCajaResultante de TODOS los movimientos de
+	 * una caja, ordenados del más viejo al más nuevo. El punto de partida se
+	 * calcula ("ancla") de forma que, al reproducir todo el historial, el
+	 * resultado del último movimiento cuadre EXACTO con el saldo real actual de
+	 * la caja — así no importa si hubo algún ajuste fuera del historial de
+	 * movimientos, el backfill igual queda consistente con la realidad de hoy.
+	 */
+	@Override
+	@Transactional
+	public void recalcularHistoricoCaja(Integer cajaId) {
+		if (cajaId == null) return;
+		Efectivo caja = efectivoRepository.findById(cajaId)
+				.orElseThrow(() -> new RuntimeException("Caja no encontrada: " + cajaId));
+
+		List<Movimiento> movimientos = movimientoRepository.findByCaja_IdOrCajaDestino_IdOrderByFechaAsc(cajaId, cajaId);
+
+		double sumaDeltas = 0.0;
+		for (Movimiento m : movimientos) {
+			sumaDeltas += deltaParaCaja(m, cajaId);
+		}
+
+		double saldoActual = caja.getSaldo() != null ? caja.getSaldo() : 0.0;
+		double ancla = round2(saldoActual - sumaDeltas);
+
+		double acumulado = ancla;
+		for (Movimiento m : movimientos) {
+			acumulado = round2(acumulado + deltaParaCaja(m, cajaId));
+			boolean esOrigen = m.getCaja() != null && cajaId.equals(m.getCaja().getId());
+			if (esOrigen) {
+				m.setSaldoCajaResultante(acumulado);
+			} else {
+				m.setSaldoCajaDestinoResultante(acumulado);
+			}
+			movimientoRepository.save(m);
+		}
+	}
+
+	/** Backfill inicial de uso único: recalcula el histórico de TODAS las cajas existentes. */
+	@Override
+	@Transactional
+	public void recalcularHistoricoCajaTodas() {
+		List<Efectivo> todas = efectivoRepository.findAll();
+		for (Efectivo caja : todas) {
+			recalcularHistoricoCaja(caja.getId());
+		}
+	}
+
 	@Override
 	public List<Movimiento> listarMovimientosPorCaja(Integer cajaId) {
 		if (cajaId == null)
@@ -729,6 +891,26 @@ public class MovimientoServiceImplement implements MovimientoService {
 		if (cajaId == null)
 			throw new IllegalArgumentException("cajaId no puede ser nulo");
 		return movimientoRepository.findMovimientosCajaLiteEntreFechas(cajaId, desde, hasta);
+	}
+
+	@Override
+	public Double obtenerSaldoInicialDelDia(Integer cajaId, LocalDateTime desde) {
+		if (cajaId == null)
+			throw new IllegalArgumentException("cajaId no puede ser nulo");
+		List<Movimiento> anteriores = movimientoRepository.findUltimoMovimientoDeCajaAntesDe(
+				cajaId, desde, org.springframework.data.domain.PageRequest.of(0, 1));
+		if (anteriores.isEmpty())
+			return null;
+		Movimiento ultimo = anteriores.get(0);
+		// El movimiento pudo tocar esta caja como origen o como destino (ej. TRANSFERENCIA
+		// CAJA) — tomamos el campo que corresponda según en cuál rol aparece esta caja.
+		if (ultimo.getCaja() != null && cajaId.equals(ultimo.getCaja().getId())) {
+			return ultimo.getSaldoCajaResultante();
+		}
+		if (ultimo.getCajaDestino() != null && cajaId.equals(ultimo.getCajaDestino().getId())) {
+			return ultimo.getSaldoCajaDestinoResultante();
+		}
+		return null;
 	}
 
 	@Override
@@ -996,6 +1178,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 	                    .saldoNuevo(nuevo)
 	                    .diferencia(dif)
 	                    .caja(caja)                 // usamos el campo caja del movimiento
+	                    .saldoCajaResultante(nuevo)
 	                    .build();
 
 	            return movimientoRepository.save(m);
@@ -1098,6 +1281,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 	            Efectivo caja = m.getCaja();
 	            caja.setSaldo(round2((caja.getSaldo() != null ? caja.getSaldo() : 0.0) - monto));
 	            efectivoRepository.save(caja);
+	            propagarDeltaCaja(caja.getId(), m.getFecha(), -monto);
 	        }
 	        if (m.getProveedorOrigen() != null) {
 	            Supplier po = m.getProveedorOrigen();
@@ -1113,6 +1297,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 	            Efectivo caja = m.getCaja();
 	            caja.setSaldo(round2((caja.getSaldo() != null ? caja.getSaldo() : 0.0) - monto));
 	            efectivoRepository.save(caja);
+	            propagarDeltaCaja(caja.getId(), m.getFecha(), -monto);
 	        }
 	        if (m.getClienteOrigen() != null) {
 	            Cliente cl = m.getClienteOrigen();
@@ -1130,6 +1315,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 	            Efectivo caja = m.getCaja();
 	            caja.setSaldo(round2((caja.getSaldo() != null ? caja.getSaldo() : 0.0) - monto));
 	            efectivoRepository.save(caja);
+	            propagarDeltaCaja(caja.getId(), m.getFecha(), -monto);
 	        }
 	        if (m.getProveedorOrigen() != null) {
 	            Supplier po = m.getProveedorOrigen();
@@ -1145,6 +1331,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 	            Efectivo caja = m.getCaja();
 	            caja.setSaldo(round2((caja.getSaldo() != null ? caja.getSaldo() : 0.0) - monto));
 	            efectivoRepository.save(caja);
+	            propagarDeltaCaja(caja.getId(), m.getFecha(), -monto);
 	        }
 	        if (m.getClienteOrigen() != null) {
 	            Cliente cl = m.getClienteOrigen();
@@ -1176,6 +1363,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 	            Efectivo caja = m.getCaja();
 	            caja.setSaldo((caja.getSaldo() != null ? caja.getSaldo() : 0.0) + monto);
 	            efectivoRepository.save(caja);
+	            propagarDeltaCaja(caja.getId(), m.getFecha(), monto);
 	        } else if (m.getProveedorOrigen() != null) {
 	            Supplier po = m.getProveedorOrigen();
 	            po.setBalance((po.getBalance() != null ? po.getBalance() : 0.0) - monto);
@@ -1197,10 +1385,12 @@ public class MovimientoServiceImplement implements MovimientoService {
 	        if (origen != null) {
 	            origen.setSaldo(round2((origen.getSaldo() != null ? origen.getSaldo() : 0.0) + monto));
 	            efectivoRepository.save(origen);
+	            propagarDeltaCaja(origen.getId(), m.getFecha(), monto);
 	        }
 	        if (destino != null) {
 	            destino.setSaldo(round2((destino.getSaldo() != null ? destino.getSaldo() : 0.0) - monto));
 	            efectivoRepository.save(destino);
+	            propagarDeltaCaja(destino.getId(), m.getFecha(), -monto);
 	        }
 	        movimientoRepository.delete(m);
 	        return;
@@ -1246,6 +1436,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 	        if (caja != null) {
 	            caja.setSaldo(round2((caja.getSaldo() != null ? caja.getSaldo() : 0.0) - monto));
 	            efectivoRepository.save(caja);
+	            propagarDeltaCaja(caja.getId(), m.getFecha(), -monto);
 	        }
 
 	        movimientoRepository.delete(m);
