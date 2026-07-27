@@ -30,6 +30,10 @@ public interface SellDollarsRepository extends JpaRepository<SellDollars, Intege
 	/** Ventas del proveedor acotadas a un rango de fechas (para el resumen del día — rápido). */
 	List<SellDollars> findBySupplier_IdAndDateBetween(Integer supplierId, LocalDateTime desde, LocalDateTime hasta);
 	List<SellDollars> findByAsignadoFalseAndDateLessThan(LocalDateTime end);
+
+	/** NULL-safe: incluye ventas con asignado=null (el derived query las ignora). */
+	@Query("SELECT v FROM SellDollars v WHERE COALESCE(v.asignado, false) = false AND v.date < :end")
+	List<SellDollars> findNoAsignadasBeforeNullSafe(@Param("end") LocalDateTime end);
 	List<SellDollars> findByAsignadoFalseAndDateBetween(LocalDateTime start, LocalDateTime end);
 
 	/** Solo IDs — evita cargar entidades completas para deduplicación */

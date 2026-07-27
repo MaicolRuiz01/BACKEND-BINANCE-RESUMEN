@@ -14,4 +14,7 @@ public interface AverageRateRepository extends JpaRepository<AverageRate, Intege
 	Optional<AverageRate> findTopByFechaBeforeOrderByFechaDesc(LocalDateTime fecha);
 	Optional<AverageRate> findByInicioDia(LocalDateTime inicioDia);
 
+	/** La sesión de tasa promedio que está ABIERTA (si hay compras dollars sin asignar). */
+	Optional<AverageRate> findTopBySesionAbiertaTrueOrderByFechaDesc();
+
 }

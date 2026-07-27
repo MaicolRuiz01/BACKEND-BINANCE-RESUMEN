@@ -44,6 +44,14 @@ public class AverageRate {
 
     // Acumulado de compras del día en pesos
     private Double totalPesosComprasDia;
-	
+
+    /**
+     * Nueva lógica de "corte por sesión" (en vez de por día calendario):
+     * true = este snapshot es la SESIÓN ABIERTA actual. Mientras haya compras (dollars) sin
+     * asignar, la sesión sigue abierta y las compras que se asignan se licúan contra la misma
+     * base. Cuando se asigna la última compra pendiente, la sesión se cierra (false) y su tasa
+     * pasa a ser la base de la próxima sesión.
+     */
+    private Boolean sesionAbierta;
 
 }
