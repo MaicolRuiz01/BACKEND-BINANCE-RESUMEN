@@ -1,5 +1,6 @@
 package com.binance.web.service;
 
+import com.binance.web.Entity.AccountCop;
 import com.binance.web.Entity.Retirador;
 import com.binance.web.Entity.SolicitudRetiro;
 import com.binance.web.dto.*;
@@ -73,4 +74,14 @@ public interface RetiradorService {
      * "saldo disponible" distinto de "saldo bruto".
      */
     List<CuentaComprometidoDto> obtenerMontosComprometidos();
+
+    /**
+     * Revisa si esta cuenta (marcada activa para P2P) ya alcanzó el cupo diario
+     * disponible de cajero y/o corresponsal (según su cupoTipoP2P) y, si es así,
+     * dispara automáticamente una Solicitud General de retiro por ese canal —
+     * igual que si alguien hubiera dado clic en "Solicitud general" — sin pedir
+     * confirmación y sin duplicar si ya hay una solicitud pendiente de ese canal
+     * para esta cuenta. Se llama cada vez que el saldo de una cuenta cambia.
+     */
+    void verificarYDispararRetiroAutomaticoP2P(AccountCop cuenta);
 }
