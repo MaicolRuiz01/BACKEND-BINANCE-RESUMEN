@@ -322,7 +322,7 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
             LocalDateTime end = endOfDay(fecha);
 
             // Ideal: crea en repo un método findByAsignadaFalseAndDateLessThan(end)
-            List<BuyDollars> comprasNoAsignadas = buyDollarsRepository.findByAsignadaFalseAndDateLessThan(end);
+            List<BuyDollars> comprasNoAsignadas = buyDollarsRepository.findNoAsignadasBeforeNullSafe(end);
 
             return comprasNoAsignadas.stream()
                 .mapToDouble(c -> convertirCriptoAUsdt(
@@ -342,7 +342,7 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
         private double calcularTotalVentasNoAsignadasUsdt(LocalDate fecha) {
             LocalDateTime end = endOfDay(fecha);
 
-            List<SellDollars> ventasNoAsignadas = sellDollarsRepository.findByAsignadoFalseAndDateLessThan(end);
+            List<SellDollars> ventasNoAsignadas = sellDollarsRepository.findNoAsignadasBeforeNullSafe(end);
 
             return ventasNoAsignadas.stream()
                 .mapToDouble(v -> convertirCriptoAUsdt(
@@ -358,7 +358,8 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
         private double calcularTotalComprasP2PNoAsignadasUsdt(LocalDate fecha) {
             LocalDateTime end = endOfDay(fecha);
 
-            return buyP2PRepository.findByAsignadoFalseAndDateLessThan(end).stream()
+            // NULL-safe: incluye compras con asignado=null.
+            return buyP2PRepository.findNoAsignadasBeforeNullSafe(end).stream()
                 .mapToDouble(b -> safe(b.getDollarsUs()))
                 .sum();
         }
@@ -367,7 +368,9 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
         private double calcularTotalVentasP2PNoAsignadasUsdt(LocalDate fecha) {
             LocalDateTime end = endOfDay(fecha);
 
-            return saleP2PRepository.findByAsignadoFalseAndDateLessThan(end).stream()
+            // NULL-safe: incluye ventas con asignado=null (el derived query las ignoraba y el
+            // balance daba 0 aunque en "Ventas Pendientes" sí aparecieran).
+            return saleP2PRepository.findNoAsignadasBeforeNullSafe(end).stream()
                 .mapToDouble(s -> safe(s.getDollarsUs()))
                 .sum();
         }

@@ -90,5 +90,11 @@ public interface SaleP2PRepository extends JpaRepository<SaleP2P, Integer> {
     List<SaleP2P> findByAsignadoFalseAndDateBetween(LocalDateTime start, LocalDateTime end);
     List<SaleP2P> findByAsignadoFalseAndDateLessThan(LocalDateTime end);
 
+    /** NULL-safe: cuenta como NO asignada tanto asignado=false como asignado=null.
+     *  El derived query "AsignadoFalse" ignora los null (SQL: NULL = false → desconocido),
+     *  por eso el balance daba 0 aunque hubiera ventas pendientes. */
+    @Query("SELECT s FROM SaleP2P s WHERE COALESCE(s.asignado, false) = false AND s.date < :end")
+    List<SaleP2P> findNoAsignadasBeforeNullSafe(@Param("end") LocalDateTime end);
+
 
 }

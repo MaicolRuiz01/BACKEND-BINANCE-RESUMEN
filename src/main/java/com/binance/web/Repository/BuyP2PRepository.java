@@ -57,5 +57,9 @@ public interface BuyP2PRepository extends JpaRepository<BuyP2P, Integer> {
     
     List<BuyP2P> findByAsignadoFalseAndDateLessThan(LocalDateTime end);
 
+    /** NULL-safe: incluye compras con asignado=null (el derived query las ignora). */
+    @Query("SELECT b FROM BuyP2P b WHERE COALESCE(b.asignado, false) = false AND b.date < :end")
+    List<BuyP2P> findNoAsignadasBeforeNullSafe(@Param("end") LocalDateTime end);
+
 
 }
