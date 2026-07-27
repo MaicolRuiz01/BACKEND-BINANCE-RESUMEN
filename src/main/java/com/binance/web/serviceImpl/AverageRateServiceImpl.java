@@ -59,6 +59,7 @@ public class AverageRateServiceImpl implements AverageRateService{
         rate.setTotalPesosComprasDia(0.0);
         rate.setAverageRate(tasaInicial);
         rate.setSaldoTotalInterno(saldoInicialUsdt);
+        rate.setSesionAbierta(false); // la tasa inicial es la base, no una sesión abierta
 
         return averageRateRepository.save(rate);
     }
@@ -67,73 +68,78 @@ public class AverageRateServiceImpl implements AverageRateService{
     public AverageRate actualizarTasaPromedioPorCompra(
             LocalDateTime fechaCompra,
             Double montoUsdtCompra,
-            Double tasaCompra
+            Double tasaCompra,
+            boolean esUltimaSinAsignar
     ) {
-        // Día lógico a partir de la fecha de la compra (solo local, no en DB)
-        LocalDate dia = fechaCompra.atZone(ZONE_BOGOTA).toLocalDate();
-        LocalDateTime inicioDia = dia.atStartOfDay(); // este sí se guarda
+        // NUEVA LÓGICA — corte por SESIÓN, no por día calendario:
+        //  - Mientras haya compras (dollars) sin asignar, la SESIÓN sigue abierta y cada compra
+        //    que se asigna se licúa contra la misma base (no se hace corte diario).
+        //  - La base de una sesión NUEVA es la última tasa promedio vigente (el promedio real
+        //    del inventario), tomada al abrir la sesión.
+        //  - Cuando se asigna la ÚLTIMA compra pendiente (esUltimaSinAsignar), la sesión se cierra
+        //    y su tasa queda como base de la próxima sesión.
+        // Esto evita el bug de asignar compras atrasadas: ya no se recalcula ningún día pasado.
 
-        AverageRate ultima = averageRateRepository
-                .findTopByOrderByFechaDesc()
-                .orElseThrow(() -> new IllegalStateException(
-                        "Debe existir una tasa promedio inicial antes de asignar compras."
-                ));
+        LocalDateTime ahora = LocalDateTime.now(ZONE_BOGOTA);
+        LocalDate dia = ahora.atZone(ZONE_BOGOTA).toLocalDate();
+        LocalDateTime inicioDia = dia.atStartOfDay();
 
         Double saldoTotalInternoActual = accountBinanceService
                 .getTotalExternalBalance()
                 .doubleValue();
 
-        AverageRate snapshotDia = averageRateRepository.findByInicioDia(inicioDia).orElse(null);
+        AverageRate sesion = averageRateRepository.findTopBySesionAbiertaTrueOrderByFechaDesc().orElse(null);
 
-        if (snapshotDia == null) {
-            // ===== Primera compra del día =====
-            Double saldoInicialDia = saldoTotalInternoActual - montoUsdtCompra;
-            Double tasaBaseSaldoInicial = ultima.getAverageRate();
-            Double pesosSaldoInicial = saldoInicialDia * tasaBaseSaldoInicial;
+        if (sesion == null) {
+            // ===== No hay sesión abierta → se ABRE una nueva (primera compra del backlog) =====
+            AverageRate ultima = averageRateRepository
+                    .findTopByOrderByFechaDesc()
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Debe existir una tasa promedio inicial antes de asignar compras."));
 
-            Double pesosCompraActual = montoUsdtCompra * tasaCompra;
+            Double saldoInicial = saldoTotalInternoActual - montoUsdtCompra; // inventario antes de esta compra
+            Double tasaBase = ultima.getAverageRate();                       // base = última tasa vigente
+            Double pesosSaldoInicial = saldoInicial * tasaBase;
 
-            Double totalUsdtComprasDia = montoUsdtCompra;
-            Double totalPesosComprasDia = pesosCompraActual;
+            Double totalUsdtCompras = montoUsdtCompra;
+            Double totalPesosCompras = montoUsdtCompra * tasaCompra;
 
-            Double totalUsdtDia = saldoInicialDia + totalUsdtComprasDia;
-            Double totalPesosDia = pesosSaldoInicial + totalPesosComprasDia;
+            Double totalUsdt = saldoInicial + totalUsdtCompras;
+            Double totalPesos = pesosSaldoInicial + totalPesosCompras;
+            Double nuevaTasa = totalUsdt != 0 ? (totalPesos / totalUsdt) : tasaBase;
 
-            Double nuevaTasaPromedio = totalPesosDia / totalUsdtDia;
-
-            snapshotDia = new AverageRate();
-            snapshotDia.setFecha(fechaCompra);
-            snapshotDia.setInicioDia(inicioDia);
-            snapshotDia.setSaldoInicialDia(saldoInicialDia);
-            snapshotDia.setTasaBaseSaldoInicial(tasaBaseSaldoInicial);
-            snapshotDia.setTotalUsdtComprasDia(totalUsdtComprasDia);
-            snapshotDia.setTotalPesosComprasDia(totalPesosComprasDia);
-            snapshotDia.setAverageRate(nuevaTasaPromedio);
-            snapshotDia.setSaldoTotalInterno(saldoTotalInternoActual);
-
+            sesion = new AverageRate();
+            sesion.setInicioDia(inicioDia);
+            sesion.setSaldoInicialDia(saldoInicial);
+            sesion.setTasaBaseSaldoInicial(tasaBase);
+            sesion.setTotalUsdtComprasDia(totalUsdtCompras);
+            sesion.setTotalPesosComprasDia(totalPesosCompras);
+            sesion.setAverageRate(nuevaTasa);
+            sesion.setSaldoTotalInterno(saldoTotalInternoActual);
         } else {
-            // ===== Siguientes compras del mismo día =====
-            Double saldoInicialDia = snapshotDia.getSaldoInicialDia();
-            Double tasaBaseSaldoInicial = snapshotDia.getTasaBaseSaldoInicial();
-            Double pesosSaldoInicial = saldoInicialDia * tasaBaseSaldoInicial;
+            // ===== Sesión ya abierta → se licúa la compra contra la MISMA base =====
+            Double saldoInicial = sesion.getSaldoInicialDia();
+            Double tasaBase = sesion.getTasaBaseSaldoInicial();
+            Double pesosSaldoInicial = saldoInicial * tasaBase;
 
-            Double totalUsdtComprasDia = snapshotDia.getTotalUsdtComprasDia() + montoUsdtCompra;
-            Double totalPesosComprasDia = snapshotDia.getTotalPesosComprasDia()
-                    + (montoUsdtCompra * tasaCompra);
+            Double totalUsdtCompras = sesion.getTotalUsdtComprasDia() + montoUsdtCompra;
+            Double totalPesosCompras = sesion.getTotalPesosComprasDia() + (montoUsdtCompra * tasaCompra);
 
-            Double totalUsdtDia = saldoInicialDia + totalUsdtComprasDia;
-            Double totalPesosDia = pesosSaldoInicial + totalPesosComprasDia;
+            Double totalUsdt = saldoInicial + totalUsdtCompras;
+            Double totalPesos = pesosSaldoInicial + totalPesosCompras;
+            Double nuevaTasa = totalUsdt != 0 ? (totalPesos / totalUsdt) : sesion.getAverageRate();
 
-            Double nuevaTasaPromedio = totalPesosDia / totalUsdtDia;
-
-            snapshotDia.setFecha(fechaCompra);
-            snapshotDia.setTotalUsdtComprasDia(totalUsdtComprasDia);
-            snapshotDia.setTotalPesosComprasDia(totalPesosComprasDia);
-            snapshotDia.setAverageRate(nuevaTasaPromedio);
-            snapshotDia.setSaldoTotalInterno(saldoTotalInternoActual);
+            sesion.setTotalUsdtComprasDia(totalUsdtCompras);
+            sesion.setTotalPesosComprasDia(totalPesosCompras);
+            sesion.setAverageRate(nuevaTasa);
+            sesion.setSaldoTotalInterno(saldoTotalInternoActual);
         }
 
-        return averageRateRepository.save(snapshotDia);
+        sesion.setFecha(ahora);
+        // La sesión queda ABIERTA mientras queden compras sin asignar; se CIERRA con la última.
+        sesion.setSesionAbierta(!esUltimaSinAsignar);
+
+        return averageRateRepository.save(sesion);
     }
 
     @Override

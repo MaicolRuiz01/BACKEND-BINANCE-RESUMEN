@@ -352,11 +352,16 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 	    Double montoPesos = montoUsdt * dto.getTasa();
 	    existing.setPesos(montoPesos);
 
-	    // === NUEVA LÓGICA DE TASA PROMEDIO POR DÍA ===
+	    // === TASA PROMEDIO — corte por SESIÓN (no por día) ===
+	    // La sesión se mantiene abierta mientras queden compras (dollars) sin asignar. Esta compra
+	    // todavía está asignada=false en este punto, así que si solo queda 1 sin asignar, esta ES
+	    // la última → la sesión se cierra tras licuarla.
+	    boolean esUltimaSinAsignar = buyDollarsRepository.countByAsignadaFalse() <= 1;
 	    AverageRate tasaDia = averageRateService.actualizarTasaPromedioPorCompra(
 	            existing.getDate(),
 	            montoUsdt,
-	            dto.getTasa()
+	            dto.getTasa(),
+	            esUltimaSinAsignar
 	    );
 
 	    // (Opcional) si quieres loguear o devolver info:
