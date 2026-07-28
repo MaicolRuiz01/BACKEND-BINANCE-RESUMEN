@@ -643,6 +643,88 @@ public class RetiradorServiceImpl implements RetiradorService {
         return saved;
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // Retiro automático por P2P (cuenta activa en P2P que llega a su tope)
+    // ═══════════════════════════════════════════════════════════════
+
+    @Override
+    @Transactional
+    public void verificarYDispararRetiroAutomaticoP2P(AccountCop cuenta) {
+        if (cuenta == null || !Boolean.TRUE.equals(cuenta.getActivaParaP2P())) {
+            return; // solo aplica a cuentas actualmente seleccionadas en P2P
+        }
+        if (cuenta.getBankType() == null) {
+            return; // sin banco configurado, no hay tope que aplicar
+        }
+
+        double balance = cuenta.getBalance() != null ? cuenta.getBalance() : 0.0;
+        String tipoP2P = cuenta.getCupoTipoP2P() != null ? cuenta.getCupoTipoP2P() : "AMBOS";
+
+        // "AMBOS": se revisa primero CAJERO (tope más bajo, se agota primero) y
+        // luego CORRESPONSAL, cada uno con su propio cupo disponible de hoy. Si
+        // la cuenta está fijada a un solo tipo, solo se revisa ese.
+        if ("CAJERO".equals(tipoP2P) || "AMBOS".equals(tipoP2P)) {
+            intentarDispararAutomaticoP2P(cuenta, TipoRetiro.CAJERO, balance);
+        }
+        if ("CORRESPONSAL".equals(tipoP2P) || "AMBOS".equals(tipoP2P)) {
+            intentarDispararAutomaticoP2P(cuenta, TipoRetiro.CORRESPONSAL, balance);
+        }
+    }
+
+    /**
+     * Dispara una Solicitud General automática para UN canal (cajero o
+     * corresponsal) si el saldo de la cuenta ya alcanzó o superó lo que queda
+     * disponible de cupo hoy para ese canal. Se pide EXACTAMENTE ese
+     * disponible (no el saldo completo) — el excedente queda en la cuenta
+     * para el siguiente retiro. No duplica si ya hay una solicitud
+     * SIN_ASIGNAR/PENDIENTE de ese mismo canal para esta cuenta.
+     */
+    private void intentarDispararAutomaticoP2P(AccountCop cuenta, TipoRetiro tipo, double balance) {
+        double disponible = tipo == TipoRetiro.CAJERO
+                ? (cuenta.getCupoCajeroDisponibleHoy() != null ? cuenta.getCupoCajeroDisponibleHoy() : 0.0)
+                : (cuenta.getCupoCorresponsalDisponibleHoy() != null ? cuenta.getCupoCorresponsalDisponibleHoy() : 0.0);
+
+        if (disponible <= 0) {
+            return; // ya no queda cupo hoy para este canal (o ya se disparó/confirmó antes)
+        }
+        if (balance + 0.5 < disponible) {
+            return; // todavía no llega al tope disponible de hoy
+        }
+
+        double yaComprometido = tipo == TipoRetiro.CAJERO
+                ? nz(solicitudRepository.sumMontoCajeroComprometidoPorCuenta(cuenta.getId()))
+                : nz(solicitudRepository.sumMontoCorresponsalComprometidoPorCuenta(cuenta.getId()));
+        if (yaComprometido > 0) {
+            return; // ya hay una solicitud pendiente de confirmar para este canal — no duplicar
+        }
+
+        double monto = round2(Math.min(disponible, balance));
+
+        SolicitudGeneralRequestDto dto = new SolicitudGeneralRequestDto();
+        SolicitudGeneralRequestDto.DetalleDto detalle = new SolicitudGeneralRequestDto.DetalleDto();
+        detalle.setCuentaCopId(cuenta.getId());
+        detalle.setTipoRetiro(tipo);
+        if (tipo == TipoRetiro.CAJERO) {
+            detalle.setMontoCajero(monto);
+        } else {
+            detalle.setMontoCorresponsal(monto);
+        }
+        dto.setDetalles(List.of(detalle));
+
+        try {
+            SolicitudRetiro creada = crearSolicitudGeneral(dto);
+            log.info("[P2P Auto-retiro] Cuenta {} (id={}) alcanzó el cupo disponible de {} (${}). Solicitud #{} creada automáticamente.",
+                    cuenta.getName(), cuenta.getId(), tipo, String.format("%,.0f", monto), creada.getId());
+        } catch (Exception e) {
+            log.error("[P2P Auto-retiro] Error al crear solicitud automática para cuenta {} ({}): {}",
+                    cuenta.getId(), tipo, e.getMessage());
+        }
+    }
+
+    private static double nz(Double d) {
+        return d != null ? d : 0.0;
+    }
+
     @Override
     @Transactional
     public SolicitudRetiro asignarRetirador(Long solicitudId, AsignarRetiradorDto dto) {
@@ -816,34 +898,39 @@ public class RetiradorServiceImpl implements RetiradorService {
     }
 
     private void notificarN8n(SolicitudRetiro solicitud, Retirador retirador, String url) {
+        // OJO: este chequeo solo debe saltarse el aviso a n8n (usado por el bot
+        // "notificar_pagos_bot", desactivado temporalmente a propósito). El aviso
+        // directo por Telegram al retirador, más abajo, es OTRA cosa y siempre debe
+        // intentarse — antes estaban unidos con un solo "return" y al vaciar la URL
+        // de n8n se apagó también, sin querer, la notificación real al retirador.
         if (url == null || url.isBlank()) {
-            log.warn("[Retiro] n8n webhook no configurado — notificación omitida.");
-            return;
-        }
-        try {
-            List<Map<String, Object>> cuentas = new ArrayList<>();
-            for (DetalleRetiro d : solicitud.getDetalles()) {
-                Map<String, Object> item = new HashMap<>();
-                item.put("cuenta", d.getCuentaCop().getName());
-                item.put("banco", d.getCuentaCop().getBankType().name());
-                item.put("tipo", d.getTipoRetiro().name());
-                item.put("montoCajero", d.getMontoCajero());
-                item.put("montoCorresponsal", d.getMontoCorresponsal());
-                cuentas.add(item);
-            }
-            Map<String, Object> payload = new HashMap<>();
-            payload.put("solicitudId", solicitud.getId());
-            payload.put("retirador", retirador.getNombre());
-            payload.put("totalMonto", solicitud.getTotalMonto());
-            payload.put("pagoRetirador", solicitud.getPagoRetirador());
-            payload.put("cuentas", cuentas);
+            log.warn("[Retiro] n8n webhook no configurado — notificación a n8n omitida (el aviso directo al retirador sigue de largo).");
+        } else {
+            try {
+                List<Map<String, Object>> cuentas = new ArrayList<>();
+                for (DetalleRetiro d : solicitud.getDetalles()) {
+                    Map<String, Object> item = new HashMap<>();
+                    item.put("cuenta", d.getCuentaCop().getName());
+                    item.put("banco", d.getCuentaCop().getBankType().name());
+                    item.put("tipo", d.getTipoRetiro().name());
+                    item.put("montoCajero", d.getMontoCajero());
+                    item.put("montoCorresponsal", d.getMontoCorresponsal());
+                    cuentas.add(item);
+                }
+                Map<String, Object> payload = new HashMap<>();
+                payload.put("solicitudId", solicitud.getId());
+                payload.put("retirador", retirador.getNombre());
+                payload.put("totalMonto", solicitud.getTotalMonto());
+                payload.put("pagoRetirador", solicitud.getPagoRetirador());
+                payload.put("cuentas", cuentas);
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            restTemplate.postForObject(url, new HttpEntity<>(payload, headers), String.class);
-            log.info("[Retiro] Notificación enviada a n8n — solicitud #{}", solicitud.getId());
-        } catch (Exception e) {
-            log.error("[Retiro] Error al notificar n8n: {}", e.getMessage());
+                HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.APPLICATION_JSON);
+                restTemplate.postForObject(url, new HttpEntity<>(payload, headers), String.class);
+                log.info("[Retiro] Notificación enviada a n8n — solicitud #{}", solicitud.getId());
+            } catch (Exception e) {
+                log.error("[Retiro] Error al notificar n8n: {}", e.getMessage());
+            }
         }
 
         // Notificación adicional directa por Telegram al retirador (si tiene chat

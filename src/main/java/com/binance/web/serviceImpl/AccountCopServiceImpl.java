@@ -18,6 +18,7 @@ import com.binance.web.Repository.AccountCopRepository;
 import com.binance.web.Repository.SaleP2PRepository;
 import com.binance.web.Repository.SaleP2pAccountCopRepository;
 import com.binance.web.service.AccountCopService;
+import com.binance.web.service.RetiradorService;
 import com.binance.web.util.CupoDiarioRules;
 
 @Service
@@ -26,12 +27,14 @@ public class AccountCopServiceImpl implements AccountCopService {
 	private final AccountCopRepository AccountCopRepository;
 	private final SaleP2pAccountCopRepository saleP2pAccountCopRepository;
 	private final SaleP2PRepository saleP2PRepository;
+	private final RetiradorService retiradorService;
 	private static final ZoneId ZONE_BOGOTA = ZoneId.of("America/Bogota");
 
-	public AccountCopServiceImpl(AccountCopRepository AccountCopRepository, SaleP2PRepository saleP2PRepository, SaleP2pAccountCopRepository saleP2pAccountCopRepository) {
+	public AccountCopServiceImpl(AccountCopRepository AccountCopRepository, SaleP2PRepository saleP2PRepository, SaleP2pAccountCopRepository saleP2pAccountCopRepository, RetiradorService retiradorService) {
 	    this.AccountCopRepository = AccountCopRepository;
 	    this.saleP2PRepository = saleP2PRepository;
 	    this.saleP2pAccountCopRepository = saleP2pAccountCopRepository;
+	    this.retiradorService = retiradorService;
 	}
 
 	@Override
@@ -175,7 +178,17 @@ public class AccountCopServiceImpl implements AccountCopService {
 	    existing.setBalance(accountCop.getBalance());
 	    existing.setCupoDisponibleHoy(accountCop.getCupoDisponibleHoy());
 
+	    // Asegura que el cupo diario (cajero/corresponsal) esté al día ANTES de
+	    // guardar, para que el chequeo de retiro automático de abajo compare
+	    // contra el cupo de HOY y no el de un día anterior.
+	    CupoDiarioRules.asegurarCupoHoy(existing);
 	    AccountCopRepository.save(existing);
+
+	    // Retiro automático por P2P: si esta cuenta está seleccionada en P2P
+	    // (activaParaP2P) y su saldo ya alcanzó el cupo disponible de hoy para
+	    // cajero y/o corresponsal, dispara una Solicitud General automática al
+	    // grupo de Retiradores — sin necesidad de que nadie la pida a mano.
+	    retiradorService.verificarYDispararRetiroAutomaticoP2P(existing);
 	}
 	@Override
 	@Transactional
