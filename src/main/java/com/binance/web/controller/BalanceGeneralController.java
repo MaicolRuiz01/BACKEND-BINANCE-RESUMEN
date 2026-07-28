@@ -48,6 +48,14 @@ public class BalanceGeneralController {
         return balanceService.listarTodos();
     }
 
+    /** Neto (COP) de compras/ventas pendientes por asignar hoy. Cálculo aislado y liviano:
+     *  no corre el balance general completo, así la card "Asignar" nunca queda en 0 por un
+     *  error en otra parte del balance. */
+    @GetMapping("/neto-no-asignado")
+    public Map<String, Double> netoNoAsignado() {
+        return Map.of("neto", balanceService.calcularNetoNoAsignadoHoy());
+    }
+
     @GetMapping("/cajas/total")
     public Map<String, Double> obtenerTotalDeCajas() {
         double totalCajas = balanceService.obtenerTotalCajas();

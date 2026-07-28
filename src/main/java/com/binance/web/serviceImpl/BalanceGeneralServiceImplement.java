@@ -266,6 +266,29 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
                 return balanceRepo.findByDate(fecha).orElse(null);
         }
 
+        /**
+         * Neto (en COP) de TODO lo que está pendiente por asignar HOY: compras/ventas dólares
+         * + compras/ventas P2P. Se calcula AISLADO del balance general completo (que hace muchas
+         * más consultas y puede fallar por otras causas), así la card "Asignar" siempre refleja
+         * exactamente lo que se ve en las vistas de asignación. NULL-safe (asignado=null cuenta).
+         */
+        @Override
+        public double calcularNetoNoAsignadoHoy() {
+                LocalDate fecha = LocalDate.now(ZoneId.of("America/Bogota"));
+                double comprasDolares = calcularTotalComprasNoAsignadasUsdt(fecha);
+                double ventasDolares  = calcularTotalVentasNoAsignadasUsdt(fecha);
+                double comprasP2P     = calcularTotalComprasP2PNoAsignadasUsdt(fecha);
+                double ventasP2P      = calcularTotalVentasP2PNoAsignadasUsdt(fecha);
+
+                double tasa = averageRateRepository.findTopByOrderByFechaDesc()
+                        .map(AverageRate::getAverageRate)
+                        .orElseGet(() -> averageRateRepository.findTopByOrderByIdDesc()
+                                .map(AverageRate::getAverageRate)
+                                .orElse(0.0));
+
+                return ((ventasDolares + ventasP2P) - (comprasDolares + comprasP2P)) * tasa;
+        }
+
         @Override
         public BalanceGeneral calcularHoyYRetornar() {
                 LocalDate today = LocalDate.now(ZoneId.of("America/Bogota"));

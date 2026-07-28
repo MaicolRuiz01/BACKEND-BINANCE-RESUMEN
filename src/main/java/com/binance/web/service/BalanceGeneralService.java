@@ -13,4 +13,7 @@ public interface BalanceGeneralService {
     Double obtenerTotalCajas();
     Double obtenerTotalClientes();
 
+    /** Neto (COP) de compras/ventas (dólares + P2P) pendientes por asignar hoy. Cálculo aislado. */
+    double calcularNetoNoAsignadoHoy();
+
 }

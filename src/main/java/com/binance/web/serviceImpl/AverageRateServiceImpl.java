@@ -97,7 +97,12 @@ public class AverageRateServiceImpl implements AverageRateService{
                     .orElseThrow(() -> new IllegalStateException(
                             "Debe existir una tasa promedio inicial antes de asignar compras."));
 
-            Double saldoInicial = saldoTotalInternoActual - montoUsdtCompra; // inventario antes de esta compra
+            // Inventario ANTES de esta compra. Se acota a >= 0: en este negocio el USDT fluye
+            // (entra y sale rápido), así que el saldo externo actual puede ser MENOR que la compra
+            // que se está asignando. Si no se acotara, saldoInicial quedaría NEGATIVO y el promedio
+            // ponderado se dispararía FUERA del rango [tasaCompra, tasaBase] (bug: subía en vez de
+            // bajar al asignar una compra más barata).
+            Double saldoInicial = Math.max(0.0, saldoTotalInternoActual - montoUsdtCompra);
             Double tasaBase = ultima.getAverageRate();                       // base = última tasa vigente
             Double pesosSaldoInicial = saldoInicial * tasaBase;
 
@@ -118,7 +123,8 @@ public class AverageRateServiceImpl implements AverageRateService{
             sesion.setSaldoTotalInterno(saldoTotalInternoActual);
         } else {
             // ===== Sesión ya abierta → se licúa la compra contra la MISMA base =====
-            Double saldoInicial = sesion.getSaldoInicialDia();
+            // Acotar a >= 0 por si una sesión anterior guardó saldoInicial negativo (bug viejo).
+            Double saldoInicial = Math.max(0.0, sesion.getSaldoInicialDia() != null ? sesion.getSaldoInicialDia() : 0.0);
             Double tasaBase = sesion.getTasaBaseSaldoInicial();
             Double pesosSaldoInicial = saldoInicial * tasaBase;
 
