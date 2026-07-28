@@ -898,34 +898,39 @@ public class RetiradorServiceImpl implements RetiradorService {
     }
 
     private void notificarN8n(SolicitudRetiro solicitud, Retirador retirador, String url) {
+        // OJO: este chequeo solo debe saltarse el aviso a n8n (usado por el bot
+        // "notificar_pagos_bot", desactivado temporalmente a propósito). El aviso
+        // directo por Telegram al retirador, más abajo, es OTRA cosa y siempre debe
+        // intentarse — antes estaban unidos con un solo "return" y al vaciar la URL
+        // de n8n se apagó también, sin querer, la notificación real al retirador.
         if (url == null || url.isBlank()) {
-            log.warn("[Retiro] n8n webhook no configurado — notificación omitida.");
-            return;
-        }
-        try {
-            List<Map<String, Object>> cuentas = new ArrayList<>();
-            for (DetalleRetiro d : solicitud.getDetalles()) {
-                Map<String, Object> item = new HashMap<>();
-                item.put("cuenta", d.getCuentaCop().getName());
-                item.put("banco", d.getCuentaCop().getBankType().name());
-                item.put("tipo", d.getTipoRetiro().name());
-                item.put("montoCajero", d.getMontoCajero());
-                item.put("montoCorresponsal", d.getMontoCorresponsal());
-                cuentas.add(item);
-            }
-            Map<String, Object> payload = new HashMap<>();
-            payload.put("solicitudId", solicitud.getId());
-            payload.put("retirador", retirador.getNombre());
-            payload.put("totalMonto", solicitud.getTotalMonto());
-            payload.put("pagoRetirador", solicitud.getPagoRetirador());
-            payload.put("cuentas", cuentas);
+            log.warn("[Retiro] n8n webhook no configurado — notificación a n8n omitida (el aviso directo al retirador sigue de largo).");
+        } else {
+            try {
+                List<Map<String, Object>> cuentas = new ArrayList<>();
+                for (DetalleRetiro d : solicitud.getDetalles()) {
+                    Map<String, Object> item = new HashMap<>();
+                    item.put("cuenta", d.getCuentaCop().getName());
+                    item.put("banco", d.getCuentaCop().getBankType().name());
+                    item.put("tipo", d.getTipoRetiro().name());
+                    item.put("montoCajero", d.getMontoCajero());
+                    item.put("montoCorresponsal", d.getMontoCorresponsal());
+                    cuentas.add(item);
+                }
+                Map<String, Object> payload = new HashMap<>();
+                payload.put("solicitudId", solicitud.getId());
+                payload.put("retirador", retirador.getNombre());
+                payload.put("totalMonto", solicitud.getTotalMonto());
+                payload.put("pagoRetirador", solicitud.getPagoRetirador());
+                payload.put("cuentas", cuentas);
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            restTemplate.postForObject(url, new HttpEntity<>(payload, headers), String.class);
-            log.info("[Retiro] Notificación enviada a n8n — solicitud #{}", solicitud.getId());
-        } catch (Exception e) {
-            log.error("[Retiro] Error al notificar n8n: {}", e.getMessage());
+                HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.APPLICATION_JSON);
+                restTemplate.postForObject(url, new HttpEntity<>(payload, headers), String.class);
+                log.info("[Retiro] Notificación enviada a n8n — solicitud #{}", solicitud.getId());
+            } catch (Exception e) {
+                log.error("[Retiro] Error al notificar n8n: {}", e.getMessage());
+            }
         }
 
         // Notificación adicional directa por Telegram al retirador (si tiene chat
