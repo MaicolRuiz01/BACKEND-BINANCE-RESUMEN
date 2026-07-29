@@ -23,6 +23,9 @@ public interface AccountCopRepository extends JpaRepository<AccountCop, Integer>
     Optional<AccountCop> findByIdForUpdate(@Param("id") Integer id);
 	AccountCop findByName(String name);
 
+	/** Todas las cuentas de un banco (ej. BANCOLOMBIA) — para emparejar por nombre en la conciliación bancaria. */
+	List<AccountCop> findByBankType(BankType bankType);
+
 	/** ¿Existe una cuenta con ese número EN EL MISMO BANCO? (para crear) */
 	boolean existsByNumeroCuentaAndBankType(String numeroCuenta, BankType bankType);
 
