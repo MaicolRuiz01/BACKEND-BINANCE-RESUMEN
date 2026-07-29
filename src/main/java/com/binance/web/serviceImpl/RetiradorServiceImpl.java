@@ -185,6 +185,19 @@ public class RetiradorServiceImpl implements RetiradorService {
     private void validarSaldoSuficiente(List<DetalleRetiro> detalles) {
         for (DetalleRetiro detalle : detalles) {
             AccountCop cuenta = detalle.getCuentaCop();
+
+            // Guard contra solicitudes "fantasma" de $0: sin esto, una fila
+            // seleccionada por error en la UI (o con el campo de monto vacío)
+            // creaba igual una solicitud válida, notificaba al retirador por
+            // Telegram y aparecía en el historial pidiendo $0. Una solicitud
+            // real siempre pide algo mayor a $0 en al menos un canal.
+            if (detalle.totalDetalle() <= 0) {
+                throw new IllegalArgumentException(
+                        "El monto solicitado para " + cuenta.getName()
+                                + " debe ser mayor a $0 (llegó $"
+                                + String.format("%,.0f", detalle.totalDetalle()) + "). Revisa el monto antes de enviar.");
+            }
+
             double comprometido = solicitudRepository.sumComprometidoPorCuenta(cuenta.getId());
             double disponible = cuenta.getBalance() - comprometido;
             // Tolerancia = 0.50, ni un peso más: en COP no existen los centavos, y el

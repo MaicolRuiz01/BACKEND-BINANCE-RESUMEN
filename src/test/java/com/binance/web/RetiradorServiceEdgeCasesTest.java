@@ -37,24 +37,30 @@ import static org.mockito.Mockito.*;
  * cancelaciones fuera de estado, y el guardado que impide borrar un
  * retirador con historial (relevante para el caso real de Camilo).
  *
- * ── HALLAZGO REAL (no arreglado, solo documentado) ────────────────────────
- * El sistema NUNCA valida que los montos de un retiro (montoCajero /
- * montoCorresponsal) sean positivos, ni en crearSolicitud() ni en
- * confirmarSolicitud(). Un monto negativo:
- *  1) En crearSolicitud(): pasa la validación de saldo sin problema, porque
- *     "disponible < detalle.totalDetalle()" nunca es cierto si totalDetalle()
- *     es negativo.
+ * ── HALLAZGO REAL (parcialmente arreglado) ────────────────────────────────
+ * El sistema NUNCA validaba que los montos de un retiro (montoCajero /
+ * montoCorresponsal) fueran positivos, ni en crearSolicitud() ni en
+ * confirmarSolicitud(). Un monto $0 o negativo:
+ *  1) En crearSolicitud()/crearSolicitudGeneral(): pasaba la validación de
+ *     saldo sin problema, porque "disponible < detalle.totalDetalle()" nunca
+ *     es cierto si totalDetalle() es <= 0. Esto es justo lo que generaba
+ *     solicitudes "fantasma" de $0 (caso real: se pidió un retiro de Javier
+ *     Rivera y se dispararon 3 solicitudes extra de $0 hacia otras cuentas,
+ *     notificando a los retiradores por Telegram sin que hubiera nada que
+ *     retirar). YA ARREGLADO: validarSaldoSuficiente ahora rechaza cualquier
+ *     detalle con totalDetalle() <= 0 con IllegalArgumentException — ver
+ *     {@code crearSolicitud_montoCero_esRechazado},
+ *     {@code crearSolicitud_montoCajeroNulo_esRechazado} y
+ *     {@code crearSolicitud_montoNegativo_esRechazado}.
  *  2) En confirmarInterno(): la resta "balance - deduccionHoy" con
- *     deduccionHoy negativo SUMA dinero a la cuenta en vez de restarlo.
- * O sea: con el estado actual del código, cualquier cliente que arme el
- * payload a mano (sin pasar por la UI, que probablemente nunca manda
- * negativos) podría "fabricar" saldo. Las pruebas
- * {@code confirmarSolicitud_montoNegativo_incrementaSaldoEnVezDeRechazar_BUG}
- * y {@code crearSolicitud_montoNegativo_noEsRechazado_BUG} reproducen esto
- * para dejar evidencia. Recomendación: agregar
- * {@code if (montoCajero != null && montoCajero < 0) throw ...} (mismo para
- * corresponsal) tanto en buildDetalles/crearSolicitudGeneral como al
- * principio de confirmarInterno.
+ *     deduccionHoy negativo SUMA dinero a la cuenta en vez de restarlo. TODAVÍA
+ *     NO ARREGLADO — solo se puede llegar a este punto si el dato negativo ya
+ *     está guardado en la solicitud (ej. alguien arma el payload a mano sin
+ *     pasar por crearSolicitud), pero sigue siendo un hueco real. La prueba
+ *     {@code confirmarSolicitud_montoNegativo_incrementaSaldoEnVezDeRechazar_BUG}
+ *     reproduce esto para dejar evidencia. Recomendación pendiente: agregar
+ *     {@code if (montoCajeroUsar < 0 || montoCorresponsalUsar < 0) throw ...}
+ *     al principio de confirmarInterno.
  */
 @ExtendWith(MockitoExtension.class)
 public class RetiradorServiceEdgeCasesTest {
@@ -375,7 +381,10 @@ public class RetiradorServiceEdgeCasesTest {
     }
 
     @Test
-    void crearSolicitud_montoNegativo_noEsRechazado_BUG() {
+    void crearSolicitud_montoNegativo_esRechazado() {
+        // FIX (antes BUG): "El monto solicitado ... debe ser mayor a $0" en
+        // validarSaldoSuficiente ahora rechaza tanto $0 como negativos, porque
+        // "disponible < totalDetalle()" nunca dispara para un total <= 0.
         SolicitudRetiroRequestDto request = new SolicitudRetiroRequestDto();
         request.setRetiradorId(1L);
         SolicitudRetiroRequestDto.DetalleDto dto = new SolicitudRetiroRequestDto.DetalleDto();
@@ -386,15 +395,51 @@ public class RetiradorServiceEdgeCasesTest {
 
         when(retiradorRepository.findById(1L)).thenReturn(Optional.of(retirador));
         when(accountCopRepository.findById(1)).thenReturn(Optional.of(cuenta));
-        when(solicitudRepository.sumComprometidoPorCuenta(anyInt())).thenReturn(0.0);
-        when(solicitudRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        // BUG confirmado: la validación "disponible < totalDetalle()" nunca dispara
-        // para montos negativos, así que la solicitud se crea sin más — debería
-        // haber lanzado IllegalArgumentException.
-        SolicitudRetiro creada = assertDoesNotThrow(() -> retiradorService.crearSolicitud(request));
-        assertEquals(-5000.0, creada.getTotalMonto(),
-                "BUG confirmado: se creó una solicitud con monto total negativo");
+        assertThrows(IllegalArgumentException.class, () -> retiradorService.crearSolicitud(request));
+        verify(solicitudRepository, never()).save(any());
+    }
+
+    @Test
+    void crearSolicitud_montoCero_esRechazado() {
+        // Caso real reportado por Milton: una fila quedaba marcada en la UI
+        // pero sin monto (o con el campo vacío) y se creaba igual una
+        // solicitud "fantasma" de $0, notificando al retirador por Telegram
+        // sin que hubiera nada real que retirar.
+        SolicitudRetiroRequestDto request = new SolicitudRetiroRequestDto();
+        request.setRetiradorId(1L);
+        SolicitudRetiroRequestDto.DetalleDto dto = new SolicitudRetiroRequestDto.DetalleDto();
+        dto.setCuentaCopId(1);
+        dto.setTipoRetiro(TipoRetiro.CAJERO);
+        dto.setMontoCajero(0.0);
+        request.setDetalles(List.of(dto));
+
+        when(retiradorRepository.findById(1L)).thenReturn(Optional.of(retirador));
+        when(accountCopRepository.findById(1)).thenReturn(Optional.of(cuenta));
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> retiradorService.crearSolicitud(request));
+        assertTrue(ex.getMessage().contains("mayor a $0"));
+        verify(solicitudRepository, never()).save(any());
+    }
+
+    @Test
+    void crearSolicitud_montoCajeroNulo_esRechazado() {
+        // Mismo caso que el anterior pero con el campo directamente en null
+        // (sin llegar a $0.0) — no debe colarse tampoco.
+        SolicitudRetiroRequestDto request = new SolicitudRetiroRequestDto();
+        request.setRetiradorId(1L);
+        SolicitudRetiroRequestDto.DetalleDto dto = new SolicitudRetiroRequestDto.DetalleDto();
+        dto.setCuentaCopId(1);
+        dto.setTipoRetiro(TipoRetiro.CAJERO);
+        dto.setMontoCajero(null);
+        request.setDetalles(List.of(dto));
+
+        when(retiradorRepository.findById(1L)).thenReturn(Optional.of(retirador));
+        when(accountCopRepository.findById(1)).thenReturn(Optional.of(cuenta));
+
+        assertThrows(IllegalArgumentException.class, () -> retiradorService.crearSolicitud(request));
+        verify(solicitudRepository, never()).save(any());
     }
 
     @Test
@@ -493,7 +538,10 @@ public class RetiradorServiceEdgeCasesTest {
         retirador.setSaldoPendiente(1000.0);
         caja.setSaldo(100.0);
         when(retiradorRepository.findById(1L)).thenReturn(Optional.of(retirador));
-        when(efectivoRepository.findById(1)).thenReturn(Optional.of(caja));
+        // pagarRetirador usa findByIdForUpdate (bloqueo de fila), no findById —
+        // mockear el método equivocado hacía que este test fallara con "Caja no
+        // encontrada" en vez de probar lo que realmente se quería (saldo insuficiente).
+        when(efectivoRepository.findByIdForUpdate(1)).thenReturn(Optional.of(caja));
 
         PagoRetiradorDto dto = new PagoRetiradorDto();
         dto.setFuente("CAJA");
