@@ -83,6 +83,8 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 	@Autowired
 	private TraspasoWalletService traspasoWalletService;
 	@Autowired
+	private com.binance.web.util.TraspasoBybitService traspasoBybitService;
+	@Autowired
 	private SolanaController solanaController;
 	@Autowired
 	private com.binance.web.BinanceAPI.BybitService bybitService;
@@ -618,15 +620,30 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 	      double feeTRX  = dto.getComision() != null ? dto.getComision() : 0.0;
 	      Double eqTRX   = dto.getEquivalenteciaTRX(); // puede ser null
 
-	      // 🔁 Wallet Bybit → TRASPASO, NO venta. Se descuenta el cripto igual (salió),
-	      // pero se registra como Transacción/traspaso y NO como SellDollars.
-	      if (account != null && traspasoWalletService.esWalletTraspaso(dto.getContraparteAddress())) {
+	      // 🔁 ¿Es un TRASPASO hacia una cuenta Bybit nuestra (no una venta)?
+	      // Detección PRINCIPAL por HASH on-chain (espejo de la que ya se usa para Bybit → otros):
+	      // si este retiro comparte hash con un DEPÓSITO de una de nuestras cuentas Bybit, el dinero
+	      // no salió del negocio y además SABEMOS a qué cuenta llegó (cuentaTo real).
+	      // Se prueban ambos identificadores (txId e idWithdrawals) porque según la fuente uno u otro
+	      // trae el hash on-chain. Se conserva esWalletTraspaso como FALLBACK para las wallets
+	      // configuradas a mano, pero ya no es el único mecanismo (antes, una cuenta Bybit nueva o
+	      // una hot-wallet rotada por Bybit hacía que el traspaso se registrara como venta real).
+	      AccountBinance destinoBybit = traspasoBybitService.cuentaDestinoPorHash(dto.getTxId());
+	      if (destinoBybit == null) destinoBybit = traspasoBybitService.cuentaDestinoPorHash(dto.getIdWithdrawals());
+	      boolean esTraspasoBybit = destinoBybit != null
+	          || traspasoWalletService.esWalletTraspaso(dto.getContraparteAddress());
+
+	      if (account != null && esTraspasoBybit) {
 	        try {
 	          accountCryptoBalanceService.updateCryptoBalance(account, symbol, -dollars, true);
 	          if (feeTRX > 0) accountCryptoBalanceService.updateCryptoBalance(account, "TRX", -feeTRX, true);
 	        } catch (Exception ex) {
 	          System.out.println("⚠️ No se pudo ajustar balance cripto (traspaso Bybit): " + ex.getMessage());
 	        }
+	        // OJO (no se toca aquí a propósito): el ABONO del cripto en la cuenta Bybit destino lo
+	        // hace el lado de las COMPRAS al importar ese mismo depósito (rama esTraspaso de
+	        // BuyDollarsServiceImpl). Acreditarlo también aquí duplicaría el saldo. Ver nota al
+	        // usuario sobre el caso en que el depósito se filtra por "wallet propia" y nadie abona.
 	        String txHash = dto.getIdWithdrawals();
 	        if (txHash == null || !transaccionesRepository.existsByTxId(txHash)) {
 	          Transacciones t = new Transacciones();
@@ -636,7 +653,7 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 	          t.setFecha(dto.getDate());
 	          t.setTipo(symbol);
 	          t.setCuentaFrom(account);    // salió de nuestra cuenta
-	          t.setCuentaTo(null);         // Bybit no es cuenta nuestra
+	          t.setCuentaTo(destinoBybit); // ← cuenta Bybit REAL si se detectó por hash; null si solo por wallet
 	          transaccionesRepository.save(t);
 	        }
 	        continue;
