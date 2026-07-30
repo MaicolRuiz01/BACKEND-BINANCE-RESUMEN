@@ -107,6 +107,33 @@ public class BybitService {
     }
 
     /**
+     * Hashes on-chain (txID) de los DEPÓSITOS recientes de esta cuenta Bybit (últimos 7 días).
+     * Es el ESPEJO de getWithdrawalTxIds y sirve para el sentido contrario del traspaso:
+     * si un RETIRO nuestro (Binance/TRON) trae un hash que está en esta lista, ese dinero
+     * aterrizó en ESTA cuenta Bybit → es un traspaso interno, no una venta a un tercero.
+     * Antes esto solo se detectaba con una lista de wallets hardcodeada en application.properties,
+     * que se queda corta apenas se agrega una cuenta Bybit nueva o Bybit rota su hot-wallet.
+     * Defensivo: si falla, devuelve lista vacía (nunca throw, nunca null).
+     */
+    public List<String> getDepositTxIds(String apiKey, String apiSecret) {
+        List<String> out = new ArrayList<>();
+        if (apiKey == null || apiSecret == null || apiKey.isBlank() || apiSecret.isBlank()) return out;
+        try {
+            long end = System.currentTimeMillis();
+            long start = end - 7L * 24 * 3600 * 1000; // últimos 7 días
+            String query = "startTime=" + start + "&endTime=" + end + "&limit=50";
+            JsonNode root = signedGet("/v5/asset/deposit/query-record", query, apiKey, apiSecret);
+            for (JsonNode d : root.path("result").path("rows")) {
+                String txId = d.path("txID").asText(null);
+                if (txId != null && !txId.isBlank()) out.add(txId.trim());
+            }
+        } catch (Exception e) {
+            log.warn("[Bybit] No se pudieron leer los depósitos: {}", e.getMessage());
+        }
+        return out;
+    }
+
+    /**
      * Depósitos entrantes de HOY a esta cuenta Bybit (on-chain, status=success), en el mismo
      * formato genérico que usa TronScan para alimentar "registrar compras automáticamente".
      * Excluye depósitos cuyo remitente sea una de NUESTRAS propias wallets registradas

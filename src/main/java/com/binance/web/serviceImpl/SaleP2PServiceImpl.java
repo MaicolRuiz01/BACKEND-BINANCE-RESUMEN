@@ -334,15 +334,21 @@ public class SaleP2PServiceImpl implements SaleP2PService {
         return binanceService.getP2POrdersInRange(account, start, end, null);
     }
 
-    /** Solo lee de BD. Sync en background vía P2PSyncScheduler. */
+    /**
+     * Ventas P2P SIN ASIGNAR de una cuenta Binance — de CUALQUIER fecha, no solo de hoy.
+     *
+     * Antes esto filtraba por el día actual, así que una venta que quedaba sin asignar se volvía
+     * invisible al pasar la medianoche y ya no había forma de asignarla desde la vista. La versión
+     * "todas las cuentas" (getTodayNoAsignadasAllAccounts) nunca filtró por fecha, así que además
+     * las dos vistas se contradecían: al elegir una cuenta concreta desaparecían ventas que sí se
+     * veían en "Todas las cuentas". Ahora ambas usan el mismo criterio: pendiente es pendiente,
+     * sin importar el día.
+     */
     @Override
     public List<SaleP2PDto> getTodayNoAsignadas(String account) {
-        LocalDate today     = LocalDate.now(ZONE_BOGOTA);
-        LocalDateTime start = today.atStartOfDay();
-        LocalDateTime end   = start.plusDays(1);
-        AccountBinance ab   = accountBinanceRepository.findByName(account);
+        AccountBinance ab = accountBinanceRepository.findByName(account);
         if (ab == null) return List.of();
-        return saleP2PRepository.findNoAsignadasByAccountAndDateBetween(ab.getId(), start, end)
+        return saleP2PRepository.findNoAsignadasGeneralByAccount(ab.getId())
                 .stream().map(this::convertToDto).collect(Collectors.toList());
     }
 

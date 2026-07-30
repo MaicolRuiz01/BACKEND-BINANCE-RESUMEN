@@ -85,14 +85,10 @@ public class SpotOrdersController {
             Set<String> assignedIds = buyDollarsRepository.findAll().stream()
                     .map(BuyDollars::getIdDeposit)
                     .collect(Collectors.toSet());
-            Set<String> blockedAddresses = getRegisteredAddresses();
-
             ArrayNode filtered = mapper.createArrayNode();
 
-         // 🔥 NUEVO: obtengo mis direcciones internas normalizadas
-         Set<String> ownAddrs = getRegisteredAddresses().stream()
-                 .map(a -> a.trim().toLowerCase())
-                 .collect(Collectors.toSet());
+         // 🔥 Mis direcciones internas, ya normalizadas por getRegisteredAddresses().
+         Set<String> ownAddrs = getRegisteredAddresses();
 
          for (JsonNode deposit : sourceArray) {
 
@@ -109,7 +105,7 @@ public class SpotOrdersController {
              if (assignedIds.contains(id)) continue;
 
              // ❌ Es dirección interna explícita
-             if (address != null && ownAddrs.contains(address.trim().toLowerCase())) continue;
+             if (address != null && ownAddrs.contains(normalizarAddress(address))) continue;
 
              // ❌ Detectado interno por txId
              if (internal) continue;
@@ -149,7 +145,8 @@ public class SpotOrdersController {
             for (JsonNode withdrawal : sourceArray) {
                 String id = withdrawal.path("id").asText();
                 String address = withdrawal.path("address").asText(null);
-                if (!assignedIds.contains(id) && (address == null || !internalAddresses.contains(address))) {
+                if (!assignedIds.contains(id)
+                        && (address == null || !internalAddresses.contains(normalizarAddress(address)))) {
                     filtered.add(withdrawal);
                 }
             }
@@ -317,7 +314,8 @@ public class SpotOrdersController {
                     double amount = wd.path("amount").asDouble(0);
                     
                     // Omitir si ya registrada o es traspaso interno
-                    if (ventasIds.contains(id) || (addr != null && internalAddrs.contains(addr))) {
+                    if (ventasIds.contains(id)
+                            || (addr != null && internalAddrs.contains(normalizarAddress(addr)))) {
                         continue;
                     }
                     
@@ -381,7 +379,7 @@ public class SpotOrdersController {
 
                     // Si ya registrado o no es interno → se omite
                     if ((txId != null && txIdsRegistrados.contains(txId)) ||
-                    	    (addr == null || !internalAddrs.contains(addr))) {
+                    	    (addr == null || !internalAddrs.contains(normalizarAddress(addr)))) {
                     	    continue;
                     	}
                     
@@ -422,12 +420,9 @@ public class SpotOrdersController {
         LocalDateTime inicio = ayer.atStartOfDay();
         LocalDateTime fin = ayer.plusDays(1).atStartOfDay();
 
-        // Direcciones propias (normalizadas) para detectar traspasos internos.
-        Set<String> ownAddrs = accountBinanceRepository.findAll().stream()
-                .map(AccountBinance::getAddress)
-                .filter(Objects::nonNull)
-                .map(a -> a.trim().toLowerCase())
-                .collect(Collectors.toSet());
+        // Direcciones propias para detectar traspasos internos. Se usa el MISMO normalizador que
+        // el import real, si no este diagnóstico clasificaría distinto a lo que hace producción.
+        Set<String> ownAddrs = getRegisteredAddresses();
 
         ObjectMapper mapper = new ObjectMapper();
         List<Map<String, Object>> movimientos = new ArrayList<>();
@@ -449,7 +444,7 @@ public class SpotOrdersController {
                     if (remitente != null && traspasoWalletService.esWalletTraspaso(remitente)) {
                         tipo = "TRASPASO";
                         razon = "Depósito que VIENE de la wallet Bybit";
-                    } else if (remitente != null && ownAddrs.contains(remitente.trim().toLowerCase())) {
+                    } else if (remitente != null && ownAddrs.contains(normalizarAddress(remitente))) {
                         tipo = "TRASPASO INTERNO";
                         razon = "Viene de una wallet nuestra";
                     } else {
@@ -490,7 +485,7 @@ public class SpotOrdersController {
                     if (destino != null && traspasoWalletService.esWalletTraspaso(destino)) {
                         tipo = "TRASPASO";
                         razon = "Retiro que VA a la wallet Bybit";
-                    } else if (destino != null && ownAddrs.contains(destino.trim().toLowerCase())) {
+                    } else if (destino != null && ownAddrs.contains(normalizarAddress(destino))) {
                         tipo = "TRASPASO INTERNO";
                         razon = "Va a una wallet nuestra";
                     } else {
@@ -550,7 +545,24 @@ public class SpotOrdersController {
         return accountBinanceRepository.findAll().stream()
                 .map(AccountBinance::getAddress)
                 .filter(Objects::nonNull)
+                .map(SpotOrdersController::normalizarAddress)
+                .filter(a -> !a.isEmpty())
                 .collect(Collectors.toSet());
+    }
+
+    /**
+     * Normaliza una dirección para compararla sin importar el formato en que la devuelva cada API.
+     * MISMO criterio que TraspasoWalletService / BybitService / TronScanService: minúsculas, sin
+     * prefijo "0x" y sin el "41" del hex de TRON. Antes aquí se comparaba la dirección EXACTA, así
+     * que un retiro hacia una cuenta propia cuya dirección llegaba en otro formato NO se detectaba
+     * como traspaso interno y se registraba como una venta real.
+     */
+    private static String normalizarAddress(String w) {
+        if (w == null) return "";
+        String s = w.trim().toLowerCase();
+        if (s.startsWith("0x")) s = s.substring(2);
+        if (s.length() == 42 && s.startsWith("41")) s = s.substring(2);
+        return s;
     }
 
     @GetMapping("/spot-trades")
@@ -596,7 +608,7 @@ public class SpotOrdersController {
             if ("TRC20".equalsIgnoreCase(network) || "TRX".equalsIgnoreCase(network)) {
                 JsonNode tx = tronScanService.getTxByHash(txId);
                 String fromAddr = tx.path("from").asText(null);
-                if (fromAddr != null && ownAddrs.contains(fromAddr.trim().toLowerCase())) {
+                if (fromAddr != null && ownAddrs.contains(normalizarAddress(fromAddr))) {
                     return true;
                 }
             }

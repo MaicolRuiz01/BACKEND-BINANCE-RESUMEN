@@ -36,6 +36,8 @@ public class TraspasoBybitService {
 
     /** hash on-chain (minúsculas) → cuenta Bybit que hizo ese retiro. */
     private volatile Map<String, AccountBinance> indiceRetiros = new HashMap<>();
+    /** hash on-chain (minúsculas) → cuenta Bybit que RECIBIÓ ese depósito (sentido contrario). */
+    private volatile Map<String, AccountBinance> indiceDepositos = new HashMap<>();
     private volatile long indiceTs = 0L;
     private static final long TTL_MS = 60_000L; // 1 minuto
 
@@ -53,12 +55,28 @@ public class TraspasoBybitService {
         return acc;
     }
 
-    /** Reconstruye el índice consultando los retiros de todas las cuentas Bybit activas. */
+    /**
+     * ESPEJO del anterior: ¿a cuál de tus cuentas Bybit ENTRÓ este hash? Se usa para el sentido
+     * Binance/TRON → Bybit. Si un retiro nuestro comparte hash con un depósito de una cuenta
+     * Bybit propia, ese dinero no salió del negocio: es un traspaso interno, no una venta.
+     * Devuelve la cuenta destino, o null si no matchea (entonces sí es una venta real).
+     */
+    public AccountBinance cuentaDestinoPorHash(String txHash) {
+        if (txHash == null || txHash.isBlank()) return null;
+        refrescarSiVencido();
+        AccountBinance acc = indiceDepositos.get(txHash.trim().toLowerCase());
+        log.info("[TraspasoBybit][DIAG] Busco hash del retiro = '{}' → {} (el índice tiene {} hash(es) de depósito).",
+                txHash, acc != null ? acc.getName() : "NO-MATCH", indiceDepositos.size());
+        return acc;
+    }
+
+    /** Reconstruye AMBOS índices (retiros y depósitos) de todas las cuentas Bybit activas. */
     private synchronized void refrescarSiVencido() {
         boolean vigente = (System.currentTimeMillis() - indiceTs) < TTL_MS;
-        if (vigente && !indiceRetiros.isEmpty()) return;
+        if (vigente && !(indiceRetiros.isEmpty() && indiceDepositos.isEmpty())) return;
 
         Map<String, AccountBinance> nuevo = new HashMap<>();
+        Map<String, AccountBinance> nuevoDep = new HashMap<>();
         try {
             for (AccountBinance acc : accountBinanceRepository.findAll()) {
                 // Acepta "BYBIT" y el typo común "BYBIP" (cualquier tipo que empiece por BYBI).
@@ -72,19 +90,29 @@ public class TraspasoBybitService {
                 } catch (Exception e) {
                     log.warn("[TraspasoBybit] No se pudieron leer retiros de {}: {}", acc.getName(), e.getMessage());
                 }
+                try {
+                    List<String> hashesDep = bybitService.getDepositTxIds(acc.getApiKey(), acc.getApiSecret());
+                    for (String h : hashesDep) {
+                        if (h != null && !h.isBlank()) nuevoDep.put(h.trim().toLowerCase(), acc);
+                    }
+                } catch (Exception e) {
+                    log.warn("[TraspasoBybit] No se pudieron leer depósitos de {}: {}", acc.getName(), e.getMessage());
+                }
             }
         } catch (Exception e) {
-            log.warn("[TraspasoBybit] Error armando el índice de retiros: {}", e.getMessage());
+            log.warn("[TraspasoBybit] Error armando los índices Bybit: {}", e.getMessage());
         }
 
-        // Solo reemplaza el índice si obtuvimos algo; si todo falló, conserva el anterior.
-        if (!nuevo.isEmpty() || indiceRetiros.isEmpty()) {
+        // Solo reemplaza los índices si obtuvimos algo; si todo falló, conserva los anteriores.
+        if (!nuevo.isEmpty() || !nuevoDep.isEmpty()
+                || (indiceRetiros.isEmpty() && indiceDepositos.isEmpty())) {
             indiceRetiros = nuevo;
+            indiceDepositos = nuevoDep;
             indiceTs = System.currentTimeMillis();
         }
 
-        // DIAGNÓSTICO: qué hashes de retiro trajo Bybit (quitar cuando ya funcione).
-        log.info("[TraspasoBybit][DIAG] Índice de retiros armado con {} hash(es): {}",
-                indiceRetiros.size(), indiceRetiros.keySet());
+        // DIAGNÓSTICO: qué hashes trajo Bybit (quitar cuando ya funcione).
+        log.info("[TraspasoBybit][DIAG] Índices armados — retiros: {} hash(es), depósitos: {} hash(es).",
+                indiceRetiros.size(), indiceDepositos.size());
     }
 }
