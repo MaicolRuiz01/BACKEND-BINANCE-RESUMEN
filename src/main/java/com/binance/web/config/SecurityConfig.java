@@ -48,10 +48,6 @@ public class SecurityConfig {
                         .requestMatchers("/telegram/webhook").permitAll()
                         // Endpoint de diagnóstico (solo lectura, no guarda nada) — abierto para pruebas.
                         .requestMatchers("/api/spot-orders/diagnostico-ayer").permitAll()
-                        // Bot de conciliación bancaria (script local, no un usuario logueado) —
-                        // se autentica con API key propia (X-Bot-Api-Key), validada a mano
-                        // dentro de ConciliacionBancariaController, no con el JWT normal.
-                        .requestMatchers("/conciliacion/**").permitAll()
                         // Todo lo demás requiere autenticación
                         .anyRequest().authenticated()
                 )
