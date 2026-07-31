@@ -36,7 +36,7 @@ public interface MovimientoRepository extends JpaRepository<Movimiento, Integer>
 	@Query("SELECT new com.binance.web.movimientos.MovimientoDTO(" +
 	       "m.id, m.tipo, m.fecha, m.monto, " +
 	       "co.name, cd.name, cj.name, cjd.name, COALESCE(pc.nombre, cor.nombre), COALESCE(pp.name, po.name), m.motivo, " +
-	       "m.saldoCajaResultante, m.saldoCajaDestinoResultante) " +
+	       "m.saldoCajaResultante, m.saldoCajaDestinoResultante, co.id, cd.id) " +
 	       "FROM Movimiento m " +
 	       "LEFT JOIN m.cuentaOrigen co " +
 	       "LEFT JOIN m.cuentaDestino cd " +
@@ -54,7 +54,7 @@ public interface MovimientoRepository extends JpaRepository<Movimiento, Integer>
 	@Query("SELECT new com.binance.web.movimientos.MovimientoDTO(" +
 	       "m.id, m.tipo, m.fecha, m.monto, " +
 	       "co.name, cd.name, cj.name, cjd.name, COALESCE(pc.nombre, cor.nombre), COALESCE(pp.name, po.name), m.motivo, " +
-	       "m.saldoCajaResultante, m.saldoCajaDestinoResultante) " +
+	       "m.saldoCajaResultante, m.saldoCajaDestinoResultante, co.id, cd.id) " +
 	       "FROM Movimiento m " +
 	       "LEFT JOIN m.cuentaOrigen co " +
 	       "LEFT JOIN m.cuentaDestino cd " +

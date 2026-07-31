@@ -88,6 +88,37 @@ public class AccountCop {
     @Column(name = "bloqueada", nullable = false)
     private Boolean bloqueada = false;
 
+    /**
+     * Resultado de la última conciliación bancaria (bot de conciliación en
+     * Automatizacion Bancolombia): null = nunca se ha conciliado, true = el bot
+     * logró loguearse en Bancolombia y leer el saldo (la cuenta NO está bloqueada,
+     * así el saldo no cuadre exacto con Pochonance), false = no pudo loguearse o
+     * leer el saldo (posible bloqueo u otra falla técnica del banco).
+     */
+    @Column(name = "disponible_banco")
+    private Boolean disponibleBanco;
+
+    @Column(name = "ultima_conciliacion")
+    private java.time.LocalDateTime ultimaConciliacion;
+
+    /** saldoRealBanco - balance de Pochonance, calculado por Pochonance (no por el bot) al recibir el reporte. */
+    @Column(name = "ultimo_desfase_banco")
+    private Double ultimoDesfaseBanco;
+
+    /** Detalle del error si disponibleBanco = false (ej. "timeout esperando login"). */
+    @Column(name = "ultimo_error_conciliacion")
+    private String ultimoErrorConciliacion;
+
+    /**
+     * true si el bloqueo actual (bloqueada = true) lo puso el bot de conciliación
+     * automáticamente (porque no pudo leer la cuenta en Bancolombia), no un humano
+     * a mano desde Saldos. Sirve para el auto-desbloqueo: si el bot vuelve a leer
+     * bien la cuenta, solo se desbloquea sola cuando fue ÉL quien la bloqueó — un
+     * bloqueo manual nunca lo toca el bot, ni para bloquear ni para desbloquear.
+     */
+    @Column(name = "bloqueada_por_bot", nullable = false)
+    private Boolean bloqueadaPorBot = false;
+
     /** Llaves de Brebe asociadas a esta cuenta. Se serializan en el JSON. */
     @OneToMany(mappedBy = "accountCop", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
     private List<BrebeKey> brebeKeys = new ArrayList<>();
@@ -137,6 +168,11 @@ public class AccountCop {
     public Boolean getActivaParaP2P() { return activaParaP2P; }
     public String getCupoTipoP2P() { return cupoTipoP2P; }
     public Boolean getBloqueada() { return bloqueada; }
+    public Boolean getDisponibleBanco() { return disponibleBanco; }
+    public java.time.LocalDateTime getUltimaConciliacion() { return ultimaConciliacion; }
+    public Double getUltimoDesfaseBanco() { return ultimoDesfaseBanco; }
+    public String getUltimoErrorConciliacion() { return ultimoErrorConciliacion; }
+    public Boolean getBloqueadaPorBot() { return bloqueadaPorBot; }
     public List<BrebeKey> getBrebeKeys() { return brebeKeys; }
 
     // ==================== SETTERS ====================
@@ -158,6 +194,11 @@ public class AccountCop {
     public void setActivaParaP2P(Boolean activaParaP2P) { this.activaParaP2P = activaParaP2P; }
     public void setCupoTipoP2P(String cupoTipoP2P) { this.cupoTipoP2P = cupoTipoP2P; }
     public void setBloqueada(Boolean bloqueada) { this.bloqueada = bloqueada; }
+    public void setDisponibleBanco(Boolean disponibleBanco) { this.disponibleBanco = disponibleBanco; }
+    public void setUltimaConciliacion(java.time.LocalDateTime ultimaConciliacion) { this.ultimaConciliacion = ultimaConciliacion; }
+    public void setUltimoDesfaseBanco(Double ultimoDesfaseBanco) { this.ultimoDesfaseBanco = ultimoDesfaseBanco; }
+    public void setUltimoErrorConciliacion(String ultimoErrorConciliacion) { this.ultimoErrorConciliacion = ultimoErrorConciliacion; }
+    public void setBloqueadaPorBot(Boolean bloqueadaPorBot) { this.bloqueadaPorBot = bloqueadaPorBot; }
     public void setBrebeKeys(List<BrebeKey> brebeKeys) { this.brebeKeys = brebeKeys; }
 
     // ==================== equals / hashCode / toString ====================

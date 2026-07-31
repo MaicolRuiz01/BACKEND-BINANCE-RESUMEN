@@ -545,7 +545,7 @@ public class TelegramWebhookService {
                 linea.append("Total — $").append(String.format("%,.0f", montoCajero + montoCorresponsal));
 
                 if (m.getCuentaOrigen() != null) {
-                    linea.append("\n").append(m.getCuentaOrigen());
+                    linea.append("\n").append(etiquetaCuentaOrigen(m));
                 }
                 if (primero.getMotivo() != null && !primero.getMotivo().isBlank()) {
                     linea.append("\n").append(tipoParaMostrar(primero.getTipo())).append(": ").append(primero.getMotivo());
@@ -566,11 +566,11 @@ public class TelegramWebhookService {
             // el segundo en adelante lleva una flechita para no perder el sentido.
             java.util.List<String> partes = new java.util.ArrayList<>();
             if (m.getCuentaOrigen() != null)
-                partes.add(m.getCuentaOrigen());
+                partes.add(etiquetaCuentaOrigen(m));
             if (m.getPagoCliente() != null)
                 partes.add(m.getPagoCliente());
             if (m.getCuentaDestino() != null)
-                partes.add(m.getCuentaDestino());
+                partes.add(etiquetaCuentaDestino(m));
             if (m.getCajaDestino() != null)
                 partes.add(m.getCajaDestino());
             if (m.getPagoProveedor() != null)
@@ -1032,7 +1032,7 @@ public class TelegramWebhookService {
         telegramService.answerCallbackQuery(callbackQueryId, "");
 
         if (messageId != null) {
-            String texto = "¿Retiraste todo?";
+            String texto = resumenCuentasYMontosApilado(solicitud);
             java.util.LinkedHashMap<String, String> buttonsData = new java.util.LinkedHashMap<>();
             buttonsData.put("✅ Retiré todo", "completed_todo:" + solicitudId);
             buttonsData.put("✏️ Otra cifra", "completed_otra:" + solicitudId);
@@ -1063,7 +1063,7 @@ public class TelegramWebhookService {
 
         if (messageId != null) {
             telegramService.editMessageTextOnly(String.valueOf(telegramUserId), messageId,
-                    "✅ *Retiro completado* (Solicitud #" + solicitudId + ")");
+                    "✅ *Retiro completado*\n" + resumenCuentasYMontos(solicitud));
         }
 
         if (retirador != null && retirador.getEfectivo() != null) {
@@ -1133,8 +1133,8 @@ public class TelegramWebhookService {
         Retirador retirador = retiradorRepository.findById(solicitud.getRetirador().getId()).orElse(null);
 
         String textoFinal = String.format(
-                "✅ *Retiro registrado* (Solicitud #%d)\n\nSolicitado: *$%,.0f*\nRetiraste: *$%,.0f*\n\nQuedó anotado en movimientos.",
-                pending.solicitudId(), montoSolicitado, montoReal);
+                "✅ *Retiro registrado*\n%s\n\nSolicitado: *$%,.0f*\nRetiraste: *$%,.0f*\n\nQuedó anotado en movimientos.",
+                resumenCuentasYMontos(solicitud), montoSolicitado, montoReal);
         telegramService.sendMessage(String.valueOf(telegramUserId), textoFinal);
 
         if (retirador != null && retirador.getEfectivo() != null) {
@@ -1163,13 +1163,13 @@ public class TelegramWebhookService {
         // Reenviar mensaje al grupo
         retiradorService.reenviarSolicitudGeneral(solicitud);
 
-        // Sin popup: el mensaje se edita abajo a "Retiro cancelado", ya es visible.
         telegramService.answerCallbackQuery(callbackQueryId, "");
 
-        // Editar el mensaje original para quitar los botones
+        // Borra el mensaje por completo — como si la solicitud nunca hubiera
+        // existido para este retirador, sin dejar ningún texto de "cancelado"
+        // (ya vuelve al grupo para que otro la tome, ver reenviarSolicitudGeneral arriba).
         if (messageId != null) {
-            telegramService.editMessageTextOnly(String.valueOf(telegramUserId), messageId,
-                    "❌ *Retiro cancelado* (Solicitud #" + solicitudId + " ha vuelto al grupo)");
+            telegramService.deleteMessage(String.valueOf(telegramUserId), messageId);
         }
     }
 
@@ -1255,6 +1255,58 @@ public class TelegramWebhookService {
     // Helpers de texto
     // ─────────────────────────────────────────────────────────────────────────
 
+    /**
+     * Identifica la cuenta frente al retirador sin revelar el nombre del dueño
+     * — "Cuenta 1" en vez de "Diana". Mismo criterio que en RetiradorServiceImpl.
+     */
+    private static String etiquetaCuenta(AccountCop cuenta) {
+        return "Cuenta " + (cuenta.getId() != null ? cuenta.getId() : "?");
+    }
+
+    /** Mismo criterio de "Cuenta {id}" pero a partir de un MovimientoDTO (que solo
+     *  trae el nombre + id livianos, no la entidad completa) — usado en el reporte
+     *  "Movimientos de hoy" para no revelar el nombre del dueño de la cuenta.
+     *  Si por algún motivo no hay id (movimiento sin cuenta COP asociada), cae
+     *  de vuelta al nombre para no perder el dato. */
+    private static String etiquetaCuentaOrigen(com.binance.web.movimientos.MovimientoDTO m) {
+        return m.getCuentaOrigenId() != null ? "Cuenta " + m.getCuentaOrigenId() : m.getCuentaOrigen();
+    }
+
+    private static String etiquetaCuentaDestino(com.binance.web.movimientos.MovimientoDTO m) {
+        return m.getCuentaDestinoId() != null ? "Cuenta " + m.getCuentaDestinoId() : m.getCuentaDestino();
+    }
+
+    /** "Cuenta: 5\n$1.000" (una cuenta), o el mismo bloque repetido separado por
+     *  línea en blanco si la solicitud tiene varias cuentas — formato apilado
+     *  para el mensaje de confirmación ("¿Retiraste todo?"), sin ningún texto
+     *  extra alrededor. */
+    private String resumenCuentasYMontosApilado(SolicitudRetiro solicitud) {
+        StringBuilder sb = new StringBuilder();
+        var detalles = solicitud.getDetalles();
+        for (int i = 0; i < detalles.size(); i++) {
+            DetalleRetiro d = detalles.get(i);
+            if (i > 0) sb.append("\n\n");
+            sb.append("Cuenta: ").append(d.getCuentaCop().getId() != null ? d.getCuentaCop().getId() : "?")
+              .append("\n$").append(String.format("%,.0f", d.totalDetalle()));
+        }
+        return sb.toString();
+    }
+
+    /** "Cuenta 1: $2.700.000" (o varias, separadas por coma) — para que el
+     *  retirador sepa A QUÉ retiro se refiere un mensaje cuando puede tener
+     *  varias solicitudes en curso al mismo tiempo. */
+    private String resumenCuentasYMontos(SolicitudRetiro solicitud) {
+        StringBuilder sb = new StringBuilder();
+        var detalles = solicitud.getDetalles();
+        for (int i = 0; i < detalles.size(); i++) {
+            DetalleRetiro d = detalles.get(i);
+            if (i > 0) sb.append(", ");
+            sb.append(etiquetaCuenta(d.getCuentaCop())).append(": $")
+              .append(String.format("%,.0f", d.totalDetalle()));
+        }
+        return sb.toString();
+    }
+
     private String buildTextoTomado(SolicitudRetiro solicitud, Retirador retirador) {
         StringBuilder sb = new StringBuilder();
         sb.append("✅ *Solicitud de Retiro #").append(solicitud.getId()).append(" — TOMADA*\n");
@@ -1288,7 +1340,7 @@ public class TelegramWebhookService {
             if (i > 0)
                 sb.append(", ");
             String banco = d.getCuentaCop().getBankType() != null ? d.getCuentaCop().getBankType().name() : "?";
-            sb.append(d.getCuentaCop().getName()).append(" (").append(banco).append(")");
+            sb.append(etiquetaCuenta(d.getCuentaCop())).append(" (").append(banco).append(")");
         }
         return sb.toString();
     }

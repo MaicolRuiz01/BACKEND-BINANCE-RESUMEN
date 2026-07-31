@@ -21,7 +21,7 @@ public class MovimientoDTO {
 	private String cajaDestino;
 	private String pagoCliente;
 	private String pagoProveedor;
-	
+
 	private String motivo;
     private String actor;
     private Double saldoAnterior;
@@ -31,11 +31,16 @@ public class MovimientoDTO {
     private Double saldoCajaResultante;
     private Double saldoCajaDestinoResultante;
 
+    /** ID de la cuenta COP de origen/destino, para mostrar "#N" junto al nombre en la app. */
+    private Integer cuentaOrigenId;
+    private Integer cuentaDestinoId;
+
     /** Constructor liviano para la proyección JPQL de movimientos de caja (evita el N+1 del EAGER). */
     public MovimientoDTO(Integer id, String tipo, LocalDateTime fecha, Double monto,
                          String cuentaOrigen, String cuentaDestino, String caja, String cajaDestino,
                          String pagoCliente, String pagoProveedor, String motivo,
-                         Double saldoCajaResultante, Double saldoCajaDestinoResultante) {
+                         Double saldoCajaResultante, Double saldoCajaDestinoResultante,
+                         Integer cuentaOrigenId, Integer cuentaDestinoId) {
         this.id = id;
         this.tipo = tipo;
         this.fecha = fecha;
@@ -49,6 +54,8 @@ public class MovimientoDTO {
         this.motivo = motivo;
         this.saldoCajaResultante = saldoCajaResultante;
         this.saldoCajaDestinoResultante = saldoCajaDestinoResultante;
+        this.cuentaOrigenId = cuentaOrigenId;
+        this.cuentaDestinoId = cuentaDestinoId;
     }
 
 }
