@@ -109,6 +109,16 @@ public class AccountCop {
     @Column(name = "ultimo_error_conciliacion")
     private String ultimoErrorConciliacion;
 
+    /**
+     * true si el bloqueo actual (bloqueada = true) lo puso el bot de conciliación
+     * automáticamente (porque no pudo leer la cuenta en Bancolombia), no un humano
+     * a mano desde Saldos. Sirve para el auto-desbloqueo: si el bot vuelve a leer
+     * bien la cuenta, solo se desbloquea sola cuando fue ÉL quien la bloqueó — un
+     * bloqueo manual nunca lo toca el bot, ni para bloquear ni para desbloquear.
+     */
+    @Column(name = "bloqueada_por_bot", nullable = false)
+    private Boolean bloqueadaPorBot = false;
+
     /** Llaves de Brebe asociadas a esta cuenta. Se serializan en el JSON. */
     @OneToMany(mappedBy = "accountCop", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
     private List<BrebeKey> brebeKeys = new ArrayList<>();
@@ -162,6 +172,7 @@ public class AccountCop {
     public java.time.LocalDateTime getUltimaConciliacion() { return ultimaConciliacion; }
     public Double getUltimoDesfaseBanco() { return ultimoDesfaseBanco; }
     public String getUltimoErrorConciliacion() { return ultimoErrorConciliacion; }
+    public Boolean getBloqueadaPorBot() { return bloqueadaPorBot; }
     public List<BrebeKey> getBrebeKeys() { return brebeKeys; }
 
     // ==================== SETTERS ====================
@@ -187,6 +198,7 @@ public class AccountCop {
     public void setUltimaConciliacion(java.time.LocalDateTime ultimaConciliacion) { this.ultimaConciliacion = ultimaConciliacion; }
     public void setUltimoDesfaseBanco(Double ultimoDesfaseBanco) { this.ultimoDesfaseBanco = ultimoDesfaseBanco; }
     public void setUltimoErrorConciliacion(String ultimoErrorConciliacion) { this.ultimoErrorConciliacion = ultimoErrorConciliacion; }
+    public void setBloqueadaPorBot(Boolean bloqueadaPorBot) { this.bloqueadaPorBot = bloqueadaPorBot; }
     public void setBrebeKeys(List<BrebeKey> brebeKeys) { this.brebeKeys = brebeKeys; }
 
     // ==================== equals / hashCode / toString ====================

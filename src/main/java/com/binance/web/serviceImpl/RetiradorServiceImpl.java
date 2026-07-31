@@ -875,6 +875,18 @@ public class RetiradorServiceImpl implements RetiradorService {
     // Helpers privados
     // ═══════════════════════════════════════════════════════════════
 
+    /**
+     * Identifica la cuenta frente al RETIRADOR sin revelar el nombre del dueño —
+     * en vez de "Diana" o "Javier", el retirador ve "Cuenta 1", "Cuenta 30", etc.
+     * (el ID interno de la cuenta, el mismo que se muestra en la app junto al
+     * nombre para que el administrador pueda correlacionarlos). Esto NO aplica
+     * a las vistas propias de la app (historial, modales de selección) — ahí
+     * el administrador sigue viendo el nombre normalmente.
+     */
+    private static String etiquetaCuenta(AccountCop cuenta) {
+        return "Cuenta " + (cuenta.getId() != null ? cuenta.getId() : "?");
+    }
+
     private List<DetalleRetiro> buildDetalles(
             List<SolicitudRetiroRequestDto.DetalleDto> dtos, SolicitudRetiro solicitud) {
         List<DetalleRetiro> result = new ArrayList<>();
@@ -961,7 +973,7 @@ public class RetiradorServiceImpl implements RetiradorService {
                     DetalleRetiro d = solicitud.getDetalles().get(i);
                     if (i > 0)
                         sb.append(", ");
-                    sb.append(d.getCuentaCop().getName())
+                    sb.append(etiquetaCuenta(d.getCuentaCop()))
                             .append(" (").append(d.getCuentaCop().getBankType().name()).append(")");
                 }
                 // BUG FIX: si ya existía un mensaje anterior para esta misma solicitud
@@ -1051,7 +1063,7 @@ public class RetiradorServiceImpl implements RetiradorService {
                 DetalleRetiro d = solicitud.getDetalles().get(i);
                 if (i > 0)
                     sb.append(", ");
-                sb.append(d.getCuentaCop().getName())
+                sb.append(etiquetaCuenta(d.getCuentaCop()))
                         .append(" (").append(d.getCuentaCop().getBankType().name()).append(")");
             }
 
