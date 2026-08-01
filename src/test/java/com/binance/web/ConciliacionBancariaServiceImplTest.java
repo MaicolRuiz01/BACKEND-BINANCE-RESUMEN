@@ -4,19 +4,27 @@ import com.binance.web.Entity.AccountCop;
 import com.binance.web.Entity.BankType;
 import com.binance.web.Repository.AccountCopRepository;
 import com.binance.web.conciliacion.ConciliacionBancariaServiceImpl;
+import com.binance.web.conciliacion.ConciliacionBotChat;
+import com.binance.web.conciliacion.ConciliacionBotChatRepository;
+import com.binance.web.conciliacion.ConciliacionBotTelegramClient;
 import com.binance.web.conciliacion.ConciliacionResponseDto;
 import com.binance.web.conciliacion.ConciliacionResultadoDto;
+import com.binance.web.conciliacion.ConciliacionSolicitud;
+import com.binance.web.conciliacion.ConciliacionSolicitudRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -24,11 +32,21 @@ import static org.mockito.Mockito.*;
  * nombre (con tildes/mayúsculas distintas), cálculo del desfase con el saldo
  * EN VIVO de Pochonance (no el que manda el bot), y manejo de casos raros
  * (nombre que no existe, nombre ambiguo, datos incompletos) sin romper nada.
+ *
+ * También cubre el "auto-trigger": registrar el chat_id del bot
+ * (registrarChat), encolar + consumir una solicitud pendiente cuando se
+ * activa una cuenta en "Cuentas P2P" (solicitarConciliacion /
+ * obtenerYConsumirPendiente) — el mecanismo real que usa el bot, vía
+ * polling, ya que nunca podría enterarse leyendo sus propios mensajes de
+ * Telegram.
  */
 @ExtendWith(MockitoExtension.class)
 class ConciliacionBancariaServiceImplTest {
 
     @Mock private AccountCopRepository accountCopRepository;
+    @Mock private ConciliacionBotChatRepository conciliacionBotChatRepository;
+    @Mock private ConciliacionBotTelegramClient conciliacionBotTelegramClient;
+    @Mock private ConciliacionSolicitudRepository conciliacionSolicitudRepository;
 
     @InjectMocks
     private ConciliacionBancariaServiceImpl service;
@@ -103,6 +121,52 @@ class ConciliacionBancariaServiceImplTest {
         assertFalse(ana.getDisponibleBanco());
         assertNull(ana.getUltimoDesfaseBanco());
         assertEquals("timeout esperando login", ana.getUltimoErrorConciliacion());
+    }
+
+    @Test
+    void cuentaNoDisponible_seBloqueaAutomaticamenteYSaleDeP2P() {
+        ana.setActivaParaP2P(true);
+        when(accountCopRepository.findByBankType(BankType.BANCOLOMBIA)).thenReturn(List.of(ana));
+
+        service.procesarResultado(request(item("Ana", false, null, "error leyendo Bancolombia")));
+
+        assertTrue(ana.getBloqueada());
+        assertTrue(ana.getBloqueadaPorBot());
+        assertFalse(ana.getActivaParaP2P());
+    }
+
+    @Test
+    void cuentaBloqueadaPorElBot_seDesbloqueaSolaCuandoVuelveALeerseBien() {
+        ana.setBloqueada(true);
+        ana.setBloqueadaPorBot(true);
+        when(accountCopRepository.findByBankType(BankType.BANCOLOMBIA)).thenReturn(List.of(ana));
+
+        service.procesarResultado(request(item("Ana", true, 1250.0, null)));
+
+        assertFalse(ana.getBloqueada());
+        assertFalse(ana.getBloqueadaPorBot());
+    }
+
+    @Test
+    void cuentaBloqueadaManualmente_elBotNuncaLaDesbloqueaAunqueLaLeaBien() {
+        ana.setBloqueada(true);
+        ana.setBloqueadaPorBot(false); // bloqueo manual desde Saldos, no del bot
+        when(accountCopRepository.findByBankType(BankType.BANCOLOMBIA)).thenReturn(List.of(ana));
+
+        service.procesarResultado(request(item("Ana", true, 1250.0, null)));
+
+        assertTrue(ana.getBloqueada(), "un bloqueo manual no lo debe tocar el bot");
+        assertFalse(ana.getBloqueadaPorBot());
+    }
+
+    @Test
+    void cuentaNiBloqueadaNiTocadaPorElBot_disponibleTrue_noCambiaNadaDeBloqueo() {
+        when(accountCopRepository.findByBankType(BankType.BANCOLOMBIA)).thenReturn(List.of(ana));
+
+        service.procesarResultado(request(item("Ana", true, 1250.0, null)));
+
+        assertFalse(ana.getBloqueada());
+        assertFalse(ana.getBloqueadaPorBot());
     }
 
     @Test
@@ -183,5 +247,117 @@ class ConciliacionBancariaServiceImplTest {
         assertTrue(resp.getActualizados().isEmpty());
         assertTrue(resp.getNoEncontrados().isEmpty());
         verifyNoInteractions(accountCopRepository);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // registrarChat / solicitarConciliacion — auto-trigger desde "Cuentas P2P"
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    void registrarChat_primeraVez_creaLaFilaConIdFijo() {
+        when(conciliacionBotChatRepository.findById(1)).thenReturn(Optional.empty());
+
+        service.registrarChat(555L);
+
+        ArgumentCaptor<ConciliacionBotChat> captor = ArgumentCaptor.forClass(ConciliacionBotChat.class);
+        verify(conciliacionBotChatRepository).save(captor.capture());
+        assertEquals(1, captor.getValue().getId());
+        assertEquals(555L, captor.getValue().getChatId());
+        assertNotNull(captor.getValue().getRegistradoEn());
+    }
+
+    @Test
+    void registrarChat_yaExistiaUno_loReemplazaEnVezDeCrearOtro() {
+        ConciliacionBotChat existente = new ConciliacionBotChat();
+        existente.setId(1);
+        existente.setChatId(111L);
+        when(conciliacionBotChatRepository.findById(1)).thenReturn(Optional.of(existente));
+
+        service.registrarChat(999L);
+
+        verify(conciliacionBotChatRepository).save(existente);
+        assertEquals(999L, existente.getChatId());
+    }
+
+    @Test
+    void registrarChat_chatIdNulo_noHaceNadaNiRompe() {
+        assertDoesNotThrow(() -> service.registrarChat(null));
+        verifyNoInteractions(conciliacionBotChatRepository);
+    }
+
+    @Test
+    void solicitarConciliacion_encolaUnaSolicitudPendienteConElNombreDeLaCuenta() {
+        when(conciliacionBotChatRepository.findById(1)).thenReturn(Optional.empty());
+
+        service.solicitarConciliacion(ana);
+
+        ArgumentCaptor<ConciliacionSolicitud> captor = ArgumentCaptor.forClass(ConciliacionSolicitud.class);
+        verify(conciliacionSolicitudRepository).save(captor.capture());
+        assertEquals("Ana", captor.getValue().getCuenta());
+        assertFalse(captor.getValue().isConsumida());
+        assertNotNull(captor.getValue().getCreadaEn());
+    }
+
+    @Test
+    void solicitarConciliacion_conChatRegistrado_tambienMandaAvisoInformativoPorTelegram() {
+        ConciliacionBotChat chat = new ConciliacionBotChat();
+        chat.setId(1);
+        chat.setChatId(777L);
+        when(conciliacionBotChatRepository.findById(1)).thenReturn(Optional.of(chat));
+
+        service.solicitarConciliacion(ana);
+
+        ArgumentCaptor<String> textoCaptor = ArgumentCaptor.forClass(String.class);
+        verify(conciliacionBotTelegramClient).enviarMensaje(eq(777L), textoCaptor.capture());
+        assertTrue(textoCaptor.getValue().contains("Ana"),
+                "el mensaje debe traer el nombre de la cuenta: " + textoCaptor.getValue());
+    }
+
+    @Test
+    void solicitarConciliacion_sinChatRegistradoTodavia_llamaAlClienteConNulYNoRompe() {
+        when(conciliacionBotChatRepository.findById(1)).thenReturn(Optional.empty());
+
+        assertDoesNotThrow(() -> service.solicitarConciliacion(ana));
+
+        verify(conciliacionBotTelegramClient).enviarMensaje(eq((Long) null), any());
+    }
+
+    @Test
+    void solicitarConciliacion_cuentaNula_noRompeNiEncolaNiLlamaAlCliente() {
+        assertDoesNotThrow(() -> service.solicitarConciliacion(null));
+        verifyNoInteractions(conciliacionBotTelegramClient);
+        verifyNoInteractions(conciliacionSolicitudRepository);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // obtenerYConsumirPendiente — polling del bot (reemplaza el intento fallido
+    // de "escuchar" el aviso por Telegram)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    void obtenerYConsumirPendiente_hayUnaPendiente_laDevuelveYLaMarcaConsumida() {
+        ConciliacionSolicitud pendiente = new ConciliacionSolicitud();
+        pendiente.setId(10L);
+        pendiente.setCuenta("Jorge Sanchez");
+        pendiente.setConsumida(false);
+        when(conciliacionSolicitudRepository.findFirstByConsumidaFalseOrderByCreadaEnAsc())
+                .thenReturn(Optional.of(pendiente));
+
+        Optional<String> resultado = service.obtenerYConsumirPendiente();
+
+        assertEquals(Optional.of("Jorge Sanchez"), resultado);
+        assertTrue(pendiente.isConsumida());
+        verify(conciliacionSolicitudRepository).save(pendiente);
+    }
+
+    @Test
+    void obtenerYConsumirPendiente_noHayNinguna_devuelveVacioSinRomper() {
+        when(conciliacionSolicitudRepository.findFirstByConsumidaFalseOrderByCreadaEnAsc())
+                .thenReturn(Optional.empty());
+
+        Optional<String> resultado = assertDoesNotThrow(() -> service.obtenerYConsumirPendiente());
+
+        assertTrue(resultado.isEmpty());
+        verify(conciliacionSolicitudRepository, never()).save(any());
     }
 }
