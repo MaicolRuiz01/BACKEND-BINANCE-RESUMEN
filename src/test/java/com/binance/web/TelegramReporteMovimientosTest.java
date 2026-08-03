@@ -85,11 +85,11 @@ public class TelegramReporteMovimientosTest {
     }
 
     private MovimientoDTO retiro(int id, String tipo, LocalDateTime fecha, double monto, String cuenta) {
-        return new MovimientoDTO(id, tipo, fecha, monto, cuenta, null, null, null, null, null, null, null, null);
+        return new MovimientoDTO(id, tipo, fecha, monto, cuenta, null, null, null, null, null, null, null, null, null, null);
     }
 
     private MovimientoDTO retiroConMotivo(int id, String tipo, LocalDateTime fecha, double monto, String cuenta, String motivo) {
-        return new MovimientoDTO(id, tipo, fecha, monto, cuenta, null, null, null, null, null, motivo, null, null);
+        return new MovimientoDTO(id, tipo, fecha, monto, cuenta, null, null, null, null, null, motivo, null, null, null, null);
     }
 
     @Test
