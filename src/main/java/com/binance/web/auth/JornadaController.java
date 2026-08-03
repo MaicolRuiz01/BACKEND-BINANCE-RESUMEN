@@ -78,6 +78,68 @@ public class JornadaController {
         }
     }
 
+    /**
+     * Reanuda una jornada que la vigilancia pausó automáticamente.
+     * Acumula el tiempo que estuvo detenida para que NO se le pague, y limpia el aviso.
+     */
+    @PostMapping("/reanudar")
+    public ResponseEntity<Map<String, Object>> reanudar(@AuthenticationPrincipal Usuario user) {
+        if (user == null) return ResponseEntity.status(401).build();
+
+        JornadaTrabajo jornada = jornadaRepository
+                .findFirstByUsernameAndEndedAtIsNullOrderByStartedAtDesc(user.getUsername())
+                .orElse(null);
+
+        if (jornada == null) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("activa", false);
+            return ResponseEntity.ok(m);
+        }
+
+        if (jornada.getPausadaAt() != null) {
+            long pausados = jornada.getSegundosPausados() != null ? jornada.getSegundosPausados() : 0L;
+            pausados += Math.max(0, Duration.between(jornada.getPausadaAt(), LocalDateTime.now()).getSeconds());
+            jornada.setSegundosPausados(pausados);
+            jornada.setPausadaAt(null);
+            jornada.setMotivoPausa(null);
+            // Al reanudar se le da margen limpio: la cuenta de "en seco" arranca desde ahora.
+            jornada.setUltimaVentaVistaAt(LocalDateTime.now());
+            jornada.setUltimaAlertaAt(null);
+            jornada.setAvisoPendiente(null);
+            jornada.setAvisoPendienteAt(null);
+            jornada = jornadaRepository.save(jornada);
+
+            try {
+                if (JornadaSseController.INSTANCE != null) {
+                    JornadaSseController.INSTANCE.notificarReanudada(user.getUsername());
+                }
+            } catch (Exception ignored) { /* el SSE es el canal rápido, no el confiable */ }
+        }
+        return ResponseEntity.ok(toMap(jornada));
+    }
+
+    /**
+     * El operador ya vio el aviso: se limpia para que no se le repita al recargar.
+     * No afecta la pausa (esa solo se levanta reanudando).
+     */
+    @PostMapping("/aviso-visto")
+    public ResponseEntity<Map<String, Object>> avisoVisto(@AuthenticationPrincipal Usuario user) {
+        if (user == null) return ResponseEntity.status(401).build();
+
+        JornadaTrabajo jornada = jornadaRepository
+                .findFirstByUsernameAndEndedAtIsNullOrderByStartedAtDesc(user.getUsername())
+                .orElse(null);
+
+        if (jornada != null && jornada.getAvisoPendiente() != null && jornada.getPausadaAt() == null) {
+            jornada.setAvisoPendiente(null);
+            jornada.setAvisoPendienteAt(null);
+            jornada = jornadaRepository.save(jornada);
+        }
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("ok", true);
+        return ResponseEntity.ok(m);
+    }
+
     /** Termina la jornada en curso (si hay). */
     @PostMapping("/finalizar")
     public ResponseEntity<Map<String, Object>> finalizar(@AuthenticationPrincipal Usuario user) {
@@ -88,7 +150,18 @@ public class JornadaController {
                 .orElse(null);
 
         if (jornada != null) {
-            jornada.setEndedAt(LocalDateTime.now());
+            LocalDateTime ahora = LocalDateTime.now();
+            // Si se termina estando pausada, se cierra primero la pausa para que ese tiempo
+            // quede contabilizado como no pagado y no se pierda al cerrar la jornada.
+            if (jornada.getPausadaAt() != null) {
+                long pausados = jornada.getSegundosPausados() != null ? jornada.getSegundosPausados() : 0L;
+                pausados += Math.max(0, Duration.between(jornada.getPausadaAt(), ahora).getSeconds());
+                jornada.setSegundosPausados(pausados);
+                jornada.setPausadaAt(null);
+            }
+            jornada.setEndedAt(ahora);
+            jornada.setAvisoPendiente(null);
+            jornada.setAvisoPendienteAt(null);
             jornada = jornadaRepository.save(jornada);
             return ResponseEntity.ok(toMap(jornada));
         }
@@ -117,8 +190,22 @@ public class JornadaController {
 
     private Map<String, Object> toMap(JornadaTrabajo j) {
         boolean activa = j.getEndedAt() == null;
-        LocalDateTime fin = activa ? LocalDateTime.now() : j.getEndedAt();
-        long seg = j.getStartedAt() != null ? Math.max(0, Duration.between(j.getStartedAt(), fin).getSeconds()) : 0;
+        boolean pausada = activa && j.getPausadaAt() != null;
+        LocalDateTime ahora = LocalDateTime.now();
+        LocalDateTime fin = activa ? ahora : j.getEndedAt();
+
+        long seg = 0;
+        if (j.getStartedAt() != null) {
+            seg = Math.max(0, Duration.between(j.getStartedAt(), fin).getSeconds());
+
+            // El tiempo en pausa NO se paga: se descuenta lo ya acumulado y, si está pausada
+            // ahora mismo, también lo que lleva detenida en este momento.
+            long pausados = j.getSegundosPausados() != null ? j.getSegundosPausados() : 0L;
+            if (pausada) {
+                pausados += Math.max(0, Duration.between(j.getPausadaAt(), ahora).getSeconds());
+            }
+            seg = Math.max(0, seg - pausados);
+        }
 
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", j.getId());
@@ -127,6 +214,12 @@ public class JornadaController {
         m.put("startedAt", j.getStartedAt() != null ? j.getStartedAt().toString() : null);
         m.put("endedAt", j.getEndedAt() != null ? j.getEndedAt().toString() : null);
         m.put("transcurridoSegundos", seg);
+        // Estado de la vigilancia automática (lo usa el topbar para congelar el cronómetro,
+        // mostrar el motivo y ofrecer el botón de reanudar).
+        m.put("pausada", pausada);
+        m.put("motivoPausa", j.getMotivoPausa());
+        m.put("pausadaAt", j.getPausadaAt() != null ? j.getPausadaAt().toString() : null);
+        m.put("avisoPendiente", j.getAvisoPendiente());
         return m;
     }
 }

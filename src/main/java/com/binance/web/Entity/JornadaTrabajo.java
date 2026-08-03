@@ -68,4 +68,49 @@ public class JornadaTrabajo {
      * repetir el mensaje más seguido de la cuenta (cada 5 min en venta, cada hora en caja).
      */
     private LocalDateTime ultimaAlertaAt;
+
+    // ── Pausa automática del cronómetro ───────────────────────────
+    // La jornada sigue ABIERTA pero el tiempo no corre (y por lo tanto no se paga).
+    // El operador la reanuda desde la app cuando corrige lo que la disparó.
+
+    /** Momento en que se pausó. null = el cronómetro está corriendo. */
+    private LocalDateTime pausadaAt;
+
+    /** Segundos ya acumulados en pausas anteriores de esta misma jornada. */
+    private Long segundosPausados;
+
+    /** Por qué se pausó (se le muestra al operador y se manda por Telegram). */
+    @Column(length = 300)
+    private String motivoPausa;
+
+    // ── Estado de la vigilancia de anuncio y tasa ─────────────────
+
+    /**
+     * Primera vez en esta jornada que se vio un anuncio publicado de alguna cuenta propia.
+     * Si sigue en null pasados los minutos de gracia, es que el operador nunca publicó
+     * anuncio y se le pausa el cronómetro.
+     */
+    private LocalDateTime tuvoAnuncioAt;
+
+    /** Cuándo se le avisó que le bajara un punto a la tasa (arranca la cuenta regresiva). */
+    private LocalDateTime avisoTasaAt;
+
+    /** Tasa que tenía el anuncio en el momento de ese aviso, para comparar si la bajó. */
+    private Double tasaAlAvisar;
+
+    /** Anuncio (advNo) sobre el que se hizo el aviso, para comparar contra el mismo. */
+    @Column(length = 64)
+    private String advNoAvisado;
+
+    // ── Aviso pendiente para el operador ──────────────────────────
+
+    /**
+     * Mensaje que el operador todavía no ha visto. Se empuja al instante por SSE, pero
+     * también queda acá para que la app lo recupere si el SSE se cayó (Railway) o si el
+     * operador recarga la página. Se limpia cuando la app confirma que lo mostró.
+     */
+    @Column(length = 400)
+    private String avisoPendiente;
+
+    private LocalDateTime avisoPendienteAt;
 }
