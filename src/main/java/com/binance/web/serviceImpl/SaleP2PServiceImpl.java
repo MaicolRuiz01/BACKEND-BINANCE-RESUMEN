@@ -47,6 +47,7 @@ public class SaleP2PServiceImpl implements SaleP2PService {
     @Autowired private AccountBinanceRepository accountBinanceRepository;
     @Autowired private AccountBinanceService accountBinanceService;
     @Autowired private SaleP2pAccountCopRepository saleP2pAccountCopRepository;
+    @Autowired private com.binance.web.service.UtilidadP2PCalculator utilidadCalculator;
 
     @Override
     public List<SaleP2PDto> findAllSaleP2P() {
@@ -160,22 +161,23 @@ public class SaleP2PServiceImpl implements SaleP2PService {
         return sale.getPesosCop() / sale.getDollarsUs();
     }
 
-    private Double generateTax(SaleP2P sale) {
-        double impuesto = 0.0;
-        List<SaleP2pAccountCop> accountCop = sale.getAccountCopsDetails();
-        for (SaleP2pAccountCop account : accountCop) {
-            if (account.getAccountCop() == null) {
-                impuesto += account.getAmount() * 0.004;
-            }
-        }
-        return impuesto;
-    }
+    // El cálculo del 4x1000 se movió a UtilidadP2PCalculator, junto con el resto de la fórmula
+    // de utilidad. Tener la copia acá fue lo que permitió que las dos rutas de asignación
+    // terminaran calculando cosas distintas.
 
+    /**
+     * Recalcula en bloque la utilidad de un rango de ventas con una tasa promedio definitiva
+     * (por ejemplo al cerrar el día, cuando ya se conoce la tasa real de compra).
+     *
+     * Delega en UtilidadP2PCalculator para que use EXACTAMENTE la misma fórmula que se aplica
+     * al asignar. Antes este método tenía su propia copia del cálculo y era el único lugar donde
+     * la utilidad se computaba de verdad — pero nadie lo llamaba, así que todas las ventas
+     * quedaban en cero.
+     */
     public void saveUtilitydefinitive(List<SaleP2P> rangeSales, Double averageRate) {
+        if (rangeSales == null) return;
         for (SaleP2P sale : rangeSales) {
-            double utilidad = sale.getPesosCop() - ((sale.getDollarsUs() + sale.getCommission()) * averageRate);
-            utilidad -= generateTax(sale);
-            sale.setUtilidad(utilidad);
+            sale.setUtilidad(utilidadCalculator.calcularCon(sale, averageRate));
             saleP2PRepository.save(sale);
         }
     }
@@ -222,8 +224,10 @@ public class SaleP2PServiceImpl implements SaleP2PService {
         }
 
         accountBinanceService.subtractBalance(sale.getBinanceAccount().getName(), sale.getDollarsUs());
-        if (sale.getUtilidad() == null) sale.setUtilidad(0.0);
-        sale.setUtilidad(sale.getUtilidad() + generateTax(sale));
+        // Misma fórmula que usa la asignación automática por pre-asignación: costo contra la tasa
+        // promedio de compra e impuesto del 4x1000. Antes acá solo se sumaba el impuesto sobre una
+        // utilidad que nunca se había calculado, así que quedaba en negativo o en cero.
+        utilidadCalculator.calcularYAsignar(sale);
         sale.setAsignado(true);
         saleP2PRepository.save(sale);
         return "Asignación realizada con éxito";
