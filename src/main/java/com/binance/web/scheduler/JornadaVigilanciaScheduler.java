@@ -85,11 +85,14 @@ public class JornadaVigilanciaScheduler {
      */
     @Scheduled(fixedDelayString = "${jornada.vigilancia.interval-ms:60000}", initialDelay = 60000)
     public void vigilar() {
-        // Regla 4: es independiente de las jornadas, así que corre siempre.
+        // Vigilancia de anuncios: es independiente de las jornadas, así que corre siempre —
+        // aunque nadie esté trabajando. Si el anuncio se apaga a las 3 a.m., el administrador
+        // se entera igual.
         try {
+            anuncioVigilancia.detectarYReportarAnunciosEncendidoApagado();
             anuncioVigilancia.detectarYReportarCambiosDeTasa();
         } catch (Exception e) {
-            log.warn("[Jornada] Error revisando cambios de tasa: {}", e.getMessage());
+            log.warn("[Jornada] Error revisando los anuncios: {}", e.getMessage());
         }
 
         if (grupoChatId == null || grupoChatId.isBlank()) return; // Telegram no configurado

@@ -43,12 +43,13 @@ public class JornadaController {
     private String grupoChatId;
 
     /**
-     * Avisar también los inicios y finales de jornada. Por defecto NO, porque con varios
-     * operadores entrando y saliendo el grupo se llena de mensajes y termina siendo ruido que
-     * nadie lee. Las REANUDACIONES sí se avisan siempre: son el evento que de otra forma queda
-     * invisible (el operador se levanta su propia pausa y nadie se entera).
+     * Avisar los inicios y finales de jornada. Encendido por pedido del cliente: quiere saber
+     * cuándo entra y sale cada operador. Si en algún momento el grupo se vuelve ruidoso, se
+     * apaga con esta clave sin tocar código.
+     * Las REANUDACIONES se avisan SIEMPRE, independientemente de esta clave: son el evento que
+     * de otra forma queda invisible (el operador se levanta su propia pausa y nadie se entera).
      */
-    @Value("${jornada.telegram.avisar-inicio-fin:false}")
+    @Value("${jornada.telegram.avisar-inicio-fin:true}")
     private boolean avisarInicioFin;
 
     /**

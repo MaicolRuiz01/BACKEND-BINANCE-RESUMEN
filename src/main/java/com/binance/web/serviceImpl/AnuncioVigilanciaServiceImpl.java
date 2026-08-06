@@ -4,6 +4,8 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -11,6 +13,7 @@ import org.springframework.stereotype.Service;
 import com.binance.web.BinanceAPI.AnuncioDto;
 import com.binance.web.BinanceAPI.BinanceService;
 import com.binance.web.Entity.AnuncioTasa;
+import com.binance.web.Entity.CuentaAnuncioEstado;
 import com.binance.web.Repository.AnuncioTasaRepository;
 import com.binance.web.service.AnuncioVigilanciaService;
 import com.binance.web.service.TelegramService;
@@ -35,6 +38,8 @@ public class AnuncioVigilanciaServiceImpl implements AnuncioVigilanciaService {
 
     private final BinanceService binanceService;
     private final AnuncioTasaRepository anuncioTasaRepository;
+    private final com.binance.web.Repository.CuentaAnuncioEstadoRepository cuentaEstadoRepository;
+    private final com.binance.web.Repository.AccountBinanceRepository accountBinanceRepository;
     private final TelegramService telegramService;
 
     @Value("${app.telegram.group-chat-id:}")
@@ -164,18 +169,125 @@ public class AnuncioVigilanciaServiceImpl implements AnuncioVigilanciaService {
             }
         }
 
-        if (!reportes.isEmpty() && grupoChatId != null && !grupoChatId.isBlank()) {
-            String msg = "🔔 *Cambio de tasa en anuncios*\n\n" + String.join("\n", reportes);
+        if (!reportes.isEmpty()) {
+            enviarTelegram("🔔 *Cambio de tasa en anuncios*\n\n" + String.join("\n", reportes));
+        }
+        return cambios;
+    }
+
+    @Override
+    public int detectarYReportarAnunciosEncendidoApagado() {
+        List<AnuncioDto> actuales = anunciosVenta();
+
+        // Sin una lectura confiable no se reporta NADA. Si Binance falló, la foto viene vacía y
+        // se avisaría que todas las cuentas apagaron su anuncio — falsas alarmas que destruyen
+        // la confianza en el sistema justo en la alerta que más importa.
+        if (!ultimaConsultaOk) return 0;
+
+        // Cuentas propias que se esperan publicando.
+        Set<String> misNicks;
+        try {
+            misNicks = accountBinanceRepository.findByTipoAndActivaTrue("BINANCE").stream()
+                    .map(a -> a.getUserBinance())
+                    .filter(n -> n != null && !n.isBlank())
+                    .collect(Collectors.toSet());
+        } catch (Exception e) {
+            log.warn("[Anuncios] No se pudieron leer las cuentas propias: {}", e.getMessage());
+            return 0;
+        }
+        if (misNicks.isEmpty()) return 0;
+
+        Set<String> conAnuncio = actuales.stream()
+                .map(AnuncioDto::getVendedor)
+                .filter(v -> v != null && !v.isBlank())
+                .collect(Collectors.toSet());
+
+        int cambios = 0;
+        LocalDateTime ahora = LocalDateTime.now();
+
+        for (String nick : misNicks) {
+            boolean activoAhora = conAnuncio.contains(nick);
             try {
-                telegramService.sendMessage(grupoChatId, msg);
+                CuentaAnuncioEstado estado = cuentaEstadoRepository.findByVendedor(nick).orElse(null);
+
+                if (estado == null) {
+                    // Primera vez que se ve esta cuenta: se registra el estado SIN reportar.
+                    // Si no, al arrancar el sistema llegaría una ráfaga de avisos.
+                    CuentaAnuncioEstado nuevo = new CuentaAnuncioEstado();
+                    nuevo.setVendedor(nick);
+                    nuevo.setActivo(activoAhora);
+                    nuevo.setActualizadoAt(ahora);
+                    if (activoAhora) nuevo.setUltimoVistoActivoAt(ahora);
+                    cuentaEstadoRepository.save(nuevo);
+                    continue;
+                }
+
+                boolean activoAntes = Boolean.TRUE.equals(estado.getActivo());
+                if (activoAntes == activoAhora) {
+                    // Sin cambio: solo se refresca la marca de "última vez visto publicado".
+                    if (activoAhora) {
+                        estado.setUltimoVistoActivoAt(ahora);
+                        estado.setActualizadoAt(ahora);
+                        cuentaEstadoRepository.save(estado);
+                    }
+                    continue;
+                }
+
+                if (activoAhora) {
+                    String apagadoDesde = estado.getUltimoVistoActivoAt() != null
+                            ? " (estuvo apagado " + duracion(estado.getUltimoVistoActivoAt(), ahora) + ")"
+                            : "";
+                    Double tasa = tasaDeVendedor(actuales, nick);
+                    enviarTelegram(String.format(
+                            "🟢 *Anuncio ENCENDIDO*%n%nCuenta: *%s*%nTasa: %s%s",
+                            nick, tasa != null ? fmt(tasa) : "no disponible", apagadoDesde));
+                    estado.setUltimoVistoActivoAt(ahora);
+                } else {
+                    enviarTelegram(String.format(
+                            "🔴 *Anuncio APAGADO*%n%nCuenta: *%s*%nYa no tiene ningún anuncio de "
+                            + "venta publicado en Binance.%n%nMientras esté apagado no van a entrar ventas.",
+                            nick));
+                }
+
+                estado.setActivo(activoAhora);
+                estado.setActualizadoAt(ahora);
+                cuentaEstadoRepository.save(estado);
+                cambios++;
+                log.info("[Anuncios] Cuenta {} pasó a {}", nick, activoAhora ? "ENCENDIDO" : "APAGADO");
+
             } catch (Exception e) {
-                log.warn("[Anuncios] No se pudo avisar el cambio de tasa: {}", e.getMessage());
+                log.warn("[Anuncios] Error revisando el estado de {}: {}", nick, e.getMessage());
             }
         }
         return cambios;
     }
 
     // ── Helpers ───────────────────────────────────────────────────
+
+    private Double tasaDeVendedor(List<AnuncioDto> anuncios, String vendedor) {
+        return anuncios.stream()
+                .filter(a -> vendedor.equals(a.getVendedor()))
+                .map(this::precio)
+                .filter(p -> p != null)
+                .min(Double::compareTo)
+                .orElse(null);
+    }
+
+    private String duracion(LocalDateTime desde, LocalDateTime hasta) {
+        long min = Math.max(0, java.time.Duration.between(desde, hasta).toMinutes());
+        if (min < 60) return min + " min";
+        long h = min / 60;
+        return h < 24 ? String.format("%d h %02d min", h, min % 60) : (h / 24) + " día(s)";
+    }
+
+    private void enviarTelegram(String msg) {
+        if (grupoChatId == null || grupoChatId.isBlank()) return;
+        try {
+            telegramService.sendMessage(grupoChatId, msg);
+        } catch (Exception e) {
+            log.warn("[Anuncios] No se pudo enviar el mensaje de Telegram: {}", e.getMessage());
+        }
+    }
 
     /** El precio viene como texto desde Binance; se parsea tolerando comas y espacios. */
     private Double precio(AnuncioDto a) {

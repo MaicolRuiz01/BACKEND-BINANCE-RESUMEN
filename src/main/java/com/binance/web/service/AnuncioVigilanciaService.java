@@ -40,4 +40,12 @@ public interface AnuncioVigilanciaService {
      * Telegram los que cambiaron. Devuelve cuántos cambios detectó.
      */
     int detectarYReportarCambiosDeTasa();
+
+    /**
+     * Detecta que una cuenta ENCENDIÓ o APAGÓ su anuncio de venta y lo avisa por Telegram.
+     * Es lo que le permite al administrador enterarse de que alguien bajó el anuncio, que es
+     * la razón más común de que dejen de entrar ventas.
+     * Devuelve cuántos cambios de estado detectó.
+     */
+    int detectarYReportarAnunciosEncendidoApagado();
 }
