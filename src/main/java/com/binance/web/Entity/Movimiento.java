@@ -62,6 +62,16 @@ public class Movimiento {
     private Integer reversaDeMovimientoId; // null si no es reversa
 
     /**
+     * Si este movimiento viene de confirmar una SolicitudRetiro (RETIRO CAJERO /
+     * RETIRO CORRESPONSAL creados en confirmarInterno), acá queda el id de esa
+     * solicitud. Null en cualquier otro tipo de movimiento. Sirve para poder
+     * borrar/editar el mensaje de Telegram ("✅ Retiro completado...") cuando
+     * alguien borra o edita este movimiento desde la plataforma — sin esto no
+     * había forma de saber a qué mensaje de Telegram correspondía cada retiro.
+     */
+    private Long solicitudRetiroId;
+
+    /**
      * Para retiros: ¿ya se descontó el 4x1000 de la cuenta?
      *  - Nequi/Daviplata: true (se descuenta al instante).
      *  - Bancolombia: false al crearse (se descuenta al día siguiente por el scheduler).

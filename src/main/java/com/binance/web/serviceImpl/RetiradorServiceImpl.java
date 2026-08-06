@@ -484,6 +484,7 @@ public class RetiradorServiceImpl implements RetiradorService {
                         .comisionAplicada(!esBanco)
                         .motivo(motivoCajero)
                         .saldoCajaResultante(cajaSaldoAcumulado)
+                        .solicitudRetiroId(solicitud.getId())
                         .build());
             }
             if (montoCorresponsalUsar > 0) {
@@ -498,6 +499,7 @@ public class RetiradorServiceImpl implements RetiradorService {
                         .comisionAplicada(!esBanco)
                         .motivo(motivoCorresponsal)
                         .saldoCajaResultante(cajaSaldoAcumulado)
+                        .solicitudRetiroId(solicitud.getId())
                         .build());
             }
         }
