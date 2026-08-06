@@ -186,6 +186,28 @@ public class AccountCopController {
 	}
 
 	/**
+	 * POST /cuenta-cop/{id}/solicitar-conciliacion
+	 * Dispara manualmente el mismo aviso al bot de conciliación que dispara
+	 * activar la cuenta en P2P (toggle-p2p), pero SIN tocar el estado de P2P —
+	 * para poder probar la conexión con el bot en cualquier momento, sin
+	 * desactivar/reactivar la cuenta. Pensado como botón de prueba, no para
+	 * uso diario. Requiere login normal (esta ruta NO es la del bot).
+	 */
+	@PostMapping("/{id}/solicitar-conciliacion")
+	public ResponseEntity<?> solicitarConciliacionManual(@PathVariable Integer id) {
+		AccountCop cuenta = AccountCopService.findByIdAccountCop(id);
+		if (cuenta == null) return ResponseEntity.notFound().build();
+
+		if (cuenta.getBankType() != com.binance.web.Entity.BankType.BANCOLOMBIA) {
+			return ResponseEntity.badRequest()
+					.body(Map.of("error", "El bot de conciliación solo revisa cuentas Bancolombia."));
+		}
+
+		conciliacionBancariaService.solicitarConciliacion(cuenta);
+		return ResponseEntity.ok(Map.of("ok", true, "cuenta", cuenta.getName()));
+	}
+
+	/**
 	 * PATCH /cuenta-cop/{id}/toggle-bloqueo
 	 * Bloquea / desbloquea la cuenta. Bloqueada = no aparece ni es seleccionable en ningún
 	 * lado (movimientos, formularios, P2P, ventas en curso, retiradores, gastos, pagos).
