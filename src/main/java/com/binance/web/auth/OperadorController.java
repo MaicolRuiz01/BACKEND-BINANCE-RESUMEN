@@ -78,16 +78,23 @@ public class OperadorController {
         List<JornadaTrabajo> jornadas = jornadaRepository.findByStartedAtBetween(dia.atStartOfDay(), dia.plusDays(1).atStartOfDay());
         Map<String, Long> segundosPorUsuario = new HashMap<>();
         for (JornadaTrabajo j : jornadas) {
-            LocalDateTime finJ = j.getEndedAt() != null ? j.getEndedAt() : LocalDateTime.now(ZONE);
-            long seg = j.getStartedAt() != null ? Math.max(0, Duration.between(j.getStartedAt(), finJ).getSeconds()) : 0;
-            segundosPorUsuario.merge(j.getUsername(), seg, Long::sum);
+            segundosPorUsuario.merge(j.getUsername(), segundosPagablesDe(j), Long::sum);
         }
 
         // "Activo" = tiene CUALQUIER jornada abierta (está trabajando ahora), sin importar el día.
         // Así concuerda con el endpoint de iniciar/terminar y el botón no se revierte al recargar.
         Set<String> activos = new HashSet<>();
+        // Pausados por la vigilancia automática: siguen "en jornada" pero su tiempo NO corre.
+        Set<String> pausados = new HashSet<>();
+        Map<String, String> motivoPausaPorUsuario = new HashMap<>();
         for (JornadaTrabajo abierta : jornadaRepository.findByEndedAtIsNull()) {
             activos.add(abierta.getUsername());
+            if (abierta.getPausadaAt() != null) {
+                pausados.add(abierta.getUsername());
+                if (abierta.getMotivoPausa() != null) {
+                    motivoPausaPorUsuario.put(abierta.getUsername(), abierta.getMotivoPausa());
+                }
+            }
         }
 
         List<Map<String, Object>> resultado = new ArrayList<>();
@@ -106,6 +113,9 @@ public class OperadorController {
                     m.put("tiempoTrabajadoSegundos", seg);
                     m.put("pagoCop", Math.round(pago));
                     m.put("jornadaActiva", activos.contains(u.getUsername()));
+                    // Pausada por la vigilancia: sigue en jornada pero su tiempo no está corriendo.
+                    m.put("jornadaPausada", pausados.contains(u.getUsername()));
+                    m.put("motivoPausa", motivoPausaPorUsuario.get(u.getUsername()));
                     // ¿Ya se le pagó ese día? Para bloquear el botón "Pagar" y evitar doble pago.
                     m.put("pagadoHoy", pagoOperadorRepository.existsByUsernameAndDia(u.getUsername(), dia));
                     resultado.add(m);
@@ -113,13 +123,37 @@ public class OperadorController {
         return ResponseEntity.ok(resultado);
     }
 
+    /**
+     * Segundos REALMENTE PAGABLES de una jornada: el tiempo transcurrido menos el que estuvo
+     * detenida por la vigilancia automática.
+     *
+     * Es el único lugar donde se calcula esto. Antes el tiempo se computaba por separado en el
+     * resumen y en segundosTrabajados(), y al agregar la pausa quedaron desincronizados: al
+     * operador se le detenía el cronómetro en su pantalla pero el panel del administrador le
+     * seguía sumando el tiempo (y por lo tanto el pago). Centralizarlo evita que vuelvan a
+     * divergir cuando se toque uno de los dos.
+     */
+    private long segundosPagablesDe(JornadaTrabajo j) {
+        if (j == null || j.getStartedAt() == null) return 0;
+
+        LocalDateTime ahora = LocalDateTime.now(ZONE);
+        LocalDateTime finJ = j.getEndedAt() != null ? j.getEndedAt() : ahora;
+        long seg = Math.max(0, Duration.between(j.getStartedAt(), finJ).getSeconds());
+
+        // Descontar el tiempo en pausa: el ya acumulado y, si sigue pausada ahora, lo que lleva.
+        long pausados = j.getSegundosPausados() != null ? j.getSegundosPausados() : 0L;
+        if (j.getEndedAt() == null && j.getPausadaAt() != null) {
+            pausados += Math.max(0, Duration.between(j.getPausadaAt(), ahora).getSeconds());
+        }
+        return Math.max(0, seg - pausados);
+    }
+
     /** Segundos trabajados por un usuario en un día concreto (misma lógica que el resumen). */
     private long segundosTrabajados(String username, LocalDate dia) {
         long total = 0;
         for (JornadaTrabajo j : jornadaRepository.findByStartedAtBetween(dia.atStartOfDay(), dia.plusDays(1).atStartOfDay())) {
-            if (!username.equals(j.getUsername()) || j.getStartedAt() == null) continue;
-            LocalDateTime finJ = j.getEndedAt() != null ? j.getEndedAt() : LocalDateTime.now(ZONE);
-            total += Math.max(0, Duration.between(j.getStartedAt(), finJ).getSeconds());
+            if (!username.equals(j.getUsername())) continue;
+            total += segundosPagablesDe(j);
         }
         return total;
     }

@@ -643,4 +643,58 @@ public class BinanceService {
 		}
 		return resultado;
 	}
+
+	/**
+	 * Igual que obtenerMisAnuncios() pero SOLO los anuncios de VENTA (SELL) y con corte temprano.
+	 *
+	 * Lo usa la vigilancia de jornadas, que consulta cada minuto: la versión completa recorre
+	 * hasta 8 páginas × 2 tipos en cada llamada, y a un minuto de intervalo eso son cientos de
+	 * peticiones por hora contra la API pública de Binance (riesgo real de que limiten la IP y
+	 * de paso se caiga la vista de anuncios). Acá se corta apenas ya se encontraron anuncios de
+	 * todas las cuentas propias, que es el caso normal: casi siempre resuelve en 1–2 páginas.
+	 *
+	 * Defensivo: si Binance falla devuelve lo que se alcanzó a leer, nunca lanza.
+	 */
+	public List<AnuncioDto> obtenerMisAnunciosVenta() {
+		Set<String> misNicks = accountRepo.findByTipoAndActivaTrue("BINANCE").stream()
+				.filter(a -> a.getUserBinance() != null && !a.getUserBinance().isBlank())
+				.map(AccountBinance::getUserBinance)
+				.collect(Collectors.toSet());
+
+		if (misNicks.isEmpty()) return List.of();
+
+		final int MAX_PAGES = 8;
+		final int ROWS      = 20;
+		List<AnuncioDto> resultado = new ArrayList<>();
+		Set<String> nicksEncontrados = new HashSet<>();
+
+		try {
+			for (int page = 1; page <= MAX_PAGES; page++) {
+				Map<String, Object> filtros = new HashMap<>();
+				filtros.put("asset",         "USDT");
+				filtros.put("fiat",          "COP");
+				filtros.put("payTypes",      List.of());
+				filtros.put("publisherType", null);
+				filtros.put("rows",          ROWS);
+				filtros.put("page",          page);
+
+				List<AnuncioDto> pagina = obtenerAnunciosPorTipo(filtros, "SELL", "");
+				if (pagina.isEmpty()) break;
+
+				for (AnuncioDto a : pagina) {
+					if (misNicks.contains(a.getVendedor())) {
+						resultado.add(a);
+						nicksEncontrados.add(a.getVendedor());
+					}
+				}
+
+				// Corte temprano: ya aparecieron todas las cuentas propias, no hay para qué seguir.
+				if (nicksEncontrados.size() >= misNicks.size()) break;
+				if (pagina.size() < ROWS) break; // última página
+			}
+		} catch (Exception e) {
+			System.out.println("[Anuncios] Error leyendo anuncios de venta: " + e.getMessage());
+		}
+		return resultado;
+	}
 }

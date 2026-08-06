@@ -50,6 +50,11 @@ public class P2PSyncService {
     @Autowired private P2PPreAsignacionRepository preAsignacionRepository;
     @Autowired private AccountCopService accountCopService;
     @Autowired private AccountBinanceService accountBinanceService;
+    @Autowired private com.binance.web.service.UtilidadP2PCalculator utilidadCalculator;
+
+    /** Horas hacia atrás que se le piden a Binance. Cubre el cruce de medianoche (ver resolveStartMs). */
+    @org.springframework.beans.factory.annotation.Value("${p2p.sync.lookback-horas:36}")
+    private long lookbackHoras;
 
     /** Referencia a sí mismo (vía proxy) para que @Transactional de syncAccount SÍ aplique
      *  cuando se llama desde syncAllAccounts (evita el problema de auto-invocación de Spring). */
@@ -144,18 +149,29 @@ public class P2PSyncService {
     // ─────────────────────────────────────────────────────────────
 
     /**
-     * Siempre devuelve el inicio del día actual en Bogotá.
+     * Límite inferior de la ventana que se le pide a Binance.
      *
-     * IMPORTANTE: No usar lastSyncAtMs como límite inferior del query.
-     * Una orden puede ser creada en estado TRADING (T1) y completarse
-     * después del último sync (T2). Si usáramos T2 como startMs,
-     * Binance filtraría por createTime >= T2 y nunca devolvería esa
-     * orden porque su createTime es T1 < T2.
+     * IMPORTANTE: No usar lastSyncAtMs. Una orden puede crearse en TRADING (T1) y completarse
+     * después del último sync (T2). Si usáramos T2, Binance filtraría por createTime >= T2 y
+     * nunca devolvería esa orden, porque su createTime es T1 < T2.
      *
-     * El duplicate-check (existsByNumberOrder) previene doble guardado.
+     * Tampoco sirve el inicio del día: Binance filtra por FECHA DE CREACIÓN, no de completado.
+     * Una orden creada a las 11:50 p.m. y completada a las 12:10 a.m. tiene createTime de AYER,
+     * así que con una ventana "desde hoy 00:00" no se importaba nunca: el dinero entraba a la
+     * cuenta COP pero la venta no quedaba registrada y su pre-asignación quedaba huérfana.
+     * Por eso se mira hacia atrás {@code p2p.sync.lookback-horas} (36 h por defecto), que cubre
+     * de sobra el cruce de medianoche y cualquier orden que se demore en completarse.
+     *
+     * Repetir órdenes ya importadas no cuesta nada: existsByNumberOrder las descarta antes de
+     * guardar, así que ampliar la ventana es seguro.
      */
     private long resolveStartMs(AccountBinance account) {
-        return LocalDate.now(ZONE).atStartOfDay(ZONE).toInstant().toEpochMilli();
+        long ahora = Instant.now().toEpochMilli();
+        long desdeVentana = ahora - (lookbackHoras * 3_600_000L);
+        // Nunca antes del inicio del día de hace {lookbackHoras}: mantiene la ventana acotada
+        // y alineada a días completos, para no pedirle a Binance rangos innecesariamente largos.
+        long inicioDeHoy = LocalDate.now(ZONE).atStartOfDay(ZONE).toInstant().toEpochMilli();
+        return Math.min(desdeVentana, inicioDeHoy);
     }
 
     /** Filtra: solo ventas USDT completadas. */
@@ -227,6 +243,9 @@ public class P2PSyncService {
         if (sale.getAccountCopsDetails() == null) sale.setAccountCopsDetails(new ArrayList<>());
         sale.getAccountCopsDetails().add(detail);
         sale.setAsignado(true);
+        // La utilidad se calcula acá, con los detalles ya cargados. Antes las ventas que entraban
+        // por pre-asignación quedaban siempre en utilidad = 0, que es justo el camino normal hoy.
+        utilidadCalculator.calcularYAsignar(sale);
         saleP2PRepository.save(sale);
     }
 
