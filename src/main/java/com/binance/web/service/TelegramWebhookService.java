@@ -1132,10 +1132,13 @@ public class TelegramWebhookService {
 
         Retirador retirador = retiradorRepository.findById(solicitud.getRetirador().getId()).orElse(null);
 
-        String textoFinal = String.format(
-                "✅ *Retiro registrado*\n%s\n\nSolicitado: *$%,.0f*\nRetiraste: *$%,.0f*\n\nQuedó anotado en movimientos.",
-                resumenCuentasYMontos(solicitud), montoSolicitado, montoReal);
-        telegramService.sendMessage(String.valueOf(telegramUserId), textoFinal);
+        // Mismo mensaje simple que un retiro normal ("Retiré todo") — nada de
+        // desglosar "solicitado vs retiraste" para no confundir; el monto que
+        // se muestra ya es el real (ver resumenCuentasYMontos → totalDetalleFinal).
+        if (pending.messageId() != null) {
+            telegramService.editMessageTextOnly(String.valueOf(telegramUserId), pending.messageId(),
+                    "✅ *Retiro completado*\n" + resumenCuentasYMontos(solicitud));
+        }
 
         if (retirador != null && retirador.getEfectivo() != null) {
             retiradorService.enviarRecordatorioCaja(retirador);
@@ -1294,7 +1297,11 @@ public class TelegramWebhookService {
 
     /** "Cuenta 1: $2.700.000" (o varias, separadas por coma) — para que el
      *  retirador sepa A QUÉ retiro se refiere un mensaje cuando puede tener
-     *  varias solicitudes en curso al mismo tiempo. */
+     *  varias solicitudes en curso al mismo tiempo. Usa el monto FINAL (el
+     *  real si el retirador registró uno distinto al solicitado, si no el
+     *  solicitado) para que el mensaje de "Retiro completado" luzca IGUAL
+     *  de simple sin importar si se confirmó con "Retiré todo" o con
+     *  "Otra cifra" — nada de mostrar aparte "solicitado vs retiraste". */
     private String resumenCuentasYMontos(SolicitudRetiro solicitud) {
         StringBuilder sb = new StringBuilder();
         var detalles = solicitud.getDetalles();
@@ -1302,7 +1309,7 @@ public class TelegramWebhookService {
             DetalleRetiro d = detalles.get(i);
             if (i > 0) sb.append(", ");
             sb.append(etiquetaCuenta(d.getCuentaCop())).append(": $")
-              .append(String.format("%,.0f", d.totalDetalle()));
+              .append(String.format("%,.0f", d.totalDetalleFinal()));
         }
         return sb.toString();
     }
