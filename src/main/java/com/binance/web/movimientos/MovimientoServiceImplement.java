@@ -13,11 +13,15 @@ import com.binance.web.Entity.Cliente;
 import com.binance.web.Entity.Efectivo;
 import com.binance.web.Entity.Movimiento;
 import com.binance.web.Entity.Supplier;
+import com.binance.web.Entity.SolicitudRetiro;
+import com.binance.web.Entity.Retirador;
 import com.binance.web.Repository.AccountCopRepository;
 import com.binance.web.Repository.ClienteRepository;
 import com.binance.web.Repository.EfectivoRepository;
 import com.binance.web.Repository.MovimientoRepository;
+import com.binance.web.Repository.SolicitudRetiroRepository;
 import com.binance.web.Repository.SupplierRepository;
+import com.binance.web.service.TelegramService;
 import com.binance.web.model.AjusteSaldoDto;
 import com.binance.web.model.PagoClienteAClienteDto;
 import com.binance.web.model.PagoClienteAProveedorDto;
@@ -41,7 +45,65 @@ public class MovimientoServiceImplement implements MovimientoService {
 	private ClienteRepository clienteRepository;
 	@Autowired
 	private SupplierRepository supplierRepository;
+	@Autowired
+	private SolicitudRetiroRepository solicitudRetiroRepository;
+	@Autowired
+	private TelegramService telegramService;
 	private static final ZoneId ZONE_BOGOTA = ZoneId.of("America/Bogota");
+
+	/**
+	 * Mantiene el mensaje de Telegram de una solicitud de retiro en línea con lo
+	 * que de verdad hay en movimientos, después de que alguien borra o edita un
+	 * RETIRO CAJERO/CORRESPONSAL desde la plataforma. Antes de esto, si borrabas
+	 * o cambiabas un retiro en Pochonance, el mensaje "✅ Retiro completado"
+	 * en Telegram se quedaba mostrando lo viejo para siempre.
+	 *
+	 * - Si ya no queda NINGÚN movimiento de esa solicitud (se borró el único, o
+	 *   el último que quedaba), se borra el mensaje de Telegram por completo.
+	 * - Si todavía queda al menos uno (solicitud con varias cuentas y solo se
+	 *   tocó una), se reconstruye el mensaje con lo que realmente sigue vigente.
+	 *
+	 * No hace nada si el movimiento no venía de una solicitud (solicitudRetiroId
+	 * null — retiros manuales viejos, u otros tipos de movimiento), o si esa
+	 * solicitud nunca tuvo mensaje privado de Telegram.
+	 */
+	private void sincronizarMensajeTelegramRetiro(Long solicitudRetiroId) {
+		if (solicitudRetiroId == null) return;
+
+		SolicitudRetiro solicitud = solicitudRetiroRepository.findById(solicitudRetiroId).orElse(null);
+		if (solicitud == null) return;
+
+		Retirador retirador = solicitud.getRetirador();
+		Integer messageId = solicitud.getTelegramPrivateMessageId();
+		if (retirador == null || retirador.getTelegramChatId() == null || messageId == null) return;
+
+		String chatId = String.valueOf(retirador.getTelegramChatId());
+		List<Movimiento> vivos = movimientoRepository.findBySolicitudRetiroId(solicitudRetiroId);
+
+		if (vivos.isEmpty()) {
+			// No queda nada de este retiro en movimientos: el mensaje ya no aplica.
+			telegramService.deleteMessage(chatId, messageId);
+			return;
+		}
+
+		// Reconstruir "Cuenta X: $Y, Cuenta Z: $W" con lo que sigue vivo de verdad,
+		// agrupado por cuenta (por si CAJERO y CORRESPONSAL de la misma cuenta
+		// quedaron como dos movimientos separados de la misma solicitud).
+		java.util.LinkedHashMap<String, Double> porCuenta = new java.util.LinkedHashMap<>();
+		for (Movimiento m : vivos) {
+			String nombreCuenta = m.getCuentaOrigen() != null ? m.getCuentaOrigen().getName() : "Cuenta";
+			porCuenta.merge(nombreCuenta, m.getMonto() != null ? m.getMonto() : 0.0, Double::sum);
+		}
+		StringBuilder resumen = new StringBuilder();
+		boolean primero = true;
+		for (var e : porCuenta.entrySet()) {
+			if (!primero) resumen.append(", ");
+			resumen.append(e.getKey()).append(": $").append(String.format("%,.0f", e.getValue()));
+			primero = false;
+		}
+
+		telegramService.editMessageTextOnly(chatId, messageId, "✅ *Retiro completado*\n" + resumen);
+	}
 
 	@Override
 	public Movimiento RegistrarTransferencia(Integer idCuentoFrom, Integer idCuentaTo, Double monto) {
@@ -638,7 +700,11 @@ public class MovimientoServiceImplement implements MovimientoService {
 			}
 		}
 
-		return movimientoRepository.save(m);
+		Movimiento guardado = movimientoRepository.save(m);
+		if (tipo.startsWith("RETIRO")) {
+			sincronizarMensajeTelegramRetiro(guardado.getSolicitudRetiroId());
+		}
+		return guardado;
 	}
 
 	@Override
@@ -1439,7 +1505,9 @@ public class MovimientoServiceImplement implements MovimientoService {
 	            propagarDeltaCaja(caja.getId(), m.getFecha(), -monto);
 	        }
 
+	        Long solicitudRetiroId = m.getSolicitudRetiroId();
 	        movimientoRepository.delete(m);
+	        sincronizarMensajeTelegramRetiro(solicitudRetiroId);
 	        return;
 	    }
 
