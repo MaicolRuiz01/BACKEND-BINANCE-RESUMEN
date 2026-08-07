@@ -72,7 +72,8 @@ public interface AccountCopRepository extends JpaRepository<AccountCop, Integer>
 		       a.cupoCajeroDisponibleHoy AS cupoCajeroDisponibleHoy,
 		       a.cupoCorresponsalDisponibleHoy AS cupoCorresponsalDisponibleHoy,
 		       a.cupoDisponibleHoy AS cupoDisponibleHoy,
-		       a.numeroCuenta AS numeroCuenta, a.cedula AS cedula
+		       a.numeroCuenta AS numeroCuenta, a.cedula AS cedula,
+		       a.tipoCuenta AS tipoCuenta
 		FROM AccountCop a
 		WHERE (a.bloqueada = false OR a.bloqueada IS NULL)
 	""")
@@ -88,9 +89,11 @@ public interface AccountCopRepository extends JpaRepository<AccountCop, Integer>
 		Double getCupoCajeroDisponibleHoy();
 		Double getCupoCorresponsalDisponibleHoy();
 		Double getCupoDisponibleHoy();
-		// Datos para copiar al portapapeles al clic en la mini-card (nombre, banco, cédula, cuenta).
+		// Datos para copiar al portapapeles al clic en la mini-card
+		// (nombre, banco, tipo de cuenta, cédula, número de cuenta).
 		String getNumeroCuenta();
 		String getCedula();
+		String getTipoCuenta();
 	}
 
 }

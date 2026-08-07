@@ -70,6 +70,15 @@ public class AccountCop {
     @Column(name = "cedula")
     private String cedula;
 
+    /**
+     * Tipo de cuenta bancaria: "AHORROS" (default) o "CORRIENTE".
+     * Hace falta al pasarle los datos al cliente para que consigne: si se equivoca de tipo,
+     * la transferencia rebota. Se guarda como texto, igual que cupoTipoP2P, para no obligar a
+     * migrar la tabla ni romper las cuentas que ya existen (quedan en AHORROS).
+     */
+    @Column(name = "tipo_cuenta")
+    private String tipoCuenta = "AHORROS";
+
     @Column(name = "activa_para_p2p", nullable = false)
     private Boolean activaParaP2P = false;
 
@@ -134,6 +143,7 @@ public class AccountCop {
     public Double getCupoCorresponsalDisponibleHoy() { return cupoCorresponsalDisponibleHoy; }
     public String getNumeroCuenta() { return numeroCuenta; }
     public String getCedula() { return cedula; }
+    public String getTipoCuenta() { return tipoCuenta; }
     public Boolean getActivaParaP2P() { return activaParaP2P; }
     public String getCupoTipoP2P() { return cupoTipoP2P; }
     public Boolean getBloqueada() { return bloqueada; }
@@ -155,6 +165,7 @@ public class AccountCop {
     public void setCupoCorresponsalDisponibleHoy(Double cupoCorresponsalDisponibleHoy) { this.cupoCorresponsalDisponibleHoy = cupoCorresponsalDisponibleHoy; }
     public void setNumeroCuenta(String numeroCuenta) { this.numeroCuenta = numeroCuenta; }
     public void setCedula(String cedula) { this.cedula = cedula; }
+    public void setTipoCuenta(String tipoCuenta) { this.tipoCuenta = tipoCuenta; }
     public void setActivaParaP2P(Boolean activaParaP2P) { this.activaParaP2P = activaParaP2P; }
     public void setCupoTipoP2P(String cupoTipoP2P) { this.cupoTipoP2P = cupoTipoP2P; }
     public void setBloqueada(Boolean bloqueada) { this.bloqueada = bloqueada; }
