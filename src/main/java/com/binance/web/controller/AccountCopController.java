@@ -37,19 +37,22 @@ public class AccountCopController {
 	private final RetiradorService retiradorService;
 	private final com.binance.web.Repository.AccountCopRepository accountCopRepository;
 	private final com.binance.web.Repository.MovimientoRepository movimientoRepository;
+	private final com.binance.web.conciliacion.ConciliacionBancariaService conciliacionBancariaService;
 
 	public AccountCopController(AccountCopService AccountCopService,
 			AccountCopExcelService accountCopExcelService,
 			BrebeKeyRepository brebeKeyRepository,
 			RetiradorService retiradorService,
 			com.binance.web.Repository.AccountCopRepository accountCopRepository,
-			com.binance.web.Repository.MovimientoRepository movimientoRepository) {
+			com.binance.web.Repository.MovimientoRepository movimientoRepository,
+			com.binance.web.conciliacion.ConciliacionBancariaService conciliacionBancariaService) {
 		this.AccountCopService = AccountCopService;
 		this.accountCopExcelService = accountCopExcelService;
 		this.brebeKeyRepository = brebeKeyRepository;
 		this.retiradorService = retiradorService;
 		this.accountCopRepository = accountCopRepository;
 		this.movimientoRepository = movimientoRepository;
+		this.conciliacionBancariaService = conciliacionBancariaService;
 	}
 
 	@GetMapping(produces = "application/json")
@@ -169,7 +172,39 @@ public class AccountCopController {
 		boolean nuevoEstado = !Boolean.TRUE.equals(cuenta.getActivaParaP2P());
 		cuenta.setActivaParaP2P(nuevoEstado);
 		AccountCopService.updateAccountCop(id, cuenta);
+
+		// Si se está ACTIVANDO (no desactivando) una cuenta de Bancolombia, le
+		// avisamos de una vez al bot de conciliación por Telegram para que la
+		// revise ya mismo, en vez de esperar a que alguien corra el bot a mano.
+		// Best-effort: si el bot no tiene chat registrado o Telegram falla, no
+		// rompe este toggle (ver ConciliacionBancariaServiceImpl.solicitarConciliacion).
+		if (nuevoEstado && cuenta.getBankType() == com.binance.web.Entity.BankType.BANCOLOMBIA) {
+			conciliacionBancariaService.solicitarConciliacion(cuenta);
+		}
+
 		return ResponseEntity.ok(cuenta);
+	}
+
+	/**
+	 * POST /cuenta-cop/{id}/solicitar-conciliacion
+	 * Dispara manualmente el mismo aviso al bot de conciliación que dispara
+	 * activar la cuenta en P2P (toggle-p2p), pero SIN tocar el estado de P2P —
+	 * para poder probar la conexión con el bot en cualquier momento, sin
+	 * desactivar/reactivar la cuenta. Pensado como botón de prueba, no para
+	 * uso diario. Requiere login normal (esta ruta NO es la del bot).
+	 */
+	@PostMapping("/{id}/solicitar-conciliacion")
+	public ResponseEntity<?> solicitarConciliacionManual(@PathVariable Integer id) {
+		AccountCop cuenta = AccountCopService.findByIdAccountCop(id);
+		if (cuenta == null) return ResponseEntity.notFound().build();
+
+		if (cuenta.getBankType() != com.binance.web.Entity.BankType.BANCOLOMBIA) {
+			return ResponseEntity.badRequest()
+					.body(Map.of("error", "El bot de conciliación solo revisa cuentas Bancolombia."));
+		}
+
+		conciliacionBancariaService.solicitarConciliacion(cuenta);
+		return ResponseEntity.ok(Map.of("ok", true, "cuenta", cuenta.getName()));
 	}
 
 	/**

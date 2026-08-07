@@ -17,6 +17,11 @@ public interface MovimientoRepository extends JpaRepository<Movimiento, Integer>
 	List<Movimiento> findByTipo(String tipo);
 	List<Movimiento> findByTipoStartingWithOrderByFechaDesc(String prefijoTipo);
 
+	/** Movimientos (RETIRO CAJERO/CORRESPONSAL) que vienen de esta solicitud — para
+	 *  saber si queda alguno vivo al borrar/editar uno, y así borrar o reconstruir
+	 *  el mensaje de Telegram de esa solicitud. */
+	List<Movimiento> findBySolicitudRetiroId(Long solicitudRetiroId);
+
 	/** Retiros con 4x1000 pendiente (Bancolombia) hechos antes de la fecha dada → para el scheduler. */
 	List<Movimiento> findByComisionAplicadaFalseAndFechaBefore(LocalDateTime limite);
 
