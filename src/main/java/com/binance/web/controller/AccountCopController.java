@@ -173,14 +173,18 @@ public class AccountCopController {
 		cuenta.setActivaParaP2P(nuevoEstado);
 		AccountCopService.updateAccountCop(id, cuenta);
 
-		// Si se está ACTIVANDO (no desactivando) una cuenta de Bancolombia, le
-		// avisamos de una vez al bot de conciliación por Telegram para que la
-		// revise ya mismo, en vez de esperar a que alguien corra el bot a mano.
-		// Best-effort: si el bot no tiene chat registrado o Telegram falla, no
-		// rompe este toggle (ver ConciliacionBancariaServiceImpl.solicitarConciliacion).
-		if (nuevoEstado && cuenta.getBankType() == com.binance.web.Entity.BankType.BANCOLOMBIA) {
-			conciliacionBancariaService.solicitarConciliacion(cuenta);
-		}
+		// DESACTIVADO A PROPÓSITO (fase de pruebas, agosto 2026): activar una
+		// cuenta en P2P solía avisarle de una vez al bot de conciliación. Eso
+		// generaba un backlog de solicitudes sin consumir cada vez que el bot
+		// estaba apagado, y al prenderlo se drenaba todo de golpe (cuentas que
+		// nadie pidió revisar "ahora" apareciendo solas). Mientras se prueba,
+		// la ÚNICA forma de pedirle al bot que revise una cuenta es a mano,
+		// desde el botón de la lupa en P2P (ver AccountCopController
+		// .solicitarConciliacionManual). Cuando esté listo, se puede volver a
+		// activar descomentando este bloque.
+		// if (nuevoEstado && cuenta.getBankType() == com.binance.web.Entity.BankType.BANCOLOMBIA) {
+		//     conciliacionBancariaService.solicitarConciliacion(cuenta);
+		// }
 
 		return ResponseEntity.ok(cuenta);
 	}
