@@ -309,7 +309,12 @@ public class RetiradorServiceImpl implements RetiradorService {
     @Override
     @Transactional
     public SolicitudRetiro confirmarSolicitud(Long solicitudId) {
-        SolicitudRetiro solicitud = solicitudRepository.findById(solicitudId)
+        // findByIdForUpdate (no findById): bloquea la fila para que si esta misma
+        // solicitud se está confirmando AL MISMO TIEMPO por otro canal (ej. el
+        // retirador desde Telegram), esa otra transacción espere a que ésta
+        // termine en vez de leer "PENDIENTE" en paralelo y duplicar el retiro.
+        // Ver el comentario en SolicitudRetiroRepository.findByIdForUpdate.
+        SolicitudRetiro solicitud = solicitudRepository.findByIdForUpdate(solicitudId)
                 .orElseThrow(() -> new RuntimeException("Solicitud no encontrada: " + solicitudId));
 
         if (solicitud.getEstado() == EstadoSolicitud.COMPLETADO)
@@ -325,7 +330,8 @@ public class RetiradorServiceImpl implements RetiradorService {
     @Override
     @Transactional
     public SolicitudRetiro confirmarSolicitudConMontoReal(Long solicitudId, Double montoReal) {
-        SolicitudRetiro solicitud = solicitudRepository.findById(solicitudId)
+        // Mismo bloqueo de fila que en confirmarSolicitud, y por la misma razón.
+        SolicitudRetiro solicitud = solicitudRepository.findByIdForUpdate(solicitudId)
                 .orElseThrow(() -> new RuntimeException("Solicitud no encontrada: " + solicitudId));
 
         if (solicitud.getEstado() == EstadoSolicitud.COMPLETADO)
@@ -505,8 +511,17 @@ public class RetiradorServiceImpl implements RetiradorService {
         }
 
         if (caja != null) {
+            // Incidente 14/08/2026: leer-sumar-guardar (aunque venga de un fetch
+            // con lock) se pisaba entre confirmaciones casi simultáneas — 6
+            // retiros confirmados en 44 segundos sumaron los 6 sobre el MISMO
+            // saldo viejo, perdiendo $39.400 de la caja de Sebastian. El UPDATE
+            // atómico de abajo lo hace MySQL en una sola sentencia, sin pasar
+            // por un valor leído en Java, así que no se puede pisar.
+            efectivoRepository.incrementarSaldo(caja.getId(), totalReal);
+            // Refleja el nuevo valor en el objeto en memoria por si algo más
+            // abajo en esta misma solicitud (ej. el recordatorio de caja que se
+            // manda después por Telegram) lo vuelve a leer.
             caja.setSaldo(caja.getSaldo() + totalReal);
-            efectivoRepository.save(caja);
         }
 
         retirador.setSaldoPendiente(retirador.getSaldoPendiente() + solicitud.getPagoRetirador());
@@ -531,7 +546,7 @@ public class RetiradorServiceImpl implements RetiradorService {
                 telegramService.editMessageTextOnly(
                         String.valueOf(retirador.getTelegramChatId()),
                         solicitud.getTelegramPrivateMessageId(),
-                        "✅ *Retiro completado* (Solicitud #" + solicitud.getId() + ")");
+                        "✅ *Retiro completado*\n" + resumenCuentasYMontos(solicitud));
             } catch (Exception e) {
                 log.error("[Retiro] No se pudo limpiar el mensaje de Telegram al confirmar la solicitud #{}: {}",
                         solicitud.getId(), e.getMessage());
@@ -815,8 +830,8 @@ public class RetiradorServiceImpl implements RetiradorService {
                     .orElseThrow(() -> new RuntimeException("Caja no encontrada: " + dto.getCajaId()));
             if (caja.getSaldo() < dto.getMonto())
                 throw new IllegalStateException("Saldo insuficiente en la caja");
+            efectivoRepository.incrementarSaldo(caja.getId(), -dto.getMonto());
             caja.setSaldo(caja.getSaldo() - dto.getMonto());
-            efectivoRepository.save(caja);
 
             // Pago en efectivo: sin 4x1000, pero se registra el movimiento para el historial.
             movimientoRepository.save(Movimiento.builder()
@@ -887,6 +902,26 @@ public class RetiradorServiceImpl implements RetiradorService {
      */
     private static String etiquetaCuenta(AccountCop cuenta) {
         return "Cuenta " + (cuenta.getId() != null ? cuenta.getId() : "?");
+    }
+
+    /**
+     * Mismo resumen "Cuenta N: $monto[, Cuenta M: $monto]" que usa
+     * TelegramWebhookService.resumenCuentasYMontos — duplicado acá (en vez de
+     * compartido) porque viven en clases distintas y esto es solo texto de
+     * presentación. Usa SIEMPRE el monto final de cada detalle (ver
+     * DetalleRetiro#totalDetalleFinal()), así que si el retirador registró un
+     * monto real distinto al solicitado, el mensaje ya refleja lo real.
+     */
+    private static String resumenCuentasYMontos(SolicitudRetiro solicitud) {
+        StringBuilder sb = new StringBuilder();
+        List<DetalleRetiro> detalles = solicitud.getDetalles();
+        for (int i = 0; i < detalles.size(); i++) {
+            DetalleRetiro d = detalles.get(i);
+            if (i > 0) sb.append(", ");
+            sb.append(etiquetaCuenta(d.getCuentaCop())).append(": $")
+              .append(String.format("%,.0f", d.totalDetalleFinal()));
+        }
+        return sb.toString();
     }
 
     private List<DetalleRetiro> buildDetalles(

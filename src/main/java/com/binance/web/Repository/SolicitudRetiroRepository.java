@@ -4,13 +4,17 @@ import com.binance.web.Entity.DetalleRetiro;
 import com.binance.web.Entity.EstadoSolicitud;
 import com.binance.web.Entity.SolicitudRetiro;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import jakarta.persistence.LockModeType;
+
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface SolicitudRetiroRepository extends JpaRepository<SolicitudRetiro, Long> {
@@ -18,6 +22,29 @@ public interface SolicitudRetiroRepository extends JpaRepository<SolicitudRetiro
     List<SolicitudRetiro> findByRetiradorIdOrderByFechaCreacionDesc(Long retiradorId);
 
     List<SolicitudRetiro> findByEstadoOrderByFechaCreacionDesc(EstadoSolicitud estado);
+
+    /**
+     * Igual que findById, pero con bloqueo exclusivo de fila (mismo patrón que
+     * EfectivoRepository.findByIdForUpdate para la caja).
+     *
+     * Incidente 14/08/2026 (solicitud #799): la validación "si ya está
+     * COMPLETADO, rechazar" en confirmarSolicitud/confirmarSolicitudConMontoReal
+     * leía la solicitud con un findById normal (sin bloqueo). Cuando el mismo
+     * retiro se confirmó casi al mismo tiempo desde dos canales distintos (el
+     * administrador desde la web y el retirador desde Telegram), las DOS
+     * transacciones alcanzaron a leer estado=PENDIENTE antes de que cualquiera
+     * de las dos alcanzara a guardar estado=COMPLETADO (eso solo pasa al final
+     * de confirmarInterno) — las dos pasaron la validación y las dos
+     * descontaron cuenta/caja, duplicando el movimiento.
+     *
+     * Usando este findByIdForUpdate en su lugar, la segunda confirmación que
+     * llegue casi al mismo tiempo queda esperando a que la primera termine su
+     * transacción completa; cuando por fin puede leer, ya ve estado=COMPLETADO
+     * y la validación existente la rechaza ahí mismo, sin tocar nada.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select s from SolicitudRetiro s where s.id = :id")
+    Optional<SolicitudRetiro> findByIdForUpdate(@Param("id") Long id);
 
     /**
      * Desvincula (retirador = null) las solicitudes AÚN NO resueltas de un retirador
