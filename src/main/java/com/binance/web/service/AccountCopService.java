@@ -18,4 +18,12 @@ public interface AccountCopService {
 	void saveAccountCopSafe(AccountCop accountCop);
 	String reconcileAccountCop(Integer accId);
 
+	/**
+	 * Elige las 5 cuentas COP más cerca de llenar su cupo diario total (cupoDiarioMax - balance
+	 * más chico, pero sin pasarse del sub-límite de seguridad) y las deja como las ÚNICAS
+	 * activas para P2P — apagando cualquier otra que estuviera activa. Se dispara al arrancar
+	 * una jornada en modo VENTA_USDT (ver JornadaController).
+	 */
+	List<AccountCop> activarCincoCuentasMasCercanasAlCupo();
+
 }

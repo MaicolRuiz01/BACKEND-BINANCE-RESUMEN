@@ -358,6 +358,7 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 	    // la última → la sesión se cierra tras licuarla.
 	    boolean esUltimaSinAsignar = buyDollarsRepository.countByAsignadaFalse() <= 1;
 	    AverageRate tasaDia = averageRateService.actualizarTasaPromedioPorCompra(
+	            existing.getId(),
 	            existing.getDate(),
 	            montoUsdt,
 	            dto.getTasa(),

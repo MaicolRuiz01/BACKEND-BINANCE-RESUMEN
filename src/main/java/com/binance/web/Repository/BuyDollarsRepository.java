@@ -35,6 +35,18 @@ public interface BuyDollarsRepository extends JpaRepository<BuyDollars, Integer>
 	/** Cuántas compras (dollars) siguen sin asignar — para el corte por sesión de la tasa promedio. */
 	long countByAsignadaFalse();
 
+	/**
+	 * Suma en USDT de las DEMÁS compras que siguen sin asignar (excluye la que se está asignando
+	 * ahora). Ese USDT ya está físicamente en el wallet (por eso getTotalExternalBalance() lo
+	 * incluye) pero todavía no tiene tasa real asociada, así que debe restarse del saldoInicial
+	 * de la sesión para no contarlo dos veces cuando, más tarde, le toque su propia asignación.
+	 */
+	@Query("SELECT COALESCE(SUM(b.amount), 0) FROM BuyDollars b "
+			+ "WHERE COALESCE(b.asignada, false) = false "
+			+ "AND b.id <> :excludeId "
+			+ "AND (b.cryptoSymbol IS NULL OR UPPER(b.cryptoSymbol) = 'USDT')")
+	Double sumAmountPendienteExcluyendo(@Param("excludeId") Integer excludeId);
+
 	/** Solo IDs — evita cargar entidades completas para deduplicación */
 	@Query("SELECT b.idDeposit FROM BuyDollars b WHERE b.idDeposit IS NOT NULL")
 	java.util.Set<String> findAllDepositIds();

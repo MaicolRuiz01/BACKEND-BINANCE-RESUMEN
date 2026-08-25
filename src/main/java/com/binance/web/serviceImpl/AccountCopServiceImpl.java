@@ -5,7 +5,10 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -229,5 +232,59 @@ public class AccountCopServiceImpl implements AccountCopService {
 	    return "OK balance=" + newBalance + " cupoDisponibleHoy=" + newCupoHoy;
 	}
 
+	/**
+	 * Sub-límite de seguridad: una cuenta a la que le quede menos de esto de cupo total no se
+	 * elige aunque sea la más cercana al límite — está tan al borde que la próxima venta que le
+	 * caiga la haría pasarse. Valores en MILES de COP, misma unidad que el resto de cupos.
+	 */
+	private static final double SUBLIMITE_CUPO_RESTANTE = 1_000.0;
+	private static final int CUENTAS_A_ACTIVAR_POR_JORNADA = 5;
+
+	@Override
+	@Transactional
+	public List<AccountCop> activarCincoCuentasMasCercanasAlCupo() {
+	    List<AccountCop> todas = AccountCopRepository.findAll();
+
+	    // Candidatas: no bloqueadas, con banco definido, y con cupo restante (cupoDiarioMax -
+	    // balance) dentro del rango [SUBLIMITE_CUPO_RESTANTE, +inf). Un restante negativo o cero
+	    // significa que ya se pasó del cupo; uno positivo pero por debajo del sub-límite significa
+	    // que está demasiado cerca para arriesgarse con otra venta.
+	    List<AccountCop> candidatas = new ArrayList<>();
+	    for (AccountCop acc : todas) {
+	        if (Boolean.TRUE.equals(acc.getBloqueada())) continue;
+	        if (acc.getBankType() == null) continue;
+
+	        CupoDiarioRules.asegurarCupoHoy(acc);
+
+	        double cupoTotal = acc.getCupoDiarioMax() != null ? acc.getCupoDiarioMax() : 0.0;
+	        double saldo = acc.getBalance() != null ? acc.getBalance() : 0.0;
+	        double restante = cupoTotal - saldo;
+
+	        if (restante >= SUBLIMITE_CUPO_RESTANTE) {
+	            candidatas.add(acc);
+	        }
+	    }
+
+	    // La más cerca de llenar su cupo total primero (menor cupo restante).
+	    candidatas.sort(Comparator.comparingDouble(acc ->
+	            (acc.getCupoDiarioMax() != null ? acc.getCupoDiarioMax() : 0.0)
+	                    - (acc.getBalance() != null ? acc.getBalance() : 0.0)));
+
+	    List<AccountCop> elegidas = candidatas.stream()
+	            .limit(CUENTAS_A_ACTIVAR_POR_JORNADA)
+	            .collect(Collectors.toList());
+
+	    Set<Integer> idsElegidas = elegidas.stream().map(AccountCop::getId).collect(Collectors.toSet());
+
+	    // Reemplaza el set de cuentas activas para P2P: solo las elegidas quedan activas — se
+	    // apaga cualquier otra que estuviera activa de una jornada anterior, para no acumular
+	    // cuentas activas sin control a medida que arrancan jornadas durante el día.
+	    for (AccountCop acc : todas) {
+	        acc.setActivaParaP2P(idsElegidas.contains(acc.getId()));
+	    }
+	    AccountCopRepository.saveAll(todas);
+
+	    return elegidas;
+	}
 
 }

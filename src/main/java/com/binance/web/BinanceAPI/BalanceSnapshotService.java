@@ -65,6 +65,13 @@ public class BalanceSnapshotService {
         for (AccountCop acc : cuentas) {
             acc.setSaldoInicialDelDia(acc.getBalance());
 
+            // Reset diario: una cuenta activada para P2P ayer no debe amanecer activa hoy.
+            // Antes quedaba activa indefinidamente hasta que alguien la desactivara a mano,
+            // así que cuentas viejas podían seguir recibiendo ventas sin que nadie lo decidiera
+            // ese día. Ahora cada jornada arranca con todas desactivadas y el operador elige
+            // a mano cuáles usar.
+            acc.setActivaParaP2P(false);
+
             if (acc.getBankType() == null) continue;
 
             double cajero       = CupoDiarioRules.maxCajeroPorBanco(acc.getBankType());

@@ -18,8 +18,10 @@ public class AverageRateServiceImpl implements AverageRateService{
 	
 	
 	@Autowired private AverageRateRepository averageRateRepository;
-	
+
 	@Autowired private AccountBinanceService accountBinanceService;
+
+	@Autowired private com.binance.web.Repository.BuyDollarsRepository buyDollarsRepository;
 	
 	private static final ZoneId ZONE_BOGOTA = ZoneId.of("America/Bogota");
 
@@ -66,6 +68,7 @@ public class AverageRateServiceImpl implements AverageRateService{
 
     @Override
     public AverageRate actualizarTasaPromedioPorCompra(
+            Integer buyDollarsId,
             LocalDateTime fechaCompra,
             Double montoUsdtCompra,
             Double tasaCompra,
@@ -102,7 +105,15 @@ public class AverageRateServiceImpl implements AverageRateService{
             // que se está asignando. Si no se acotara, saldoInicial quedaría NEGATIVO y el promedio
             // ponderado se dispararía FUERA del rango [tasaCompra, tasaBase] (bug: subía en vez de
             // bajar al asignar una compra más barata).
-            Double saldoInicial = Math.max(0.0, saldoTotalInternoActual - montoUsdtCompra);
+            //
+            // También se resta el USDT de OTRAS compras aún sin asignar: ese USDT ya está en el
+            // wallet (por eso saldoTotalInternoActual lo incluye) pero todavía no tiene tasa real.
+            // Si se dejara dentro de saldoInicial quedaría valorado a la tasaBase (vieja) y luego,
+            // cuando le llegue su turno de asignación, se volvería a sumar con su tasa real →
+            // quedaría contado DOS veces en el promedio ponderado.
+            Double otrosPendientes = buyDollarsRepository.sumAmountPendienteExcluyendo(buyDollarsId);
+            if (otrosPendientes == null) otrosPendientes = 0.0;
+            Double saldoInicial = Math.max(0.0, saldoTotalInternoActual - montoUsdtCompra - otrosPendientes);
             Double tasaBase = ultima.getAverageRate();                       // base = última tasa vigente
             Double pesosSaldoInicial = saldoInicial * tasaBase;
 

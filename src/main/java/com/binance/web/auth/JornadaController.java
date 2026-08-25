@@ -19,6 +19,7 @@ import com.binance.web.Entity.JornadaTrabajo;
 import com.binance.web.Entity.ModoJornada;
 import com.binance.web.Entity.Usuario;
 import com.binance.web.Repository.JornadaTrabajoRepository;
+import com.binance.web.service.AccountCopService;
 import com.binance.web.service.TelegramService;
 
 import lombok.RequiredArgsConstructor;
@@ -38,6 +39,7 @@ public class JornadaController {
 
     private final JornadaTrabajoRepository jornadaRepository;
     private final TelegramService telegramService;
+    private final AccountCopService accountCopService;
 
     @Value("${app.telegram.group-chat-id:}")
     private String grupoChatId;
@@ -73,6 +75,18 @@ public class JornadaController {
             jornada.setStartedAt(LocalDateTime.now());
             jornada.setModo(parseModo(body));
             jornada = jornadaRepository.save(jornada);
+
+            // Al arrancar a vender USDT, el sistema elige y activa por el operador las 5
+            // cuentas COP más cerca de llenar su cupo diario (ver AccountCopServiceImpl
+            // .activarCincoCuentasMasCercanasAlCupo) — así no depende de que alguien las
+            // active a mano cada mañana. No debe tumbar el inicio de la jornada si falla.
+            if (jornada.getModo() == ModoJornada.VENTA_USDT) {
+                try {
+                    accountCopService.activarCincoCuentasMasCercanasAlCupo();
+                } catch (Exception e) {
+                    log.warn("[Jornada] No se pudieron activar las cuentas P2P automáticamente: {}", e.getMessage());
+                }
+            }
 
             if (avisarInicioFin) {
                 enviarTelegram(String.format("🟢 *Inicio de jornada*%n%nOperador: *%s*%nModo: %s",
