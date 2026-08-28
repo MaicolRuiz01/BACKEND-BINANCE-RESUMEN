@@ -63,7 +63,14 @@ public class P2PActiveOrderController {
         String accountBinance = (String) body.get("accountBinance");
 
         if (orderNumber == null || copId == null || accountBinance == null) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Faltan campos requeridos"));
+            // Se detalla QUÉ falta: antes solo decía "faltan campos" y no había forma de saber
+            // cuál, ni desde el log ni desde la pantalla del operador.
+            String faltantes = (orderNumber == null ? "orderNumber " : "")
+                    + (copId == null ? "copId " : "")
+                    + (accountBinance == null ? "accountBinance" : "");
+            log.warn("[PreAsign] Petición incompleta — faltan: {}", faltantes.trim());
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "Faltan datos de la orden (" + faltantes.trim() + ")"));
         }
 
         try {
@@ -81,8 +88,14 @@ public class P2PActiveOrderController {
                 return ResponseEntity.ok(Map.of("mensaje", "Pre-asignación ya existía"));
             }
         } catch (Exception e) {
-            log.error("[PreAsign] Error: {}", e.getMessage());
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            // Se registra el TIPO de excepción y la traza: con solo getMessage() muchas
+            // excepciones de JPA llegan con mensaje vacío y el log no servía para nada.
+            log.error("[PreAsign] Falló la orden {} → cuenta {}: {} - {}",
+                    orderNumber, copId, e.getClass().getSimpleName(), e.getMessage(), e);
+            String detalle = e.getMessage() != null && !e.getMessage().isBlank()
+                    ? e.getMessage()
+                    : e.getClass().getSimpleName();
+            return ResponseEntity.badRequest().body(Map.of("error", "No se pudo guardar: " + detalle));
         }
     }
 
