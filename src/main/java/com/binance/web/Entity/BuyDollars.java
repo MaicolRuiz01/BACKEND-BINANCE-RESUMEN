@@ -58,4 +58,5 @@ public class BuyDollars {
 	  @Column(name="tx_id", length=128)
 	  private String txId;
 	
+
 }

@@ -21,6 +21,21 @@ public class AverageRateController {
 	@Autowired
 	private AverageRateService averageRateService;
 	
+	@Autowired
+	private com.binance.web.Repository.TasaPromedioDiagnosticoRepository diagnosticoRepository;
+
+	/**
+	 * GET /tasa-promedio/diagnostico
+	 * Últimos recálculos de la tasa promedio, del más reciente al más viejo.
+	 * Solo lectura y solo para ADMIN: sirve para revisar con qué números se hizo cada paso
+	 * y detectar en qué compra se desvía la tasa.
+	 */
+	@GetMapping("/diagnostico")
+	@org.springframework.security.access.prepost.PreAuthorize("hasRole('ADMIN')")
+	public ResponseEntity<java.util.List<com.binance.web.Entity.TasaPromedioDiagnostico>> diagnostico() {
+		return ResponseEntity.ok(diagnosticoRepository.findTop200ByOrderByFechaDesc());
+	}
+
 	@GetMapping("/ultima")
     public ResponseEntity<AverageRate> obtenerUltimaTasaPromedio() {
         AverageRate ultima = averageRateService.getUltimaTasaPromedio();

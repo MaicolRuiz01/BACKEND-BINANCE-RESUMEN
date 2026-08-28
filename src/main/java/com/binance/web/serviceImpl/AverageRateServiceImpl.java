@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import com.binance.web.Entity.AverageRate;
+import com.binance.web.Entity.TasaPromedioDiagnostico;
 import com.binance.web.Repository.AverageRateRepository;
 import com.binance.web.service.AccountBinanceService;
 import com.binance.web.service.AverageRateService;
@@ -20,6 +21,9 @@ public class AverageRateServiceImpl implements AverageRateService{
 	@Autowired private AverageRateRepository averageRateRepository;
 
 	@Autowired private AccountBinanceService accountBinanceService;
+
+	/** Solo para el registro de diagnóstico; no interviene en ningún cálculo. */
+	@Autowired private com.binance.web.Repository.TasaPromedioDiagnosticoRepository diagnosticoRepository;
 
 	@Autowired private com.binance.web.Repository.BuyDollarsRepository buyDollarsRepository;
 	
@@ -93,6 +97,20 @@ public class AverageRateServiceImpl implements AverageRateService{
 
         AverageRate sesion = averageRateRepository.findTopBySesionAbiertaTrueOrderByFechaDesc().orElse(null);
 
+        // ── Diagnóstico: valores intermedios que después no se pueden recuperar ──
+        // Se recogen mientras se calcula y se guardan al final en tasa_promedio_diagnostico.
+        // No influyen en el resultado: son solo para poder revisar qué pasó.
+        String diagEvento = (sesion == null) ? "APERTURA_SESION" : "LICUA_SESION";
+        Double diagTasaAnterior = null;
+        Double diagOtrosPendientes = null;
+        Double diagSaldoBase = null;
+        Double diagTasaBase = null;
+        Double diagUsdtAcum = null;
+        Double diagPesosAcum = null;
+        Double diagTotalUsdt = null;
+        Double diagTotalPesos = null;
+        boolean diagBaseRecortada = false;
+
         if (sesion == null) {
             // ===== No hay sesión abierta → se ABRE una nueva (primera compra del backlog) =====
             AverageRate ultima = averageRateRepository
@@ -113,7 +131,8 @@ public class AverageRateServiceImpl implements AverageRateService{
             // quedaría contado DOS veces en el promedio ponderado.
             Double otrosPendientes = buyDollarsRepository.sumAmountPendienteExcluyendo(buyDollarsId);
             if (otrosPendientes == null) otrosPendientes = 0.0;
-            Double saldoInicial = Math.max(0.0, saldoTotalInternoActual - montoUsdtCompra - otrosPendientes);
+            Double saldoSinRecortar = saldoTotalInternoActual - montoUsdtCompra - otrosPendientes;
+            Double saldoInicial = Math.max(0.0, saldoSinRecortar);
             Double tasaBase = ultima.getAverageRate();                       // base = última tasa vigente
             Double pesosSaldoInicial = saldoInicial * tasaBase;
 
@@ -123,6 +142,18 @@ public class AverageRateServiceImpl implements AverageRateService{
             Double totalUsdt = saldoInicial + totalUsdtCompras;
             Double totalPesos = pesosSaldoInicial + totalPesosCompras;
             Double nuevaTasa = totalUsdt != 0 ? (totalPesos / totalUsdt) : tasaBase;
+
+            diagTasaAnterior = ultima.getAverageRate();
+            diagOtrosPendientes = otrosPendientes;
+            diagSaldoBase = saldoInicial;
+            diagTasaBase = tasaBase;
+            diagUsdtAcum = totalUsdtCompras;
+            diagPesosAcum = totalPesosCompras;
+            diagTotalUsdt = totalUsdt;
+            diagTotalPesos = totalPesos;
+            // Si el saldo era menor que la compra, la base se pierde y el promedio pasa a ser
+            // simplemente la tasa de esta compra. Vale la pena poder detectar cuándo ocurre.
+            diagBaseRecortada = saldoSinRecortar < 0;
 
             sesion = new AverageRate();
             sesion.setInicioDia(inicioDia);
@@ -146,6 +177,14 @@ public class AverageRateServiceImpl implements AverageRateService{
             Double totalPesos = pesosSaldoInicial + totalPesosCompras;
             Double nuevaTasa = totalUsdt != 0 ? (totalPesos / totalUsdt) : sesion.getAverageRate();
 
+            diagTasaAnterior = sesion.getAverageRate();
+            diagSaldoBase = saldoInicial;
+            diagTasaBase = tasaBase;
+            diagUsdtAcum = totalUsdtCompras;
+            diagPesosAcum = totalPesosCompras;
+            diagTotalUsdt = totalUsdt;
+            diagTotalPesos = totalPesos;
+
             sesion.setTotalUsdtComprasDia(totalUsdtCompras);
             sesion.setTotalPesosComprasDia(totalPesosCompras);
             sesion.setAverageRate(nuevaTasa);
@@ -156,7 +195,42 @@ public class AverageRateServiceImpl implements AverageRateService{
         // La sesión queda ABIERTA mientras queden compras sin asignar; se CIERRA con la última.
         sesion.setSesionAbierta(!esUltimaSinAsignar);
 
-        return averageRateRepository.save(sesion);
+        AverageRate guardada = averageRateRepository.save(sesion);
+
+        // ── Registro de diagnóstico ──
+        // Va en try/catch y al final a propósito: si falla, la asignación de la compra ya se
+        // hizo y no puede quedar a medias por un problema al escribir un dato informativo.
+        try {
+            TasaPromedioDiagnostico d = new TasaPromedioDiagnostico();
+            d.setFecha(ahora);
+            d.setEvento(diagEvento);
+            d.setBuyDollarsId(buyDollarsId);
+            d.setCompraUsdt(montoUsdtCompra);
+            d.setCompraTasa(tasaCompra);
+            d.setCompraPesos(montoUsdtCompra != null && tasaCompra != null
+                    ? montoUsdtCompra * tasaCompra : null);
+            d.setSaldoExternoLeido(saldoTotalInternoActual);
+            d.setOtrosPendientesUsdt(diagOtrosPendientes);
+            d.setSaldoBaseUsdt(diagSaldoBase);
+            d.setTasaBase(diagTasaBase);
+            d.setPesosBase(diagSaldoBase != null && diagTasaBase != null
+                    ? diagSaldoBase * diagTasaBase : null);
+            d.setBaseRecortadaACero(diagBaseRecortada);
+            d.setUsdtAcumSesion(diagUsdtAcum);
+            d.setPesosAcumSesion(diagPesosAcum);
+            d.setTasaAnterior(diagTasaAnterior);
+            d.setTasaResultante(guardada.getAverageRate());
+            d.setTotalUsdt(diagTotalUsdt);
+            d.setTotalPesos(diagTotalPesos);
+            d.setAverageRateId(guardada.getId());
+            d.setSesionAbierta(guardada.getSesionAbierta());
+            d.setInicioDia(guardada.getInicioDia());
+            diagnosticoRepository.save(d);
+        } catch (Exception e) {
+            System.out.println("[TasaPromedio][DIAG] No se pudo registrar el diagnóstico: " + e.getMessage());
+        }
+
+        return guardada;
     }
 
     @Override

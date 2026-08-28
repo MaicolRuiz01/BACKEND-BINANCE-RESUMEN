@@ -364,9 +364,9 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 	            dto.getTasa(),
 	            esUltimaSinAsignar
 	    );
-
-	    // (Opcional) si quieres loguear o devolver info:
-	    // Double tasaPromedioActual = tasaDia.getAverageRate();
+	    // El detalle del cálculo queda registrado en la tabla tasa_promedio_diagnostico,
+	    // que se escribe dentro de AverageRateServiceImpl (que es donde viven los valores
+	    // intermedios: saldo externo leído, pendientes descontados, base y acumulados).
 
 	    // --- ASIGNACIÓN DINÁMICA (igual que antes) ---
 	    if (dto.getSupplierId() != null) {
