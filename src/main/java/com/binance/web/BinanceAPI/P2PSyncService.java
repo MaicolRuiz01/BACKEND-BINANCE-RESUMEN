@@ -56,8 +56,9 @@ public class P2PSyncService {
     @org.springframework.beans.factory.annotation.Value("${p2p.sync.lookback-horas:36}")
     private long lookbackHoras;
 
-    /** Referencia a sí mismo (vía proxy) para que @Transactional de syncAccount SÍ aplique
-     *  cuando se llama desde syncAllAccounts (evita el problema de auto-invocación de Spring). */
+    /** Referencia a sí mismo (vía proxy) para que el @Transactional de persistirVenta y
+     *  actualizarEstadoSync SÍ aplique al llamarlos desde syncAccount, que no es transaccional
+     *  (evita el problema de auto-invocación de Spring: una llamada interna se salta el proxy). */
     @Autowired @Lazy private P2PSyncService self;
 
     // ─────────────────────────────────────────────────────────────
@@ -102,12 +103,30 @@ public class P2PSyncService {
     // Sync por cuenta — lógica delta
     // ─────────────────────────────────────────────────────────────
 
-    @Transactional
+    /**
+     * Sincroniza una cuenta.
+     *
+     * IMPORTANTE — este método NO es @Transactional a propósito.
+     *
+     * Antes sí lo era, y la primera cosa que hacía dentro de la transacción era llamar a Binance
+     * por HTTP (que además pagina). Eso dejaba una transacción abierta durante SEGUNDOS esperando
+     * la red, y dentro de ella se borraban filas de p2p_pre_asignacion y se actualizaba el saldo
+     * de account_cop.
+     *
+     * Mientras tanto, cuando el operador pre-asignaba una venta, su INSERT en p2p_pre_asignacion
+     * necesitaba bloquear la fila de account_cop referenciada por la llave foránea — justo la que
+     * el sync tenía tomada. El operador quedaba esperando hasta que vencía el tiempo límite del
+     * candado y le salía "could not execute statement ... try restarting transaction".
+     * Eso es lo que reportaban como "se demora mucho en asignar y después da error".
+     *
+     * Ahora: la lectura a Binance va FUERA de cualquier transacción, y cada orden se persiste en
+     * su propia transacción corta. Los candados duran milisegundos en vez de segundos.
+     */
     public int syncAccount(AccountBinance account) throws Exception {
         long endMs   = Instant.now().toEpochMilli();
         long startMs = resolveStartMs(account);
 
-        // Pide a Binance SOLO las órdenes desde la última sync
+        // ── 1) LECTURA a Binance, sin transacción abierta ──
         String json = binanceService.getP2POrdersInRange(account.getName(), startMs, endMs, "SELL");
         JsonNode root = mapper.readTree(json);
 
@@ -119,29 +138,50 @@ public class P2PSyncService {
         JsonNode data = root.path("data");
         int newCount = 0;
 
+        // ── 2) ESCRITURA: una transacción corta por orden ──
+        // Si una orden falla, las demás igual se guardan (antes se perdía el lote completo).
         if (data.isArray()) {
             for (JsonNode obj : data) {
                 if (!isValidSell(obj)) continue;
-
-                String orderNumber = obj.path("orderNumber").asText();
-                if (orderNumber.isBlank()) continue;
-                if (saleP2PRepository.existsByNumberOrder(orderNumber)) continue;
-
-                SaleP2P sale = buildSale(obj, account);
-                saleP2PRepository.save(sale);
                 try {
-                    autoAssign(sale);
+                    if (self.persistirVenta(obj, account)) newCount++;
                 } catch (Exception e) {
-                    log.warn("[Sync] Auto-asignación falló para orden {} ({}): {}",
-                            orderNumber, account.getName(), e.getMessage());
+                    log.warn("[Sync] No se pudo guardar la orden {} ({}): {}",
+                            obj.path("orderNumber").asText(), account.getName(), e.getMessage());
                 }
-                newCount++;
             }
         }
 
         // Siempre actualiza el timestamp aunque no haya habido órdenes nuevas
-        updateSyncState(account, endMs);
+        self.actualizarEstadoSync(account, endMs);
         return newCount;
+    }
+
+    /**
+     * Guarda UNA venta y le aplica su pre-asignación, en una transacción propia y corta.
+     * Devuelve true si se guardó (false si ya existía).
+     */
+    @Transactional
+    public boolean persistirVenta(JsonNode obj, AccountBinance account) {
+        String orderNumber = obj.path("orderNumber").asText();
+        if (orderNumber.isBlank()) return false;
+        if (saleP2PRepository.existsByNumberOrder(orderNumber)) return false;
+
+        SaleP2P sale = buildSale(obj, account);
+        saleP2PRepository.save(sale);
+        try {
+            autoAssign(sale);
+        } catch (Exception e) {
+            log.warn("[Sync] Auto-asignación falló para orden {} ({}): {}",
+                    orderNumber, account.getName(), e.getMessage());
+        }
+        return true;
+    }
+
+    /** Marca de tiempo de la última sync, en su propia transacción. */
+    @Transactional
+    public void actualizarEstadoSync(AccountBinance account, long endMs) {
+        updateSyncState(account, endMs);
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -236,9 +276,8 @@ public class P2PSyncService {
                 (cop.getCupoDisponibleHoy() != null ? cop.getCupoDisponibleHoy() : 0.0) - amount);
         accountCopService.saveAccountCopSafe(cop);
 
-        if (sale.getDollarsUs() != null && sale.getDollarsUs() > 0) {
-            accountBinanceService.subtractBalance(sale.getBinanceAccount().getName(), sale.getDollarsUs());
-        }
+        // (Se quitó el descuento del USDT en el saldo interno: ese saldo ya no se lleva.
+        //  El USDT vendido se refleja solo en Binance, que es de donde se lee todo ahora.)
 
         if (sale.getAccountCopsDetails() == null) sale.setAccountCopsDetails(new ArrayList<>());
         sale.getAccountCopsDetails().add(detail);

@@ -11,6 +11,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
+import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import lombok.AllArgsConstructor;
@@ -25,6 +26,12 @@ import lombok.NoArgsConstructor;
 		  name = "sell_dollars",
 		  uniqueConstraints = {
 		    @UniqueConstraint(name = "uk_sell_dedupe", columnNames = "dedupe_key") // opcional pero recomendado
+		  },
+		  indexes = {
+		    // Mismas razones que en buy_dollars: se consultan por cada retiro importado.
+		    @Index(name = "idx_sell_dollars_tx_id", columnList = "tx_id"),
+		    @Index(name = "idx_sell_dollars_date", columnList = "date"),
+		    @Index(name = "idx_sell_dollars_asignado", columnList = "asignado")
 		  }
 		)
 public class SellDollars {

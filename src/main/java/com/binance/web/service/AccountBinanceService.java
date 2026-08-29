@@ -23,6 +23,13 @@ public interface AccountBinanceService {
     Double getFundingUSDTBalance(String name);
     BigDecimal getTotalBalanceInterno();
     Double getTotalExternalBalance();
+
+    /**
+     * Total de USDT real en todas las cuentas (en vivo), SIN convertir otras monedas.
+     * Es la base del Balance General: refleja el USDT que hay de verdad, y no se mueve
+     * cuando cambia el precio de SOL, TRX u otras criptos.
+     */
+    Double getTotalExternalUsdt();
 	Double getCryptoBalance(String accountName, String cryptoSymbol);
 	void subtractCryptoBalance(Integer accountId, String cryptoSymbol, Double amount);
 	void updateOrCreateCryptoBalance(Integer accountId, String cryptoSymbol, Double amount);

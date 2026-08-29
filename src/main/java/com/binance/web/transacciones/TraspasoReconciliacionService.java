@@ -101,11 +101,8 @@ public class TraspasoReconciliacionService {
                 continue;
             }
 
-            // La compra ya sumó el cripto en destino al importarse. Falta restarlo en origen.
-            if (origen != null) {
-                // dollars está en miles; el saldo cripto va en USDT reales → ×1000.
-                accountBinanceService.subtractCryptoBalance(origen.getId(), symbol, sell.getDollars() * 1000.0);
-            }
+            // (Se quitó el ajuste del saldo cripto interno: ese saldo ya no se lleva. El traspaso
+            //  se registra igual como Transacción, que es lo que alimenta el historial.)
 
             // Registrar la transacción (traspaso) para el historial.
             String idTx = "TRASPASO-"

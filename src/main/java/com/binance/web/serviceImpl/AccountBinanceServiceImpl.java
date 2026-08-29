@@ -278,6 +278,59 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
 		return total;
 	}
 
+	/**
+	 * Total de USDT REAL en todas las cuentas, leído en vivo — y SOLO USDT.
+	 *
+	 * Se diferencia de getTotalExternalBalance(), que convierte todas las monedas (SOL, TRX,
+	 * LINEA, BTTC…) a USDT al precio del momento. Acá se omiten a propósito: si entraran, el
+	 * patrimonio del negocio subiría o bajaría solo con el mercado, sin que se hubiera hecho
+	 * ninguna operación. Lo que interesa para el Balance General es cuánto USDT hay de verdad.
+	 *
+	 * Sustituye al saldo interno, que solo reflejaba lo que el sistema había alcanzado a
+	 * registrar y se descuadraba cuando algo no se importaba bien.
+	 *
+	 * Defensivo: si una cuenta falla se salta y se suman las demás; nunca lanza.
+	 */
+	@Override
+	public Double getTotalExternalUsdt() {
+		List<AccountBinance> cuentas = accountBinanceRepository.findAll();
+		double total = 0.0;
+
+		for (AccountBinance account : cuentas) {
+			try {
+				String tipo = account.getTipo() != null ? account.getTipo().toUpperCase() : "";
+
+				if ("BINANCE".equals(tipo)) {
+					Double usdt = binanceService.getUsdtBalance(account.getName());
+					total += usdt != null ? usdt : 0.0;
+
+				} else if ("TRUST".equals(tipo) || "TRUSTWALLET".equals(tipo)) {
+					total += soloUsdt(tronScanService.getBalancesByAsset(account.getAddress()));
+
+				} else if ("SOLANA".equals(tipo) || "PHANTOM".equals(tipo)) {
+					total += soloUsdt(solscanService.getBalancesByAsset(account.getAddress()));
+
+				} else if ("BYBIT".equals(tipo) || "BYBIP".equals(tipo)) {
+					total += soloUsdt(bybitService.getBalancesByAsset(account.getApiKey(), account.getApiSecret()));
+				}
+			} catch (Exception e) {
+				System.out.println("⚠️ [UsdtTotal] Error con cuenta " + account.getName() + ": " + e.getMessage());
+			}
+		}
+		return total;
+	}
+
+	/** Saca la cantidad de USDT de un mapa de saldos por moneda, ignorando el resto. */
+	private double soloUsdt(Map<String, Double> balances) {
+		if (balances == null || balances.isEmpty()) return 0.0;
+		for (Map.Entry<String, Double> e : balances.entrySet()) {
+			if (e.getKey() != null && "USDT".equalsIgnoreCase(e.getKey().trim())) {
+				return e.getValue() != null ? e.getValue() : 0.0;
+			}
+		}
+		return 0.0;
+	}
+
 	@Override
 	public Double getEstimatedUSDTBalance(String name) {
 		// Aquí delegamos al método que calcula sumando cada activo * precio USDT

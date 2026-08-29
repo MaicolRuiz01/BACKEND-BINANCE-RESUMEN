@@ -111,8 +111,18 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
                     .map(AverageRate::getAverageRate)
                     .orElse(0.0));
 
-            // 2) total de TODAS las cuentas en USDT (interno) → a pesos
-            Double totalBinanceUSDT = accountBinanceService.getTotalBalanceInterno().doubleValue();
+            // 2) total de TODAS las cuentas en USDT → a pesos.
+            //
+            // Se toma el saldo REAL leído de Binance/wallets, no el interno de la base. El interno
+            // solo reflejaba lo que el sistema había alcanzado a registrar, así que cualquier
+            // operación que no se importara bien lo dejaba descuadrado y el patrimonio salía mal
+            // sin dar ningún error.
+            //
+            // Se usa la versión SOLO USDT a propósito: si se contaran todas las monedas valoradas
+            // a precio de mercado (SOL, TRX, LINEA…), el patrimonio del día cambiaría solo porque
+            // se movió el mercado, sin que se hubiera hecho ninguna operación.
+            Double totalBinanceUSDT = accountBinanceService.getTotalExternalUsdt();
+            if (totalBinanceUSDT == null) totalBinanceUSDT = 0.0;
             Double saldoCuentasBinance = totalBinanceUSDT * tasaPromedioDelDia;
 
             // 3) demás componentes del balance
@@ -208,22 +218,11 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
                 - (totalUSDTVentasGenerales * tasaPromedioDelDia);
             Double saldoTotal = saldoCuentasBinance + saldoCajas + saldoCop + pesosTotalCuentasVES - saldoProveedores - clientesSaldo + netoNoAsignadasUsdt;
             
-            List<CryptoAverageRate> ratesHoy = cryptoAverageRateService.listarPorDia(fecha);
-
-            List<CryptoResumenDiaDto> resumenCriptos = ratesHoy.stream()
-                .filter(r -> r.getSaldoFinalCripto() != null && r.getSaldoFinalCripto() > 0.000001)
-                .map(r -> {
-                    Double saldo = r.getSaldoFinalCripto();
-                    Double tasa  = r.getTasaPromedioDia();
-                    Double usdt  = (saldo != null && tasa != null) ? saldo * tasa : 0.0;
-                    return new CryptoResumenDiaDto(
-                            r.getCripto(),
-                            saldo,
-                            tasa,
-                            usdt
-                    );
-                })
-                .toList();
+            // Desglose de criptos: se deja VACÍO. El negocio maneja solo USDT, así que ya no se
+            // lleva una tasa promedio por cada moneda (TRX, SOL, ZBT…) y no hay nada que desglosar.
+            // Se conserva el campo y el JSON vacío para no romper los balances ya guardados ni
+            // la vista que lo lee.
+            List<CryptoResumenDiaDto> resumenCriptos = List.of();
 
             try {
                 ObjectMapper mapper = new ObjectMapper();
@@ -325,16 +324,15 @@ public class BalanceGeneralServiceImplement implements BalanceGeneralService {
                 return amount;
             }
 
-            // Busca la tasa promedio del día para esa cripto
-            CryptoAverageRate rate = cryptoAverageRateService
-                    .listarPorDia(fecha).stream()
-                    .filter(r -> cryptoSymbol.equalsIgnoreCase(r.getCripto()))
-                    .findFirst()
-                    .orElse(null);
-
-            if (rate == null || rate.getTasaPromedioDia() == null) return 0.0;
-
-            return amount * rate.getTasaPromedioDia();
+            // El negocio maneja SOLO USDT. Ya no se lleva tasa promedio por cada cripto, así que
+            // una compra en otra moneda no se puede valorar y NO entra al balance.
+            //
+            // Se deja el aviso en el log a propósito: antes esto devolvía 0 en silencio y esa
+            // plata desaparecía del balance sin que nadie se enterara. Si aparece esta línea,
+            // es que entró algo que no es USDT y hay que revisarlo a mano.
+            System.out.println("⚠️ [BalanceGeneral] Compra en " + cryptoSymbol
+                    + " ignorada: el sistema solo maneja USDT. Monto sin valorar: " + amount);
+            return 0.0;
         }
 
         /**

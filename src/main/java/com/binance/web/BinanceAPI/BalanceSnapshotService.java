@@ -87,11 +87,11 @@ public class BalanceSnapshotService {
         }
         accountCopRepo.saveAll(cuentas);
 
-        // 🔁 1) Sincronizar saldos cripto internos desde EXTERNO
-        accountBinanceService.syncAllInternalBalancesFromExternal();
+        // (Se quitó la sincronización de saldos cripto internos: ese saldo se eliminó del
+        //  sistema. Todo se lee en vivo de Binance y las wallets, que es la fuente real.)
 
-        // 📈 2) Inicializar tasas promedio cripto del día
-        cryptoAverageRateService.inicializarCriptosDelDia(LocalDateTime.now());
+        // (Se quitó la inicialización diaria de tasas promedio por cripto: el negocio maneja
+        //  solo USDT, así que no hace falta llevar una tasa por cada moneda.)
 
         System.out.println("✅ Saldos iniciales del día actualizados (clientes, proveedores, cajas, COP y criptos)");
     }

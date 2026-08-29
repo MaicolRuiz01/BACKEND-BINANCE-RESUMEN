@@ -634,16 +634,8 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 	          || traspasoWalletService.esWalletTraspaso(dto.getContraparteAddress());
 
 	      if (account != null && esTraspasoBybit) {
-	        try {
-	          accountCryptoBalanceService.updateCryptoBalance(account, symbol, -dollars, true);
-	          if (feeTRX > 0) accountCryptoBalanceService.updateCryptoBalance(account, "TRX", -feeTRX, true);
-	        } catch (Exception ex) {
-	          System.out.println("⚠️ No se pudo ajustar balance cripto (traspaso Bybit): " + ex.getMessage());
-	        }
-	        // OJO (no se toca aquí a propósito): el ABONO del cripto en la cuenta Bybit destino lo
-	        // hace el lado de las COMPRAS al importar ese mismo depósito (rama esTraspaso de
-	        // BuyDollarsServiceImpl). Acreditarlo también aquí duplicaría el saldo. Ver nota al
-	        // usuario sobre el caso en que el depósito se filtra por "wallet propia" y nadie abona.
+	        // Ya no se ajusta saldo cripto interno (se eliminó). El traspaso se sigue registrando
+	        // como Transacción para el historial, que es lo que de verdad importa.
 	        String txHash = dto.getIdWithdrawals();
 	        if (txHash == null || !transaccionesRepository.existsByTxId(txHash)) {
 	          Transacciones t = new Transacciones();
@@ -659,17 +651,13 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 	        continue;
 	      }
 
-	      // Ajuste de balances cripto (no rompe import si falla)
+	      // (Se quitó el ajuste de balances cripto internos: ese saldo ya no se lleva.)
 	      try {
-	        if (account != null) {
-	          accountCryptoBalanceService.updateCryptoBalance(account, symbol, -dollars, true);
-	          if (feeSOL > 0) accountCryptoBalanceService.updateCryptoBalance(account, "SOL", -feeSOL, true);
-	          if (feeTRX > 0) accountCryptoBalanceService.updateCryptoBalance(account, "TRX", -feeTRX, true);
-	        } else {
+	        if (account == null) {
 	          System.out.println("⚠️ Cuenta no encontrada: " + dto.getNameAccount() + " (se registra venta igual)");
 	        }
 	      } catch (Exception ex) {
-	        System.out.println("⚠️ No se pudo ajustar balance cripto: " + ex.getMessage());
+	        System.out.println("⚠️ Error revisando la cuenta: " + ex.getMessage());
 	      }
 
 	      String tipoCuenta = (account != null && account.getTipo() != null && !account.getTipo().isBlank())

@@ -98,21 +98,12 @@ public class SpotOrderIngestService {
 
     public int importarTodasLasCuentasAuto(int limitPorSimbolo) {
 
-        // 🔴 1) NO IMPORTAR NADA si faltan tasas iniciales
-        var pendientes = cryptoAverageRateService.listarCriptosPendientesInicializacion();
-        if (!pendientes.isEmpty()) {
-            String faltan = pendientes.stream()
-                    .map(CryptoPendienteDto::getCripto)
-                    .distinct()
-                    .sorted()
-                    .collect(Collectors.joining(", "));
-
-            throw new IllegalStateException(
-                "No se pueden importar órdenes porque faltan tasas promedio iniciales para: " + faltan
-            );
-        }
-
-        // 🟢 2) Si llegamos aquí, TODO tiene tasa inicial -> ya puedes importar seguro
+        // Antes acá se bloqueaba TODA la importación si alguna cripto no tenía tasa promedio
+        // inicial configurada. Se quitó junto con el sistema de tasas por cripto: el negocio
+        // maneja solo USDT y ya no se lleva una tasa por cada moneda.
+        //
+        // Era importante quitarlo: al dejar de calcular esas tasas, esta validación habría
+        // bloqueado la importación de órdenes spot para siempre, y sin ningún aviso claro.
         int total = 0;
         for (AccountBinance acc : accountRepo.findByTipo("BINANCE")) {
             Set<String> symbols = resolverSimbolosParaCuenta(acc);
@@ -216,17 +207,10 @@ public class SpotOrderIngestService {
                     continue;
                 }
 
-                // 🔴 2) (opcional, pero MUY sano) si es BUY, validamos que la cripto tenga tasa inicial
-                if ("BUY".equalsIgnoreCase(side)) {
-                    var ultima = cryptoAverageRateService.getUltimaPorCripto(base);
-                    if (ultima == null) {
-                        throw new IllegalStateException(
-                            "Primero debes configurar la tasa promedio inicial para la cripto " + base
-                        );
-                    }
-                }
+                // (Se quitó la validación de tasa inicial por cripto: ya no se llevan tasas
+                //  promedio por moneda, el negocio maneja solo USDT.)
 
-             // ✅ 3) Crear y guardar la orden
+             // ✅ Crear y guardar la orden
                 SpotOrder so = new SpotOrder();
                 so.setCuentaBinance(acc);
                 so.setIdOrdenBinance(orderId);
@@ -246,15 +230,7 @@ public class SpotOrderIngestService {
 
                 spotOrderRepo.save(so);
 
-                // ✅ 4) Si es COMPRA, recalcular tasa promedio de ESA cripto para HOY
-                if ("BUY".equalsIgnoreCase(side)) {
-                    cryptoAverageRateService.actualizarPorCompra(
-                            base,
-                            execBase,
-                            execQ,
-                            fechaOp
-                    );
-                }
+                // (Ya no se recalcula tasa promedio por cripto en cada compra: solo USDT.)
 
                 // ✅ 5) Ajustar saldos internos
                 applyDeltas(acc, base, quote, side, execBase, execQ, feeByAsset);
@@ -268,23 +244,18 @@ public class SpotOrderIngestService {
     }
 
 
+    /**
+     * Antes ajustaba el saldo cripto interno con los deltas de cada orden spot.
+     *
+     * Ya no hace nada: el saldo interno se eliminó. Todo se lee en vivo de Binance, que es la
+     * fuente real, así que llevar una contabilidad paralela era trabajo de más que además se
+     * descuadraba cuando alguna operación no se importaba bien.
+     *
+     * Se conserva el método (vacío) en vez de borrar las llamadas para no alterar el flujo de
+     * la importación de órdenes, que sigue guardando la orden igual que siempre.
+     */
     private void applyDeltas(AccountBinance acc, String base, String quote, String side,
                              double execBase, double execQuote, Map<String, Double> feeByAsset) {
-        double feeBase  = feeByAsset.getOrDefault(base, 0.0);
-        double feeQuote = feeByAsset.getOrDefault(quote, 0.0);
-
-        if ("BUY".equalsIgnoreCase(side)) {
-            accountService.updateOrCreateCryptoBalance(acc.getId(), base,  +execBase - feeBase);
-            accountService.updateOrCreateCryptoBalance(acc.getId(), quote, -execQuote - feeQuote);
-        } else {
-            accountService.updateOrCreateCryptoBalance(acc.getId(), base,  -execBase - feeBase);
-            accountService.updateOrCreateCryptoBalance(acc.getId(), quote, +execQuote - feeQuote);
-        }
-
-        for (var e : feeByAsset.entrySet()) {
-            String asset = e.getKey();
-            if (asset.equalsIgnoreCase(base) || asset.equalsIgnoreCase(quote)) continue;
-            accountService.updateOrCreateCryptoBalance(acc.getId(), asset, -e.getValue());
-        }
+        // Sin efecto: el saldo cripto interno ya no se lleva.
     }
 }

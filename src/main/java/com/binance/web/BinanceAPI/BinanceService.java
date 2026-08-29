@@ -472,6 +472,51 @@ public class BinanceService {
 		}
 	}
 
+	/**
+	 * SOLO el USDT de la cuenta (spot + funding), sin convertir ninguna otra moneda.
+	 *
+	 * Se diferencia de getGeneralBalanceInUSDT, que recorre TODAS las monedas y las valora a
+	 * precio de mercado. Para el Balance General se quiere solo USDT a propósito: si se
+	 * incluyeran las demás, el patrimonio del día se movería solo cuando cambia el precio de
+	 * SOL o TRX, sin que se hubiera hecho ninguna operación.
+	 *
+	 * Defensivo: si alguna de las dos billeteras falla, devuelve lo que se haya podido leer.
+	 */
+	public Double getUsdtBalance(String account) {
+		double total = 0.0;
+		try {
+			String[] creds = getApiCredentials(account);
+			if (creds == null) return 0.0;
+
+			long ts = getServerTime();
+			String q = "timestamp=" + ts + "&recvWindow=60000";
+
+			// Spot: solo la fila de USDT (libre + bloqueado en órdenes abiertas).
+			try {
+				String spotRaw = binanceGet(
+						"https://api.binance.com/api/v3/account?" + q + "&signature=" + hmacSha256(creds[1], q),
+						creds[0]);
+				for (JsonNode b : mapper.readTree(spotRaw).path("balances")) {
+					if (!"USDT".equalsIgnoreCase(b.path("asset").asText())) continue;
+					total += b.path("free").asDouble() + b.path("locked").asDouble();
+					break;
+				}
+			} catch (Exception ex) {
+				log.warn("[UsdtBalance] Error leyendo spot de {}: {}", account, ex.getMessage());
+			}
+
+			// Funding: ese método ya devuelve solo el activo pedido.
+			try {
+				total += getFundingAssetBalance(account, "USDT");
+			} catch (Exception ex) {
+				log.warn("[UsdtBalance] Error leyendo funding de {}: {}", account, ex.getMessage());
+			}
+		} catch (Exception e) {
+			log.warn("[UsdtBalance] Error general en {}: {}", account, e.getMessage());
+		}
+		return total;
+	}
+
 	public Double getGeneralBalanceInUSDT(String account) {
 		try {
 			String[] creds = getApiCredentials(account);

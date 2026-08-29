@@ -87,6 +87,32 @@ public class P2PActiveOrderController {
                 log.warn("[PreAsign] Reintento tras duplicado: {}", e2.getMessage());
                 return ResponseEntity.ok(Map.of("mensaje", "Pre-asignación ya existía"));
             }
+        // PessimisticLockingFailureException cubre tanto CannotAcquireLockException (se venció el
+        // tiempo de espera del candado) como DeadlockLoserDataAccessException (interbloqueo),
+        // que son las dos formas en que MySQL reporta esto. No se pueden poner ambas en un
+        // multi-catch porque son subclases de esta.
+        } catch (org.springframework.dao.PessimisticLockingFailureException lock) {
+            // BLOQUEO de base de datos: otra transacción (típicamente el sync de Binance) tenía
+            // tomada la fila de la cuenta COP. No es un error del operador ni de sus datos, así
+            // que se reintenta un par de veces con una pausa corta antes de rendirse.
+            for (int intento = 1; intento <= 2; intento++) {
+                try {
+                    Thread.sleep(300L * intento);
+                    activeOrderService.upsertPreAsignacion(orderNumber, copId, accountBinance);
+                    log.info("[PreAsign] Orden {} guardada en el reintento {} tras bloqueo", orderNumber, intento);
+                    return ResponseEntity.ok(Map.of("mensaje", "Pre-asignación guardada"));
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                } catch (Exception e2) {
+                    log.warn("[PreAsign] Reintento {} de la orden {} falló: {}",
+                            intento, orderNumber, e2.getMessage());
+                }
+            }
+            log.error("[PreAsign] Orden {} → cuenta {}: bloqueo persistente", orderNumber, copId, lock);
+            return ResponseEntity.badRequest().body(Map.of("error",
+                    "La base de datos está ocupada en este momento. Espera unos segundos y vuelve a intentar."));
+
         } catch (Exception e) {
             // Se registra el TIPO de excepción y la traza: con solo getMessage() muchas
             // excepciones de JPA llegan con mensaje vacío y el log no servía para nada.

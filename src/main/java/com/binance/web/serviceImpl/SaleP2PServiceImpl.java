@@ -223,7 +223,7 @@ public class SaleP2PServiceImpl implements SaleP2PService {
             sale.getAccountCopsDetails().add(detail);
         }
 
-        accountBinanceService.subtractBalance(sale.getBinanceAccount().getName(), sale.getDollarsUs());
+        // (Se quitó el descuento de USDT en el saldo interno: ese saldo ya no se lleva.)
         // Misma fórmula que usa la asignación automática por pre-asignación: costo contra la tasa
         // promedio de compra e impuesto del 4x1000. Antes acá solo se sumaba el impuesto sobre una
         // utilidad que nunca se había calculado, así que quedaba en negativo o en cero.

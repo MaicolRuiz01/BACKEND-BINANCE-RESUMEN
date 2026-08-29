@@ -74,9 +74,8 @@ public class TransaccionesServiceImpl implements TransaccionesService {
         t.setCuentaTo(cuentaTo);
         transaccionesRepository.save(t);
 
-        // 4) Ajustar balances por cripto (resta en from, suma en to)
-        accountBinanceService.updateOrCreateCryptoBalance(cuentaFrom.getId(), symbol, -Math.abs(monto));
-        accountBinanceService.updateOrCreateCryptoBalance(cuentaTo.getId(),   symbol,  Math.abs(monto));
+        // 4) (Se quitó el ajuste de balances cripto internos: ese saldo ya no se lleva.
+        //     El traspaso queda registrado en la tabla de transacciones para el historial.)
 
         return t;
     }

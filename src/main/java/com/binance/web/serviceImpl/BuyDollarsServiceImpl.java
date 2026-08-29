@@ -167,16 +167,11 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 	        //    El cripto ya entró físicamente a una cuenta al importar la compra. Reasignar el PROVEEDOR
 	        //    (o el cliente) NO debe tocar el saldo cripto. Solo si el operario cambia la CUENTA de verdad
 	        //    se mueve el cripto de una cuenta a la otra. Así reasignar un proveedor no descuadra el cripto.
+	        // Ya no se mueve saldo cripto interno (se eliminó): solo se reasigna la cuenta.
 	        if (newAccountId != null && (oldAccount == null || !newAccountId.equals(oldAccount.getId()))) {
-	            if (oldAccount != null && oldAmount != null) {
-	                accountBinanceService.subtractCryptoBalance(oldAccount.getId(), oldCryptoSymbol, oldAmount * 1000.0);
-	            }
 	            AccountBinance newAccount = accountBinanceRepository.findById(newAccountId)
 	                .orElseThrow(() -> new RuntimeException("Nueva cuenta de Binance no encontrada"));
 	            existing.setAccountBinance(newAccount);
-	            if (newAmount != null) {
-	                accountBinanceService.updateOrCreateCryptoBalance(newAccount.getId(), newCryptoSymbol, newAmount * 1000.0);
-	            }
 	        }
 	        // Si la cuenta no cambió, el saldo cripto se deja intacto a propósito.
 
@@ -257,9 +252,8 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
                 boolean esTraspaso = origenBybit != null;
 
                 if (esTraspaso) {
-                    // El cripto real sí entró (se ajusta el saldo), pero se registra como
-                    // Transacción/traspaso y NO como BuyDollars (no afecta proveedores/clientes).
-                    accountBinanceService.updateOrCreateCryptoBalance(account.getId(), dto.getCryptoSymbol(), dto.getAmount());
+                    // Se registra como Transacción/traspaso y NO como BuyDollars (no afecta
+                    // proveedores/clientes). Ya no se ajusta saldo cripto interno: se eliminó.
                     String txHash = dto.getIdDeposit();
                     if (txHash == null || !transaccionesRepository.existsByTxId(txHash)) {
                         Transacciones t = new Transacciones();
@@ -276,10 +270,8 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
                     continue;
                 }
 
-                // ✅ Modificación 2: Lógica genérica para actualizar/crear balances de criptos
-                // Se usa el nuevo campo 'amount' y 'cryptoSymbol' del DTO
-                accountBinanceService.updateOrCreateCryptoBalance(account.getId(), dto.getCryptoSymbol(), dto.getAmount());
-                
+                // (Ya no se ajusta el saldo cripto interno: se eliminó, todo se lee de Binance.)
+
                 BuyDollars nueva = new BuyDollars();
                 nueva.setIdDeposit(dto.getIdDeposit());
                 nueva.setNameAccount(dto.getNameAccount());

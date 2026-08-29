@@ -26,7 +26,14 @@ import lombok.NoArgsConstructor;
 		    @UniqueConstraint(name = "uk_buy_dollars_dedupe_key", columnNames = "dedupe_key")
 		  },
 		  indexes = {
-		    @Index(name = "idx_buy_dollars_date", columnList = "date")
+		    @Index(name = "idx_buy_dollars_date", columnList = "date"),
+		    // Se consultan en CADA ciclo de importación, una vez por orden que llega de Binance.
+		    // Sin índice, MySQL recorría la tabla entera en cada consulta, y el costo crecía a
+		    // medida que se acumulaban registros: por eso la app se sentía más lenta con el tiempo.
+		    @Index(name = "idx_buy_dollars_tx_id", columnList = "tx_id"),
+		    @Index(name = "idx_buy_dollars_id_deposit", columnList = "idDeposit"),
+		    // La bandera de asignada se filtra en cada consulta de pendientes y en el balance.
+		    @Index(name = "idx_buy_dollars_asignada", columnList = "asignada")
 		  }
 		)
 public class BuyDollars {
