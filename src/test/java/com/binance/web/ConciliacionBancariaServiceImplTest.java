@@ -3,6 +3,7 @@ package com.binance.web;
 import com.binance.web.Entity.AccountCop;
 import com.binance.web.Entity.BankType;
 import com.binance.web.Repository.AccountCopRepository;
+import com.binance.web.detencion.DetencionService;
 import com.binance.web.conciliacion.ConciliacionBancariaServiceImpl;
 import com.binance.web.conciliacion.ConciliacionBotChat;
 import com.binance.web.conciliacion.ConciliacionBotChatRepository;
@@ -47,6 +48,7 @@ class ConciliacionBancariaServiceImplTest {
     @Mock private ConciliacionBotChatRepository conciliacionBotChatRepository;
     @Mock private ConciliacionBotTelegramClient conciliacionBotTelegramClient;
     @Mock private ConciliacionSolicitudRepository conciliacionSolicitudRepository;
+    @Mock private DetencionService detencionService;
 
     @InjectMocks
     private ConciliacionBancariaServiceImpl service;
@@ -124,15 +126,40 @@ class ConciliacionBancariaServiceImplTest {
     }
 
     @Test
-    void cuentaNoDisponible_seBloqueaAutomaticamenteYSaleDeP2P() {
+    void cuentaNoDisponible_yaNoSeBloqueaAutomaticamente_soloDejaAvisoParaRevisionManual() {
+        // Fix agosto 2026: antes esto bloqueaba la cuenta con solo un fallo de
+        // login del bot — causó un incidente real (bloqueos en cadena por
+        // credenciales mal configuradas en la máquina del bot, no por cuentas
+        // realmente bloqueadas por el banco). "No pude acceder" != "el banco
+        // confirmó bloqueo" — ahora eso queda registrado en
+        // disponibleBanco/ultimoErrorConciliacion (ver test de arriba) y
+        // bloquear de verdad ('bloqueada') es siempre una acción manual desde
+        // Saldos → "Bloquear cuenta".
         ana.setActivaParaP2P(true);
         when(accountCopRepository.findByBankType(BankType.BANCOLOMBIA)).thenReturn(List.of(ana));
 
         service.procesarResultado(request(item("Ana", false, null, "error leyendo Bancolombia")));
 
-        assertTrue(ana.getBloqueada());
-        assertTrue(ana.getBloqueadaPorBot());
-        assertFalse(ana.getActivaParaP2P());
+        assertFalse(ana.getBloqueada());
+        assertFalse(ana.getBloqueadaPorBot());
+    }
+
+    @Test
+    void cuentaNoDisponible_activaEnP2P_seDesactivaDeP2PYAvisaAlBotQueSeDetenga() {
+        // Confirmado con Milton (agosto 2026): esto SÍ debe desactivar de P2P
+        // (activaParaP2P=false) — distinto de bloquear ('bloqueada' sigue en
+        // false, se puede reactivar a mano en cualquier momento). No tiene
+        // sentido seguir mandándole ventas a una cuenta que el bot no pudo
+        // confirmar que sirve. Al desactivarse, dispara CuentaP2PSyncService
+        // para que Movimientos pare esa sesión puntual.
+        ana.setActivaParaP2P(true);
+        when(accountCopRepository.findByBankType(BankType.BANCOLOMBIA)).thenReturn(List.of(ana));
+
+        service.procesarResultado(request(item("Ana", false, null, "error leyendo Bancolombia")));
+
+        assertFalse(ana.getActivaParaP2P(), "el bot no pudo confirmar la cuenta — debe salir de P2P");
+        assertFalse(ana.getBloqueada(), "desactivar de P2P no es lo mismo que bloquear la cuenta");
+        verify(detencionService).solicitarDetencion(ana);
     }
 
     @Test

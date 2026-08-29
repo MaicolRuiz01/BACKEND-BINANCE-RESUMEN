@@ -17,6 +17,7 @@ import com.binance.web.Repository.AccountCopRepository;
 import com.binance.web.Repository.ClienteRepository;
 import com.binance.web.Repository.EfectivoRepository;
 import com.binance.web.Repository.SupplierRepository;
+import com.binance.web.activacion.CuentaP2PSyncService;
 import com.binance.web.service.AccountBinanceService;
 import com.binance.web.service.CryptoAverageRateService;
 import com.binance.web.util.CupoDiarioRules;
@@ -32,6 +33,7 @@ public class BalanceSnapshotService {
     @Autowired private AccountCopRepository accountCopRepo;
     @Autowired private AccountBinanceService accountBinanceService;
     @Autowired private CryptoAverageRateService cryptoAverageRateService;
+    @Autowired private CuentaP2PSyncService cuentaP2PSyncService;
 
     @Scheduled(cron = "0 0 0 * * *", zone = "America/Bogota")
     @Transactional
@@ -70,7 +72,12 @@ public class BalanceSnapshotService {
             // así que cuentas viejas podían seguir recibiendo ventas sin que nadie lo decidiera
             // ese día. Ahora cada jornada arranca con todas desactivadas y el operador elige
             // a mano cuáles usar.
+            //
+            // Cualquier cuenta que amanezca desactivándose acá (estaba activa anoche) le avisa
+            // a Movimientos que pare esa sesión — ver CuentaP2PSyncService.
+            boolean estabaActivaAntes = Boolean.TRUE.equals(acc.getActivaParaP2P());
             acc.setActivaParaP2P(false);
+            cuentaP2PSyncService.sincronizar(acc, estabaActivaAntes);
 
             if (acc.getBankType() == null) continue;
 

@@ -38,6 +38,7 @@ public class AccountCopController {
 	private final com.binance.web.Repository.AccountCopRepository accountCopRepository;
 	private final com.binance.web.Repository.MovimientoRepository movimientoRepository;
 	private final com.binance.web.conciliacion.ConciliacionBancariaService conciliacionBancariaService;
+	private final com.binance.web.activacion.CuentaP2PSyncService cuentaP2PSyncService;
 
 	public AccountCopController(AccountCopService AccountCopService,
 			AccountCopExcelService accountCopExcelService,
@@ -45,7 +46,8 @@ public class AccountCopController {
 			RetiradorService retiradorService,
 			com.binance.web.Repository.AccountCopRepository accountCopRepository,
 			com.binance.web.Repository.MovimientoRepository movimientoRepository,
-			com.binance.web.conciliacion.ConciliacionBancariaService conciliacionBancariaService) {
+			com.binance.web.conciliacion.ConciliacionBancariaService conciliacionBancariaService,
+			com.binance.web.activacion.CuentaP2PSyncService cuentaP2PSyncService) {
 		this.AccountCopService = AccountCopService;
 		this.accountCopExcelService = accountCopExcelService;
 		this.brebeKeyRepository = brebeKeyRepository;
@@ -53,6 +55,7 @@ public class AccountCopController {
 		this.accountCopRepository = accountCopRepository;
 		this.movimientoRepository = movimientoRepository;
 		this.conciliacionBancariaService = conciliacionBancariaService;
+		this.cuentaP2PSyncService = cuentaP2PSyncService;
 	}
 
 	@GetMapping(produces = "application/json")
@@ -169,22 +172,19 @@ public class AccountCopController {
 			return ResponseEntity.badRequest().body(cuenta);
 		}
 
-		boolean nuevoEstado = !Boolean.TRUE.equals(cuenta.getActivaParaP2P());
+		boolean estabaActivaAntes = Boolean.TRUE.equals(cuenta.getActivaParaP2P());
+		boolean nuevoEstado = !estabaActivaAntes;
 		cuenta.setActivaParaP2P(nuevoEstado);
 		AccountCopService.updateAccountCop(id, cuenta);
 
-		// DESACTIVADO A PROPÓSITO (fase de pruebas, agosto 2026): activar una
-		// cuenta en P2P solía avisarle de una vez al bot de conciliación. Eso
-		// generaba un backlog de solicitudes sin consumir cada vez que el bot
-		// estaba apagado, y al prenderlo se drenaba todo de golpe (cuentas que
-		// nadie pidió revisar "ahora" apareciendo solas). Mientras se prueba,
-		// la ÚNICA forma de pedirle al bot que revise una cuenta es a mano,
-		// desde el botón de la lupa en P2P (ver AccountCopController
-		// .solicitarConciliacionManual). Cuando esté listo, se puede volver a
-		// activar descomentando este bloque.
-		// if (nuevoEstado && cuenta.getBankType() == com.binance.web.Entity.BankType.BANCOLOMBIA) {
-		//     conciliacionBancariaService.solicitarConciliacion(cuenta);
-		// }
+		// Activado agosto 2026: avisa automáticamente a Movimientos (activación o
+		// detención de monitoreo, según corresponda) cada vez que este botón cambia
+		// el estado P2P de la cuenta. Ver CuentaP2PSyncService — mismo criterio
+		// centralizado que usa la selección automática de Maicol
+		// (activarCincoCuentasMasCercanasAlCupo). El riesgo de backlog que motivó
+		// tenerlo desactivado ya se probó a mano con el botón de la lupa
+		// (solicitarActivacionManual) sin problemas.
+		cuentaP2PSyncService.sincronizar(cuenta, estabaActivaAntes);
 
 		return ResponseEntity.ok(cuenta);
 	}
@@ -212,6 +212,37 @@ public class AccountCopController {
 	}
 
 	/**
+	 * POST /cuenta-cop/{id}/solicitar-activacion
+	 * Le pide al bot de Movimientos (iniciar.py / pochonance_activador.py)
+	 * que arranque el MONITOREO CONTINUO de esta cuenta — no un chequeo
+	 * puntual como solicitarConciliacionManual, sino la misma acción que ya
+	 * dispara el botón "Comenzar monitoreo" del menú de Telegram. El propio
+	 * bot reporta después, por separado (evento "conexion_exitosa" o
+	 * "error_login" en /movimientos/evento), si la cuenta realmente sirve.
+	 * No toca el estado de P2P.
+	 *
+	 * OJO (agosto 2026): esto llama a conciliacionBancariaService
+	 * .solicitarConciliacion, NO a activacionService — pochonance_activador.py
+	 * (el bot) escucha /conciliacion/pendiente, no /movimientos/activacion/
+	 * pendiente. La cola activacion_solicitud quedó huérfana (nada la
+	 * consume); se deja el servicio/endpoints por si se retoma más adelante,
+	 * pero ningún camino nuevo debe apuntar ahí — ver CuentaP2PSyncService.
+	 */
+	@PostMapping("/{id}/solicitar-activacion")
+	public ResponseEntity<?> solicitarActivacionManual(@PathVariable Integer id) {
+		AccountCop cuenta = AccountCopService.findByIdAccountCop(id);
+		if (cuenta == null) return ResponseEntity.notFound().build();
+
+		if (cuenta.getBankType() != com.binance.web.Entity.BankType.BANCOLOMBIA) {
+			return ResponseEntity.badRequest()
+					.body(Map.of("error", "El monitoreo automático solo existe para cuentas Bancolombia."));
+		}
+
+		conciliacionBancariaService.solicitarConciliacion(cuenta);
+		return ResponseEntity.ok(Map.of("ok", true, "cuenta", cuenta.getName()));
+	}
+
+	/**
 	 * PATCH /cuenta-cop/{id}/toggle-bloqueo
 	 * Bloquea / desbloquea la cuenta. Bloqueada = no aparece ni es seleccionable en ningún
 	 * lado (movimientos, formularios, P2P, ventas en curso, retiradores, gastos, pagos).
@@ -223,11 +254,13 @@ public class AccountCopController {
 		if (cuenta == null) return ResponseEntity.notFound().build();
 
 		boolean nuevoEstado = !Boolean.TRUE.equals(cuenta.getBloqueada());
+		boolean estabaActivaAntes = Boolean.TRUE.equals(cuenta.getActivaParaP2P());
 		cuenta.setBloqueada(nuevoEstado);
 		if (nuevoEstado) {
 			cuenta.setActivaParaP2P(false); // bloqueada no puede estar activa en P2P
 		}
 		AccountCopService.updateAccountCop(id, cuenta);
+		cuentaP2PSyncService.sincronizar(cuenta, estabaActivaAntes);
 		return ResponseEntity.ok(cuenta);
 	}
 
