@@ -3,6 +3,7 @@ package com.binance.web;
 import com.binance.web.Entity.EstadoSolicitud;
 import com.binance.web.Entity.Retirador;
 import com.binance.web.Entity.SolicitudRetiro;
+import com.binance.web.Repository.EfectivoRepository;
 import com.binance.web.Repository.RetiradorRepository;
 import com.binance.web.Repository.SolicitudRetiroRepository;
 import com.binance.web.Repository.ClienteRepository;
@@ -54,6 +55,7 @@ public class TelegramWebhookHandlersTest {
     @Mock private MovimientoService movimientoService;
     @Mock private GastoService gastoService;
     @Mock private ClienteRepository clienteRepository;
+    @Mock private EfectivoRepository efectivoRepository;
 
     private TelegramWebhookService webhookService;
 
@@ -70,7 +72,7 @@ public class TelegramWebhookHandlersTest {
     void setUp() throws Exception {
         webhookService = new TelegramWebhookService(retiradorRepository, solicitudRepository,
                 telegramService, retiradorService, supplierRepository, movimientoService, gastoService,
-                clienteRepository);
+                clienteRepository, efectivoRepository);
 
         pendingMontoRealClass = Class.forName("com.binance.web.service.TelegramWebhookService$PendingMontoReal");
 
@@ -184,7 +186,12 @@ public class TelegramWebhookHandlersTest {
         handleMontoRealTexto.invoke(webhookService, pending, 555L, "1800");
 
         verify(retiradorService).confirmarSolicitudConMontoReal(42L, 1800.0);
-        verify(telegramService).sendMessage(eq("555"), contains("Retiro registrado"));
+        // El mensaje final se EDITA (no se manda uno nuevo) — ver
+        // handleMontoRealTexto, que reusa el mensaje del botón "Escribe el monto"
+        // vía editMessageTextOnly. Este assert estaba desactualizado desde el
+        // commit da8b6cc ("sincroniza mensajes de Telegram al borrar/editar un
+        // retiro"), que cambió sendMessage("Retiro registrado") por esto.
+        verify(telegramService).editMessageTextOnly(eq("555"), eq(900), contains("Retiro completado"));
         assertFalse(pendingMap().containsKey(555L), "El estado pendiente debe limpiarse tras confirmar con éxito");
     }
 
