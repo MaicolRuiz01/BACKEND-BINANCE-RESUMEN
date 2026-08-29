@@ -138,12 +138,21 @@ public class MovimientosBridgeServiceImpl implements MovimientosBridgeService {
     }
 
     // ── Formateo — primer login exitoso de una cuenta recién activada ──
+    // A PROPÓSITO (agosto 2026, a pedido de Milton): mismo formato EXACTO que
+    // ya usa el bot de Movimientos al arrancar una cuenta a mano (ver
+    // iniciar.py → _esperar_y_notificar) — "✅ Nombre / 💰 Saldo / 📋 Últimos
+    // movimientos: lista numerada". El bloque de movimientos viene YA armado
+    // desde Python (movimientosTexto) para no duplicar el formato de
+    // fecha/monto en Java — acá solo se concatena.
     private String formatearConexionExitosa(MovimientoEventoDto e) {
         StringBuilder sb = new StringBuilder();
-        sb.append("✅ *").append(nvl(e.getCuenta())).append("* — activada y verificada\n");
-        sb.append("💰 Saldo: `").append(nvl(e.getSaldoActual())).append("`\n");
-        int cant = e.getCantidadMovimientos() != null ? e.getCantidadMovimientos() : 0;
-        sb.append("📋 ").append(cant).append(" movimiento(s) recientes leídos.");
+        sb.append("✅ *").append(nvl(e.getCuenta())).append("*\n");
+        sb.append("💰 Saldo: `").append(nvl(e.getSaldoActual())).append("`");
+        if (e.getMovimientosTexto() != null && !e.getMovimientosTexto().isBlank()) {
+            sb.append(e.getMovimientosTexto());
+        } else {
+            sb.append("\n_Sin movimientos recientes._");
+        }
         return sb.toString();
     }
 
