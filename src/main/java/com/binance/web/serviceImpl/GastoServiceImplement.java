@@ -97,11 +97,18 @@ public class GastoServiceImplement implements GastoService{
         }
 
         if (nuevoGasto.getPagoEfectivo() != null) {
-            Efectivo caja = efectivoRepository.findById(nuevoGasto.getPagoEfectivo().getId())
+            // Lock de fila + lectura fresca (ver EfectivoRepository.obtenerSaldoFresco) —
+            // evita que un gasto en efectivo se pise con otra operación casi
+            // simultánea sobre la misma caja (la causa raíz del descuadre de
+            // Sebastian el 26/08/2026).
+            Integer cajaId = nuevoGasto.getPagoEfectivo().getId();
+            Efectivo caja = efectivoRepository.findByIdForUpdate(cajaId)
                 .orElseThrow(() -> new RuntimeException("Caja no encontrada"));
+            double saldoCajaFresco = efectivoRepository.obtenerSaldoFresco(cajaId) != null
+                    ? efectivoRepository.obtenerSaldoFresco(cajaId) : 0.0;
 
-            caja.setSaldo(caja.getSaldo() - monto);
-            efectivoRepository.save(caja);
+            efectivoRepository.incrementarSaldo(cajaId, -monto);
+            double nuevoSaldoCaja = Math.round((saldoCajaFresco - monto) * 100.0) / 100.0;
 
             // Gasto en efectivo: sin 4x1000, pero se registra el movimiento para el historial de la caja.
             Movimiento mov = movimientoRepository.save(Movimiento.builder()
@@ -112,7 +119,7 @@ public class GastoServiceImplement implements GastoService{
                     .comision(0.0)
                     .comisionAplicada(true)
                     .motivo(nuevoGasto.getDescripcion())
-                    .saldoCajaResultante(caja.getSaldo())
+                    .saldoCajaResultante(nuevoSaldoCaja)
                     .build());
             nuevoGasto.setMovimientoId(mov.getId());
         }
@@ -145,11 +152,12 @@ public class GastoServiceImplement implements GastoService{
         }
 
         if (gasto.getPagoEfectivo() != null) {
-            Efectivo caja = efectivoRepository.findById(gasto.getPagoEfectivo().getId())
+            // Lock de fila — ver EfectivoRepository.obtenerSaldoFresco.
+            Integer cajaId = gasto.getPagoEfectivo().getId();
+            Efectivo caja = efectivoRepository.findByIdForUpdate(cajaId)
                 .orElseThrow(() -> new RuntimeException("Caja no encontrada"));
 
-            caja.setSaldo(caja.getSaldo() + monto);
-            efectivoRepository.save(caja);
+            efectivoRepository.incrementarSaldo(cajaId, monto);
 
             // Histórico de caja: el gasto restaba de la caja, así que al borrarlo hay
             // que devolver ese monto a todos los movimientos posteriores (nunca a los anteriores).
