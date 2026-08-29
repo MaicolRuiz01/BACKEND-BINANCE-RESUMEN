@@ -57,6 +57,18 @@ public class MovimientoEventoDto {
     @JsonProperty("cantidad_movimientos")
     private Integer cantidadMovimientos;
 
+    /**
+     * Solo presente cuando evento = "conexion_exitosa". Bloque YA formateado
+     * (emoji rojo/verde, fecha, descripcion, monto — uno por linea, hasta 8)
+     * con el mismo formato exacto del primer mensaje que manda iniciar.py al
+     * chat de Movimientos (ver _esperar_y_notificar en iniciar.py). Se arma
+     * en Python (pochonance_bridge.py), no en Java, para no duplicar la
+     * logica de formato de fecha/monto en dos lenguajes distintos — Python
+     * sigue siendo la unica fuente de verdad de como se ve un movimiento.
+     */
+    @JsonProperty("movimientos_texto")
+    private String movimientosTexto;
+
     /** Solo presente cuando evento = "error_login". Puede venir null. */
     private String motivo;
 
