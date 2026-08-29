@@ -53,4 +53,21 @@ public interface EfectivoRepository extends JpaRepository<Efectivo, Integer>{
 	@Query("update Efectivo e set e.saldo = e.saldo + :delta where e.id = :id")
 	int incrementarSaldo(@Param("id") Integer id, @Param("delta") Double delta);
 
+	/**
+	 * Lee el saldo DIRECTO de la base de datos, ignorando por completo el
+	 * contexto de persistencia de Hibernate (query nativa → nunca devuelve una
+	 * instancia ya cacheada). Existe específicamente para el bug del
+	 * 26/08/2026 (caja de Sebastian): dentro de una transacción que ya había
+	 * tocado el mismo Efectivo antes (ej. vía retirador.getEfectivo()), un
+	 * findByIdForUpdate() posterior adquiere el lock de fila correctamente en
+	 * la BD, pero Hibernate puede seguir devolviendo el objeto Java YA
+	 * CARGADO en vez de refrescar su campo saldo — el lock queda bien puesto,
+	 * pero el valor en memoria usado para sumar sigue viejo. Usar esta query
+	 * (o incrementarSaldo) para cualquier cálculo que dependa del saldo
+	 * verdadero en ese instante — nunca confiar en caja.getSaldo() dentro de
+	 * una transacción donde el Efectivo pudo haberse cargado antes.
+	 */
+	@Query(value = "SELECT saldo FROM efectivo WHERE id = :id", nativeQuery = true)
+	Double obtenerSaldoFresco(@Param("id") Integer id);
+
 }

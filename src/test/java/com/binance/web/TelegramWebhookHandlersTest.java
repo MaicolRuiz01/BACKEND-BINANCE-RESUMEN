@@ -3,6 +3,7 @@ package com.binance.web;
 import com.binance.web.Entity.EstadoSolicitud;
 import com.binance.web.Entity.Retirador;
 import com.binance.web.Entity.SolicitudRetiro;
+import com.binance.web.Repository.EfectivoRepository;
 import com.binance.web.Repository.RetiradorRepository;
 import com.binance.web.Repository.SolicitudRetiroRepository;
 import com.binance.web.Repository.ClienteRepository;
@@ -54,6 +55,7 @@ public class TelegramWebhookHandlersTest {
     @Mock private MovimientoService movimientoService;
     @Mock private GastoService gastoService;
     @Mock private ClienteRepository clienteRepository;
+    @Mock private EfectivoRepository efectivoRepository;
 
     private TelegramWebhookService webhookService;
 
@@ -70,7 +72,7 @@ public class TelegramWebhookHandlersTest {
     void setUp() throws Exception {
         webhookService = new TelegramWebhookService(retiradorRepository, solicitudRepository,
                 telegramService, retiradorService, supplierRepository, movimientoService, gastoService,
-                clienteRepository);
+                clienteRepository, efectivoRepository);
 
         pendingMontoRealClass = Class.forName("com.binance.web.service.TelegramWebhookService$PendingMontoReal");
 
@@ -184,9 +186,13 @@ public class TelegramWebhookHandlersTest {
         handleMontoRealTexto.invoke(webhookService, pending, 555L, "1800");
 
         verify(retiradorService).confirmarSolicitudConMontoReal(42L, 1800.0);
-        // El servicio ya NO manda un mensaje nuevo: EDITA el que estaba ("Escribe el monto")
-        // y lo reemplaza por el resumen. Antes esta prueba esperaba sendMessage("Retiro registrado"),
-        // texto que el servicio dejo de usar.
+        // El mensaje final se EDITA, no se manda uno nuevo: handleMontoRealTexto reusa el mensaje
+        // del botón "Escribe el monto" y lo reemplaza por el resumen. Esta prueba esperaba
+        // sendMessage("Retiro registrado") y quedó desactualizada desde el commit da8b6cc
+        // ("sincroniza mensajes de Telegram al borrar/editar un retiro"), que dejó de usar ese texto.
+        //
+        // (Esta línea venía duplicada de la fusión: el mismo verify aparecía dos veces con dos
+        // comentarios distintos, uno por cada rama. Se unificaron.)
         verify(telegramService).editMessageTextOnly(eq("555"), eq(900), contains("Retiro completado"));
         assertFalse(pendingMap().containsKey(555L), "El estado pendiente debe limpiarse tras confirmar con éxito");
     }
