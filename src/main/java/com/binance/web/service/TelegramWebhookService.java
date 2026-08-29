@@ -2,6 +2,7 @@ package com.binance.web.service;
 
 import com.binance.web.Entity.*;
 import com.binance.web.Repository.ClienteRepository;
+import com.binance.web.Repository.EfectivoRepository;
 import com.binance.web.Repository.RetiradorRepository;
 import com.binance.web.Repository.SolicitudRetiroRepository;
 import com.binance.web.Repository.SupplierRepository;
@@ -36,6 +37,7 @@ public class TelegramWebhookService {
     private final MovimientoService movimientoService;
     private final GastoService gastoService;
     private final ClienteRepository clienteRepository;
+    private final EfectivoRepository efectivoRepository;
 
     @Value("${app.telegram.group-chat-id:}")
     private String groupChatId;
@@ -813,19 +815,27 @@ public class TelegramWebhookService {
         telegramService.sendMessage(String.valueOf(telegramUserId), String.format(
                 "✅ Pago registrado: *$%,.0f* recibidos de *%s*.", monto, pending.clienteNombre()));
 
-        // Releemos el retirador fresco de la BD (mismo resguardo que usa "Registrar
-        // gasto") en vez de reusar el objeto cargado al principio del método, para
-        // no depender de que el saldo en memoria haya quedado sincronizado con el
-        // pago que se acaba de registrar.
-        Retirador retiradorActualizado = retiradorRepository.findByTelegramChatId(telegramUserId).orElse(retirador);
+        // OJO (incidente 29/08/2026): antes esto releía retiradorRepository.find...()
+        // de nuevo, pero registrarPagoCaja() actualiza el saldo con un UPDATE atómico
+        // (efectivoRepository.incrementarSaldo), que NO pasa por el objeto Java ya
+        // cargado en el contexto de persistencia de esta transacción. Por eso "releer"
+        // el retirador devolvía la MISMA instancia cacheada con el saldo VIEJO. Acá
+        // pedimos el saldo fresco con una consulta que ignora la caché de Hibernate
+        // (ver EfectivoRepository.obtenerSaldoFresco) y lo sincronizamos a mano.
+        if (retirador.getEfectivo() != null) {
+            Double saldoFresco = efectivoRepository.obtenerSaldoFresco(retirador.getEfectivo().getId());
+            if (saldoFresco != null) {
+                retirador.getEfectivo().setSaldo(saldoFresco);
+            }
+        }
         log.info("[Cliente Pago] Enviando recordatorio de caja tras el pago — retirador={}, cajaId={}, saldo={}",
-                retiradorActualizado.getNombre(),
-                retiradorActualizado.getEfectivo() != null ? retiradorActualizado.getEfectivo().getId() : null,
-                retiradorActualizado.getEfectivo() != null ? retiradorActualizado.getEfectivo().getSaldo() : null);
-        retiradorService.enviarRecordatorioCaja(retiradorActualizado);
+                retirador.getNombre(),
+                retirador.getEfectivo() != null ? retirador.getEfectivo().getId() : null,
+                retirador.getEfectivo() != null ? retirador.getEfectivo().getSaldo() : null);
+        retiradorService.enviarRecordatorioCaja(retirador);
 
         log.info("[Cliente Pago] {} registró un pago en efectivo de ${} de {}",
-                retiradorActualizado.getNombre(), monto, pending.clienteNombre());
+                retirador.getNombre(), monto, pending.clienteNombre());
     }
 
     /**
@@ -895,14 +905,19 @@ public class TelegramWebhookService {
         }
 
         // No confiamos en un cálculo local (saldoActual - monto) para el mensaje de
-        // éxito: releemos la caja YA GUARDADA en base de datos. Así, si por lo que
-        // sea la escritura no se reflejó de verdad (sin lanzar excepción — pasó una
-        // vez en producción: Telegram confirmó un pago que nunca quedó en la BD),
-        // no le confirmamos al retirador algo que no ocurrió.
-        Retirador retiradorActualizado = retiradorRepository.findByTelegramChatId(telegramUserId).orElse(null);
-        Double saldoReal = retiradorActualizado != null && retiradorActualizado.getEfectivo() != null
-                ? retiradorActualizado.getEfectivo().getSaldo()
-                : null;
+        // éxito: releemos el saldo YA GUARDADO en base de datos con una consulta que
+        // ignora la caché de Hibernate (ver EfectivoRepository.obtenerSaldoFresco).
+        //
+        // OJO (incidente 29/08/2026): antes esto releía retiradorRepository.find...()
+        // de nuevo y usaba retiradorActualizado.getEfectivo().getSaldo() — pero como
+        // registrarPagoProveedor() actualiza el saldo con un UPDATE atómico (no pasa
+        // por el objeto Java), el Efectivo ya cargado en el contexto de persistencia
+        // de ESTA transacción (desde retirador.getEfectivo() más arriba) seguía con
+        // el valor VIEJO. La segunda consulta a retiradorRepository devolvía la MISMA
+        // instancia cacheada, así que "releer" no releía nada de verdad: el pago SÍ
+        // había quedado bien en la BD, pero esto le avisaba (falsamente) al retirador
+        // que no se pudo confirmar.
+        Double saldoReal = efectivoRepository.obtenerSaldoFresco(retirador.getEfectivo().getId());
         double restante = saldoActual - monto;
         boolean seReflejoEnCaja = movRegistrado != null && movRegistrado.getId() != null
                 && saldoReal != null && Math.abs(saldoReal - restante) < 1.0;
@@ -915,6 +930,10 @@ public class TelegramWebhookService {
                     "⚠️ No se pudo confirmar que el pago haya quedado registrado. NO lo des por hecho — avisa al administrador antes de entregar el dinero, y vuelve a intentar.");
             return;
         }
+
+        // Sincroniza el objeto en memoria con el saldo fresco para que el recordatorio
+        // de caja de abajo (enviarRecordatorioCaja) no vuelva a mostrar el valor viejo.
+        retirador.getEfectivo().setSaldo(saldoReal);
 
         pendingEntregas.remove(telegramUserId);
 
