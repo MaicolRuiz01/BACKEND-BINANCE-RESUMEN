@@ -427,7 +427,23 @@ public class RetiradorServiceImpl implements RetiradorService {
         // Histórico de caja: acumulador que va sumando lo que entra a la caja a
         // medida que se crean los movimientos, para que cada uno quede con el
         // saldo de caja que le correspondía EN ESE MOMENTO (no solo el total final).
-        double cajaSaldoAcumulado = caja != null && caja.getSaldo() != null ? caja.getSaldo() : 0.0;
+        //
+        // Incidente 26/08/2026 (caja Sebastian): NUNCA usar caja.getSaldo() acá,
+        // aunque caja venga de findByIdForUpdate. Si este mismo Efectivo ya
+        // estaba cargado en el contexto de persistencia de esta transacción
+        // (ej. porque algo más arriba tocó retirador.getEfectivo()), Hibernate
+        // puede devolver el objeto Java ya cacheado en vez de refrescarlo — el
+        // lock de fila se adquiere bien en la BD, pero el saldo en memoria
+        // sigue siendo el de ANTES de que otra confirmación (casi simultánea,
+        // sobre la misma caja) ya lo hubiera aumentado. Por eso una retirada de
+        // $10.000 quedó registrada en el histórico como si solo hubiera sumado
+        // $200. obtenerSaldoFresco() usa una query nativa que ignora esa
+        // caché y siempre trae el valor real de la fila ya bloqueada.
+        double cajaSaldoAcumulado = caja != null
+                ? (efectivoRepository.obtenerSaldoFresco(caja.getId()) != null
+                        ? efectivoRepository.obtenerSaldoFresco(caja.getId())
+                        : 0.0)
+                : 0.0;
 
         for (DetalleRetiro detalle : solicitud.getDetalles()) {
             AccountCop cuenta = detalle.getCuentaCop();

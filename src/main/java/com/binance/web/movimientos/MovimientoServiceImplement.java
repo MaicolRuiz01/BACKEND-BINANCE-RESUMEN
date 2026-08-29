@@ -145,21 +145,35 @@ public class MovimientoServiceImplement implements MovimientoService {
 			throw new IllegalArgumentException("El monto debe ser mayor a 0.");
 		}
 
+		// Lock de fila en las DOS cajas (siempre en el mismo orden por id, para evitar
+		// deadlocks si dos transferencias cruzadas corren al mismo tiempo), y lectura
+		// del saldo por query nativa — nunca confiar en el campo ya cargado en el
+		// contexto de persistencia (ver nota en EfectivoRepository.obtenerSaldoFresco).
+		Integer primerId = Math.min(cajaFromId, cajaToId);
+		Integer segundoId = Math.max(cajaFromId, cajaToId);
+		efectivoRepository.findByIdForUpdate(primerId)
+				.orElseThrow(() -> new RuntimeException("Caja no encontrada: " + primerId));
+		efectivoRepository.findByIdForUpdate(segundoId)
+				.orElseThrow(() -> new RuntimeException("Caja no encontrada: " + segundoId));
+
 		Efectivo origen = efectivoRepository.findById(cajaFromId)
 				.orElseThrow(() -> new RuntimeException("Caja origen no encontrada"));
 		Efectivo destino = efectivoRepository.findById(cajaToId)
 				.orElseThrow(() -> new RuntimeException("Caja destino no encontrada"));
 
-		double saldoOrigen = origen.getSaldo() != null ? origen.getSaldo() : 0.0;
+		double saldoOrigen = efectivoRepository.obtenerSaldoFresco(cajaFromId) != null
+				? efectivoRepository.obtenerSaldoFresco(cajaFromId) : 0.0;
 		if (saldoOrigen < monto) {
 			throw new IllegalArgumentException("Saldo insuficiente en la caja origen.");
 		}
+		double saldoDestino = efectivoRepository.obtenerSaldoFresco(cajaToId) != null
+				? efectivoRepository.obtenerSaldoFresco(cajaToId) : 0.0;
 
-		// SIN 4x1000: se mueve el monto exacto.
-		origen.setSaldo(saldoOrigen - monto);
-		destino.setSaldo((destino.getSaldo() != null ? destino.getSaldo() : 0.0) + monto);
-		efectivoRepository.save(origen);
-		efectivoRepository.save(destino);
+		// SIN 4x1000: se mueve el monto exacto. UPDATE atómico, no leer-sumar-guardar.
+		efectivoRepository.incrementarSaldo(cajaFromId, -monto);
+		efectivoRepository.incrementarSaldo(cajaToId, monto);
+		double nuevoSaldoOrigen = round2(saldoOrigen - monto);
+		double nuevoSaldoDestino = round2(saldoDestino + monto);
 
 		Movimiento mov = Movimiento.builder()
 				.tipo("TRANSFERENCIA CAJA")
@@ -168,8 +182,8 @@ public class MovimientoServiceImplement implements MovimientoService {
 				.caja(origen)          // caja origen
 				.cajaDestino(destino)  // caja destino
 				.comision(0.0)
-				.saldoCajaResultante(origen.getSaldo())
-				.saldoCajaDestinoResultante(destino.getSaldo())
+				.saldoCajaResultante(nuevoSaldoOrigen)
+				.saldoCajaDestinoResultante(nuevoSaldoDestino)
 				.build();
 
 		return movimientoRepository.save(mov);
@@ -199,7 +213,10 @@ public class MovimientoServiceImplement implements MovimientoService {
 	    AccountCop cuentaOrigen = accountCopRepository.findByIdForUpdate(cuentaId)
 	            .orElseThrow(() -> new RuntimeException("Cuenta de Origen no encontrada"));
 
-	    Efectivo caja = efectivoRepository.findById(cajaId)
+	    // Lock de fila + lectura fresca (ver EfectivoRepository.obtenerSaldoFresco):
+	    // evita que este retiro directo se pise con una confirmación de solicitud
+	    // casi simultánea sobre la misma caja.
+	    Efectivo caja = efectivoRepository.findByIdForUpdate(cajaId)
 	            .orElseThrow(() -> new RuntimeException("Caja no encontrada"));
 
 	    // Inicializar/resetear cupos del día
@@ -252,30 +269,33 @@ public class MovimientoServiceImplement implements MovimientoService {
 
 	    cuentaOrigen.setBalance(round2(saldoCuenta - deduccionHoy));
 
-	    double saldoCaja = caja.getSaldo() != null ? caja.getSaldo() : 0.0;
-	    caja.setSaldo(round2(saldoCaja + monto));
-	    mov.setSaldoCajaResultante(caja.getSaldo());
+	    double saldoCaja = efectivoRepository.obtenerSaldoFresco(cajaId) != null
+	            ? efectivoRepository.obtenerSaldoFresco(cajaId) : 0.0;
+	    efectivoRepository.incrementarSaldo(cajaId, monto);
+	    mov.setSaldoCajaResultante(round2(saldoCaja + monto));
 
 	    accountCopRepository.save(cuentaOrigen);
-	    efectivoRepository.save(caja);
 
 	    return movimientoRepository.save(mov);
 	}
 
 
 	@Override
+	@Transactional
 	public Movimiento RegistrarDeposito(Integer cuentaId, Integer cajaId, Double monto) {
 		AccountCop cuentaDestino = accountCopRepository.findById(cuentaId).orElseThrow();
-		Efectivo caja = efectivoRepository.findById(cajaId).orElseThrow();
+		// Lock de fila + lectura fresca — ver EfectivoRepository.obtenerSaldoFresco.
+		Efectivo caja = efectivoRepository.findByIdForUpdate(cajaId).orElseThrow();
+		double saldoCajaFresco = efectivoRepository.obtenerSaldoFresco(cajaId) != null
+				? efectivoRepository.obtenerSaldoFresco(cajaId) : 0.0;
 
 		Movimiento mov = Movimiento.builder().tipo("DEPOSITO").fecha(LocalDateTime.now()).monto(monto)
 				.cuentaDestino(cuentaDestino).caja(caja).comision(0.0).build();
 
 		cuentaDestino.setBalance(cuentaDestino.getBalance() + monto);
-		caja.setSaldo(caja.getSaldo() - monto);
-		mov.setSaldoCajaResultante(caja.getSaldo());
+		efectivoRepository.incrementarSaldo(cajaId, -monto);
+		mov.setSaldoCajaResultante(round2(saldoCajaFresco - monto));
 		accountCopRepository.save(cuentaDestino);
-		efectivoRepository.save(caja);
 
 		return movimientoRepository.save(mov);
 	}
@@ -335,16 +355,20 @@ public class MovimientoServiceImplement implements MovimientoService {
 		}
 		// 4. Lógica para el pago desde la caja (efectivo)
 		else if (cajaId != null) {
-			Efectivo caja = efectivoRepository.findById(cajaId)
+			// Lock de fila + lectura fresca — ver EfectivoRepository.obtenerSaldoFresco.
+			// Este fue exactamente el punto que causó el descuadre de Sebastian el
+			// 26/08/2026: leer-restar-guardar sin bloqueo ni lectura fresca.
+			Efectivo caja = efectivoRepository.findByIdForUpdate(cajaId)
 					.orElseThrow(() -> new RuntimeException("Caja no encontrada."));
+			double saldoCajaFresco = efectivoRepository.obtenerSaldoFresco(cajaId) != null
+					? efectivoRepository.obtenerSaldoFresco(cajaId) : 0.0;
 
-			// Actualizar el saldo de la caja
-			caja.setSaldo(caja.getSaldo() - monto);
-			efectivoRepository.save(caja);
+			efectivoRepository.incrementarSaldo(cajaId, -monto);
+			double nuevoSaldoCaja = round2(saldoCajaFresco - monto);
 
 			// Crear el objeto Movimiento
 			pagoProveedor.setCaja(caja);
-			pagoProveedor.setSaldoCajaResultante(caja.getSaldo());
+			pagoProveedor.setSaldoCajaResultante(nuevoSaldoCaja);
 			pagoProveedor.setComision(0.0); // No hay comisión por pagos en efectivo
 		} else if (proveedorOrigenId != null) {
 			Supplier proveedorOrigen = supplierRepository.findById(proveedorOrigenId)
@@ -390,12 +414,15 @@ public class MovimientoServiceImplement implements MovimientoService {
 
 		Supplier proveedor = supplierRepository.findById(proveedorId)
 				.orElseThrow(() -> new RuntimeException("Proveedor no encontrado."));
-		Efectivo caja = efectivoRepository.findById(cajaId)
+		// Lock de fila + lectura fresca — ver EfectivoRepository.obtenerSaldoFresco.
+		Efectivo caja = efectivoRepository.findByIdForUpdate(cajaId)
 				.orElseThrow(() -> new RuntimeException("Caja no encontrada."));
+		double saldoCajaFresco = efectivoRepository.obtenerSaldoFresco(cajaId) != null
+				? efectivoRepository.obtenerSaldoFresco(cajaId) : 0.0;
 
-		// Entra a la caja (sin comisión).
-		caja.setSaldo((caja.getSaldo() != null ? caja.getSaldo() : 0.0) + monto);
-		efectivoRepository.save(caja);
+		// Entra a la caja (sin comisión). UPDATE atómico, no leer-sumar-guardar.
+		efectivoRepository.incrementarSaldo(cajaId, monto);
+		double nuevoSaldoCaja = round2(saldoCajaFresco + monto);
 
 		// Es un PRÉSTAMO: el proveedor nos presta efectivo → le debemos MÁS → su saldo AUMENTA (debe/debemos).
 		proveedor.setBalance((proveedor.getBalance() != null ? proveedor.getBalance() : 0.0) + monto);
@@ -408,7 +435,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 		mov.setComision(0.0);
 		mov.setCaja(caja);                 // entra a esta caja
 		mov.setProveedorOrigen(proveedor); // el proveedor es el origen del dinero
-		mov.setSaldoCajaResultante(caja.getSaldo());
+		mov.setSaldoCajaResultante(nuevoSaldoCaja);
 		return movimientoRepository.save(mov);
 	}
 
@@ -426,12 +453,15 @@ public class MovimientoServiceImplement implements MovimientoService {
 
 		Cliente cliente = clienteRepository.findById(clienteId)
 				.orElseThrow(() -> new RuntimeException("Cliente no encontrado."));
-		Efectivo caja = efectivoRepository.findById(cajaId)
+		// Lock de fila + lectura fresca — ver EfectivoRepository.obtenerSaldoFresco.
+		Efectivo caja = efectivoRepository.findByIdForUpdate(cajaId)
 				.orElseThrow(() -> new RuntimeException("Caja no encontrada."));
+		double saldoCajaFresco = efectivoRepository.obtenerSaldoFresco(cajaId) != null
+				? efectivoRepository.obtenerSaldoFresco(cajaId) : 0.0;
 
-		// Entra a la caja (sin comisión).
-		caja.setSaldo((caja.getSaldo() != null ? caja.getSaldo() : 0.0) + monto);
-		efectivoRepository.save(caja);
+		// Entra a la caja (sin comisión). UPDATE atómico, no leer-sumar-guardar.
+		efectivoRepository.incrementarSaldo(cajaId, monto);
+		double nuevoSaldoCaja = round2(saldoCajaFresco + monto);
 
 		// Es un PRÉSTAMO: el cliente nos presta efectivo → le debemos MÁS → su saldo AUMENTA (debe/debemos).
 		cliente.setSaldo((cliente.getSaldo() != null ? cliente.getSaldo() : 0.0) + monto);
@@ -444,7 +474,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 		mov.setComision(0.0);
 		mov.setCaja(caja);                 // entra a esta caja
 		mov.setClienteOrigen(cliente);     // el cliente es el origen del dinero
-		mov.setSaldoCajaResultante(caja.getSaldo());
+		mov.setSaldoCajaResultante(nuevoSaldoCaja);
 		return movimientoRepository.save(mov);
 	}
 
@@ -497,12 +527,36 @@ public class MovimientoServiceImplement implements MovimientoService {
 		double montoViejo    = m.getMonto() != null ? m.getMonto() : 0.0;
 		double comisionVieja = m.getComision() != null ? m.getComision() : 0.0;
 
+		// Solo los IDs de las cajas involucradas — nunca el objeto Efectivo cargado
+		// acá, para no arrastrar un saldo potencialmente cacheado por Hibernate.
+		Integer cajaOrigenAntesId = m.getCaja() != null ? m.getCaja().getId() : null;
+		Integer cajaDestinoAntesId = m.getCajaDestino() != null ? m.getCajaDestino().getId() : null;
+
+		// Bloqueo de fila de TODAS las cajas que este edit puede tocar (origen
+		// antes, destino antes, y la nueva si se reasigna vía cajaId), en orden
+		// fijo por id para no generar deadlocks con otra edición/eliminación
+		// concurrente sobre las mismas cajas. El saldo de cada una se lee SIEMPRE
+		// fresco después del lock (ver EfectivoRepository.obtenerSaldoFresco) —
+		// nunca confiar en el campo saldo de un objeto ya cargado antes del lock
+		// (fue exactamente la causa del descuadre de Sebastian el 26/08/2026).
+		java.util.TreeSet<Integer> idsCajasATocar = new java.util.TreeSet<>();
+		if (cajaOrigenAntesId != null) idsCajasATocar.add(cajaOrigenAntesId);
+		if (cajaDestinoAntesId != null) idsCajasATocar.add(cajaDestinoAntesId);
+		if (cajaId != null) idsCajasATocar.add(cajaId);
+		for (Integer cid : idsCajasATocar) {
+			efectivoRepository.findByIdForUpdate(cid)
+					.orElseThrow(() -> new RuntimeException("Caja no encontrada: " + cid));
+		}
+		java.util.Map<Integer, Double> saldoCorriente = new java.util.HashMap<>();
+		for (Integer cid : idsCajasATocar) {
+			Double fresco = efectivoRepository.obtenerSaldoFresco(cid);
+			saldoCorriente.put(cid, fresco != null ? fresco : 0.0);
+		}
+
 		// Histórico de caja: snapshot ANTES de tocar nada, para poder calcular el
 		// delta exacto que hay que propagar hacia adelante en el tiempo.
-		Efectivo cajaOrigenAntes = m.getCaja();
-		Efectivo cajaDestinoAntes = m.getCajaDestino();
-		Double saldoCajaOrigenAntes = cajaOrigenAntes != null ? cajaOrigenAntes.getSaldo() : null;
-		Double saldoCajaDestinoAntes = cajaDestinoAntes != null ? cajaDestinoAntes.getSaldo() : null;
+		Double saldoCajaOrigenAntes = cajaOrigenAntesId != null ? saldoCorriente.get(cajaOrigenAntesId) : null;
+		Double saldoCajaDestinoAntes = cajaDestinoAntesId != null ? saldoCorriente.get(cajaDestinoAntesId) : null;
 
 		// ── 1) REVERTIR el efecto viejo sobre los saldos (mismo criterio que eliminarMovimiento) ──
 		if ("PAGO PROVEEDOR".equals(tipo)) {
@@ -518,10 +572,9 @@ public class MovimientoServiceImplement implements MovimientoService {
 				AccountCop c = m.getCuentaOrigen();
 				c.setBalance(round2((c.getBalance() != null ? c.getBalance() : 0.0) + aReversar));
 				accountCopRepository.save(c);
-			} else if (m.getCaja() != null) {
-				Efectivo caja = m.getCaja();
-				caja.setSaldo(round2((caja.getSaldo() != null ? caja.getSaldo() : 0.0) + montoViejo));
-				efectivoRepository.save(caja);
+			} else if (cajaOrigenAntesId != null) {
+				efectivoRepository.incrementarSaldo(cajaOrigenAntesId, montoViejo);
+				saldoCorriente.merge(cajaOrigenAntesId, montoViejo, Double::sum);
 			} else if (m.getProveedorOrigen() != null) {
 				Supplier po = m.getProveedorOrigen();
 				po.setBalance((po.getBalance() != null ? po.getBalance() : 0.0) - montoViejo);
@@ -533,7 +586,6 @@ public class MovimientoServiceImplement implements MovimientoService {
 			}
 		} else if (tipo.startsWith("RETIRO")) {
 			AccountCop cuenta = m.getCuentaOrigen();
-			Efectivo caja = m.getCaja();
 			boolean comisionYaAplicada = !Boolean.FALSE.equals(m.getComisionAplicada());
 			double aReversar = montoViejo + (comisionYaAplicada ? comisionVieja : 0.0);
 			if (cuenta != null) {
@@ -557,20 +609,18 @@ public class MovimientoServiceImplement implements MovimientoService {
 				}
 				accountCopRepository.save(cuenta);
 			}
-			if (caja != null) {
-				caja.setSaldo(round2((caja.getSaldo() != null ? caja.getSaldo() : 0.0) - montoViejo));
-				efectivoRepository.save(caja);
+			if (cajaOrigenAntesId != null) {
+				efectivoRepository.incrementarSaldo(cajaOrigenAntesId, -montoViejo);
+				saldoCorriente.merge(cajaOrigenAntesId, -montoViejo, Double::sum);
 			}
 		} else if ("TRANSFERENCIA CAJA".equals(tipo)) {
-			Efectivo origen = m.getCaja();
-			Efectivo destino = m.getCajaDestino();
-			if (origen != null) {
-				origen.setSaldo(round2((origen.getSaldo() != null ? origen.getSaldo() : 0.0) + montoViejo));
-				efectivoRepository.save(origen);
+			if (cajaOrigenAntesId != null) {
+				efectivoRepository.incrementarSaldo(cajaOrigenAntesId, montoViejo);
+				saldoCorriente.merge(cajaOrigenAntesId, montoViejo, Double::sum);
 			}
-			if (destino != null) {
-				destino.setSaldo(round2((destino.getSaldo() != null ? destino.getSaldo() : 0.0) - montoViejo));
-				efectivoRepository.save(destino);
+			if (cajaDestinoAntesId != null) {
+				efectivoRepository.incrementarSaldo(cajaDestinoAntesId, -montoViejo);
+				saldoCorriente.merge(cajaDestinoAntesId, -montoViejo, Double::sum);
 			}
 		}
 
@@ -594,6 +644,8 @@ public class MovimientoServiceImplement implements MovimientoService {
 		double montoNuevo = montoParam != null ? montoParam : montoViejo;
 		m.setMonto(montoNuevo);
 
+		Integer cajaOrigenNuevaId = m.getCaja() != null ? m.getCaja().getId() : null;
+
 		// ── 3) APLICAR el efecto nuevo sobre los saldos (mismo criterio que al crear) ──
 		if ("PAGO PROVEEDOR".equals(tipo)) {
 			Supplier destino = m.getPagoProveedor();
@@ -610,11 +662,10 @@ public class MovimientoServiceImplement implements MovimientoService {
 				m.setComisionAplicada(!esBanco);
 				c.setBalance(round2((c.getBalance() != null ? c.getBalance() : 0.0) - deduccionHoy));
 				accountCopRepository.save(c);
-			} else if (m.getCaja() != null) {
+			} else if (cajaOrigenNuevaId != null) {
 				m.setComision(0.0);
-				Efectivo caja = m.getCaja();
-				caja.setSaldo(round2((caja.getSaldo() != null ? caja.getSaldo() : 0.0) - montoNuevo));
-				efectivoRepository.save(caja);
+				efectivoRepository.incrementarSaldo(cajaOrigenNuevaId, -montoNuevo);
+				saldoCorriente.merge(cajaOrigenNuevaId, -montoNuevo, Double::sum);
 			} else if (m.getProveedorOrigen() != null) {
 				Supplier po = m.getProveedorOrigen();
 				po.setBalance((po.getBalance() != null ? po.getBalance() : 0.0) + montoNuevo);
@@ -626,7 +677,6 @@ public class MovimientoServiceImplement implements MovimientoService {
 			}
 		} else if (tipo.startsWith("RETIRO")) {
 			AccountCop cuenta = m.getCuentaOrigen();
-			Efectivo caja = m.getCaja();
 			double comisionNueva = round2(montoNuevo * 0.004);
 			boolean diferir4x1000 = cuenta != null && "BANCOLOMBIA".equalsIgnoreCase(String.valueOf(cuenta.getBankType()));
 			m.setComision(comisionNueva);
@@ -651,52 +701,50 @@ public class MovimientoServiceImplement implements MovimientoService {
 				}
 				accountCopRepository.save(cuenta);
 			}
-			if (caja != null) {
-				caja.setSaldo(round2((caja.getSaldo() != null ? caja.getSaldo() : 0.0) + montoNuevo));
-				efectivoRepository.save(caja);
+			if (cajaOrigenNuevaId != null) {
+				efectivoRepository.incrementarSaldo(cajaOrigenNuevaId, montoNuevo);
+				saldoCorriente.merge(cajaOrigenNuevaId, montoNuevo, Double::sum);
 			}
 		} else if ("TRANSFERENCIA CAJA".equals(tipo)) {
 			m.setComision(0.0);
-			Efectivo origen = m.getCaja();
-			Efectivo destino = m.getCajaDestino();
-			if (origen != null) {
-				origen.setSaldo(round2((origen.getSaldo() != null ? origen.getSaldo() : 0.0) - montoNuevo));
-				efectivoRepository.save(origen);
+			if (cajaOrigenNuevaId != null) {
+				efectivoRepository.incrementarSaldo(cajaOrigenNuevaId, -montoNuevo);
+				saldoCorriente.merge(cajaOrigenNuevaId, -montoNuevo, Double::sum);
 			}
-			if (destino != null) {
-				destino.setSaldo(round2((destino.getSaldo() != null ? destino.getSaldo() : 0.0) + montoNuevo));
-				efectivoRepository.save(destino);
+			if (cajaDestinoAntesId != null) {
+				efectivoRepository.incrementarSaldo(cajaDestinoAntesId, montoNuevo);
+				saldoCorriente.merge(cajaDestinoAntesId, montoNuevo, Double::sum);
 			}
 		}
 
 		// ── 4) Histórico de caja: recalcular hacia adelante (NUNCA hacia atrás) ──
-		boolean cajaOrigenCambio = cajaOrigenAntes != null && m.getCaja() != null
-				&& !cajaOrigenAntes.getId().equals(m.getCaja().getId());
+		boolean cajaOrigenCambio = cajaOrigenAntesId != null && cajaOrigenNuevaId != null
+				&& !cajaOrigenAntesId.equals(cajaOrigenNuevaId);
 		if (cajaOrigenCambio) {
 			// Caso raro: el movimiento se reasignó a OTRA caja. No tiene sentido un
 			// delta entre dos cajas distintas, así que recalculamos ambas por completo.
-			recalcularHistoricoCaja(cajaOrigenAntes.getId());
-			recalcularHistoricoCaja(m.getCaja().getId());
-		} else if (m.getCaja() != null && saldoCajaOrigenAntes != null) {
-			double deltaCaja = round2(m.getCaja().getSaldo() - saldoCajaOrigenAntes);
+			recalcularHistoricoCaja(cajaOrigenAntesId);
+			recalcularHistoricoCaja(cajaOrigenNuevaId);
+		} else if (cajaOrigenNuevaId != null && saldoCajaOrigenAntes != null) {
+			double deltaCaja = round2(saldoCorriente.get(cajaOrigenNuevaId) - saldoCajaOrigenAntes);
 			if (deltaCaja != 0.0) {
 				Double resultanteViejo = m.getSaldoCajaResultante();
 				double base = resultanteViejo != null ? resultanteViejo : saldoCajaOrigenAntes;
 				m.setSaldoCajaResultante(round2(base + deltaCaja));
-				propagarDeltaCaja(m.getCaja().getId(), m.getFecha(), deltaCaja);
+				propagarDeltaCaja(cajaOrigenNuevaId, m.getFecha(), deltaCaja);
 			} else if (m.getSaldoCajaResultante() == null) {
-				m.setSaldoCajaResultante(m.getCaja().getSaldo());
+				m.setSaldoCajaResultante(saldoCorriente.get(cajaOrigenNuevaId));
 			}
 		}
-		if (m.getCajaDestino() != null && saldoCajaDestinoAntes != null) {
-			double deltaCajaDestino = round2(m.getCajaDestino().getSaldo() - saldoCajaDestinoAntes);
+		if (cajaDestinoAntesId != null && saldoCajaDestinoAntes != null) {
+			double deltaCajaDestino = round2(saldoCorriente.get(cajaDestinoAntesId) - saldoCajaDestinoAntes);
 			if (deltaCajaDestino != 0.0) {
 				Double resultanteDestinoViejo = m.getSaldoCajaDestinoResultante();
 				double baseDestino = resultanteDestinoViejo != null ? resultanteDestinoViejo : saldoCajaDestinoAntes;
 				m.setSaldoCajaDestinoResultante(round2(baseDestino + deltaCajaDestino));
-				propagarDeltaCaja(m.getCajaDestino().getId(), m.getFecha(), deltaCajaDestino);
+				propagarDeltaCaja(cajaDestinoAntesId, m.getFecha(), deltaCajaDestino);
 			} else if (m.getSaldoCajaDestinoResultante() == null) {
-				m.setSaldoCajaDestinoResultante(m.getCajaDestino().getSaldo());
+				m.setSaldoCajaDestinoResultante(saldoCorriente.get(cajaDestinoAntesId));
 			}
 		}
 
@@ -732,18 +780,22 @@ public class MovimientoServiceImplement implements MovimientoService {
 	}
 
 	@Override
+	@Transactional
 	public Movimiento registrarPagoCaja(Integer clienteId, Integer cajaId, Double monto) {
 
 		Cliente clienteOrigen = clienteRepository.findById(clienteId)
 				.orElseThrow(() -> new RuntimeException("No se encontro el cliente"));
-		Efectivo cajaDestino = efectivoRepository.findById(cajaId)
+		// Lock de fila + lectura fresca — ver EfectivoRepository.obtenerSaldoFresco.
+		Efectivo cajaDestino = efectivoRepository.findByIdForUpdate(cajaId)
 				.orElseThrow(() -> new RuntimeException("No se encontro la caja"));
+		double saldoCajaFresco = efectivoRepository.obtenerSaldoFresco(cajaId) != null
+				? efectivoRepository.obtenerSaldoFresco(cajaId) : 0.0;
 		Movimiento pagoCaja = new Movimiento();
 
 		clienteOrigen.setSaldo(clienteOrigen.getSaldo() + monto);
-		cajaDestino.setSaldo(cajaDestino.getSaldo() + monto);
+		efectivoRepository.incrementarSaldo(cajaId, monto);
+		double nuevoSaldoCaja = round2(saldoCajaFresco + monto);
 
-		efectivoRepository.save(cajaDestino);
 		clienteRepository.save(clienteOrigen);
 
 		// El cliente nos da efectivo → ENTRA a la caja (sin 4x1000, es efectivo).
@@ -753,7 +805,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 		pagoCaja.setCaja(cajaDestino);
 		pagoCaja.setClienteOrigen(clienteOrigen);
 		pagoCaja.setMonto(monto);
-		pagoCaja.setSaldoCajaResultante(cajaDestino.getSaldo());
+		pagoCaja.setSaldoCajaResultante(nuevoSaldoCaja);
 		return movimientoRepository.save(pagoCaja);
 	}
 
@@ -900,7 +952,7 @@ public class MovimientoServiceImplement implements MovimientoService {
 	@Transactional
 	public void recalcularHistoricoCaja(Integer cajaId) {
 		if (cajaId == null) return;
-		Efectivo caja = efectivoRepository.findById(cajaId)
+		efectivoRepository.findById(cajaId)
 				.orElseThrow(() -> new RuntimeException("Caja no encontrada: " + cajaId));
 
 		List<Movimiento> movimientos = movimientoRepository.findByCaja_IdOrCajaDestino_IdOrderByFechaAsc(cajaId, cajaId);
@@ -910,7 +962,11 @@ public class MovimientoServiceImplement implements MovimientoService {
 			sumaDeltas += deltaParaCaja(m, cajaId);
 		}
 
-		double saldoActual = caja.getSaldo() != null ? caja.getSaldo() : 0.0;
+		// Lectura fresca (ver EfectivoRepository.obtenerSaldoFresco) — este
+		// recálculo se puede llamar justo después de un ajuste dentro de la misma
+		// request; no arriesgarse a anclar sobre un valor cacheado.
+		Double saldoFresco = efectivoRepository.obtenerSaldoFresco(cajaId);
+		double saldoActual = saldoFresco != null ? saldoFresco : 0.0;
 		double ancla = round2(saldoActual - sumaDeltas);
 
 		double acumulado = ancla;
@@ -1225,14 +1281,15 @@ public class MovimientoServiceImplement implements MovimientoService {
 	        }
 
 	        case "CAJA": {
-	            Efectivo caja = efectivoRepository.findById(dto.getEntidadId())
+	            // Lock de fila + lectura fresca — ver EfectivoRepository.obtenerSaldoFresco.
+	            Efectivo caja = efectivoRepository.findByIdForUpdate(dto.getEntidadId())
 	                    .orElseThrow(() -> new RuntimeException("Caja no encontrada"));
 
-	            double anterior = caja.getSaldo() != null ? caja.getSaldo() : 0.0;
+	            double anterior = efectivoRepository.obtenerSaldoFresco(dto.getEntidadId()) != null
+	                    ? efectivoRepository.obtenerSaldoFresco(dto.getEntidadId()) : 0.0;
 	            double nuevo    = round2(anterior + dif);
 
-	            caja.setSaldo(nuevo);
-	            efectivoRepository.save(caja);
+	            efectivoRepository.incrementarSaldo(dto.getEntidadId(), dif);
 
 	            Movimiento m = Movimiento.builder()
 	                    .tipo("AJUSTE_SALDO_CAJA")
@@ -1344,10 +1401,14 @@ public class MovimientoServiceImplement implements MovimientoService {
 	    //    Su reversa vuelve a SUBIR la deuda. Se mantiene para poder borrar registros antiguos sin descuadre.
 	    if ("PAGO PROVEEDOR A CAJA".equals(tipo)) {
 	        if (m.getCaja() != null) {
-	            Efectivo caja = m.getCaja();
-	            caja.setSaldo(round2((caja.getSaldo() != null ? caja.getSaldo() : 0.0) - monto));
-	            efectivoRepository.save(caja);
-	            propagarDeltaCaja(caja.getId(), m.getFecha(), -monto);
+	            // Lock de fila — ver EfectivoRepository.obtenerSaldoFresco. UPDATE
+	            // atómico en vez de leer-restar-guardar (causa del descuadre de
+	            // Sebastian el 26/08/2026).
+	            Integer cajaId = m.getCaja().getId();
+	            efectivoRepository.findByIdForUpdate(cajaId)
+	                    .orElseThrow(() -> new RuntimeException("Caja no encontrada: " + cajaId));
+	            efectivoRepository.incrementarSaldo(cajaId, -monto);
+	            propagarDeltaCaja(cajaId, m.getFecha(), -monto);
 	        }
 	        if (m.getProveedorOrigen() != null) {
 	            Supplier po = m.getProveedorOrigen();
@@ -1360,10 +1421,11 @@ public class MovimientoServiceImplement implements MovimientoService {
 
 	    if ("PAGO CLIENTE A CAJA".equals(tipo)) {
 	        if (m.getCaja() != null) {
-	            Efectivo caja = m.getCaja();
-	            caja.setSaldo(round2((caja.getSaldo() != null ? caja.getSaldo() : 0.0) - monto));
-	            efectivoRepository.save(caja);
-	            propagarDeltaCaja(caja.getId(), m.getFecha(), -monto);
+	            Integer cajaId = m.getCaja().getId();
+	            efectivoRepository.findByIdForUpdate(cajaId)
+	                    .orElseThrow(() -> new RuntimeException("Caja no encontrada: " + cajaId));
+	            efectivoRepository.incrementarSaldo(cajaId, -monto);
+	            propagarDeltaCaja(cajaId, m.getFecha(), -monto);
 	        }
 	        if (m.getClienteOrigen() != null) {
 	            Cliente cl = m.getClienteOrigen();
@@ -1378,10 +1440,11 @@ public class MovimientoServiceImplement implements MovimientoService {
 	    //    Reversa: sale de la caja (entró) y la deuda vuelve a BAJAR (-= monto).
 	    if ("PRESTAMO PROVEEDOR A CAJA".equals(tipo)) {
 	        if (m.getCaja() != null) {
-	            Efectivo caja = m.getCaja();
-	            caja.setSaldo(round2((caja.getSaldo() != null ? caja.getSaldo() : 0.0) - monto));
-	            efectivoRepository.save(caja);
-	            propagarDeltaCaja(caja.getId(), m.getFecha(), -monto);
+	            Integer cajaId = m.getCaja().getId();
+	            efectivoRepository.findByIdForUpdate(cajaId)
+	                    .orElseThrow(() -> new RuntimeException("Caja no encontrada: " + cajaId));
+	            efectivoRepository.incrementarSaldo(cajaId, -monto);
+	            propagarDeltaCaja(cajaId, m.getFecha(), -monto);
 	        }
 	        if (m.getProveedorOrigen() != null) {
 	            Supplier po = m.getProveedorOrigen();
@@ -1394,10 +1457,11 @@ public class MovimientoServiceImplement implements MovimientoService {
 
 	    if ("PRESTAMO CLIENTE A CAJA".equals(tipo)) {
 	        if (m.getCaja() != null) {
-	            Efectivo caja = m.getCaja();
-	            caja.setSaldo(round2((caja.getSaldo() != null ? caja.getSaldo() : 0.0) - monto));
-	            efectivoRepository.save(caja);
-	            propagarDeltaCaja(caja.getId(), m.getFecha(), -monto);
+	            Integer cajaId = m.getCaja().getId();
+	            efectivoRepository.findByIdForUpdate(cajaId)
+	                    .orElseThrow(() -> new RuntimeException("Caja no encontrada: " + cajaId));
+	            efectivoRepository.incrementarSaldo(cajaId, -monto);
+	            propagarDeltaCaja(cajaId, m.getFecha(), -monto);
 	        }
 	        if (m.getClienteOrigen() != null) {
 	            Cliente cl = m.getClienteOrigen();
@@ -1426,10 +1490,11 @@ public class MovimientoServiceImplement implements MovimientoService {
 	            c.setBalance((c.getBalance() != null ? c.getBalance() : 0.0) + aReversar);
 	            accountCopRepository.save(c);
 	        } else if (m.getCaja() != null) {
-	            Efectivo caja = m.getCaja();
-	            caja.setSaldo((caja.getSaldo() != null ? caja.getSaldo() : 0.0) + monto);
-	            efectivoRepository.save(caja);
-	            propagarDeltaCaja(caja.getId(), m.getFecha(), monto);
+	            Integer cajaId = m.getCaja().getId();
+	            efectivoRepository.findByIdForUpdate(cajaId)
+	                    .orElseThrow(() -> new RuntimeException("Caja no encontrada: " + cajaId));
+	            efectivoRepository.incrementarSaldo(cajaId, monto);
+	            propagarDeltaCaja(cajaId, m.getFecha(), monto);
 	        } else if (m.getProveedorOrigen() != null) {
 	            Supplier po = m.getProveedorOrigen();
 	            po.setBalance((po.getBalance() != null ? po.getBalance() : 0.0) - monto);
@@ -1446,17 +1511,24 @@ public class MovimientoServiceImplement implements MovimientoService {
 
 	    if ("TRANSFERENCIA CAJA".equals(tipo)) {
 	        // Revertir el traspaso entre cajas: devolver al origen, quitar al destino.
-	        Efectivo origen = m.getCaja();
-	        Efectivo destino = m.getCajaDestino();
-	        if (origen != null) {
-	            origen.setSaldo(round2((origen.getSaldo() != null ? origen.getSaldo() : 0.0) + monto));
-	            efectivoRepository.save(origen);
-	            propagarDeltaCaja(origen.getId(), m.getFecha(), monto);
+	        // Lock de fila de las DOS cajas, siempre en el mismo orden por id (evita
+	        // deadlocks con otra edición/eliminación concurrente), antes de tocar nada.
+	        Integer origenId = m.getCaja() != null ? m.getCaja().getId() : null;
+	        Integer destinoId = m.getCajaDestino() != null ? m.getCajaDestino().getId() : null;
+	        java.util.TreeSet<Integer> idsOrdenados = new java.util.TreeSet<>();
+	        if (origenId != null) idsOrdenados.add(origenId);
+	        if (destinoId != null) idsOrdenados.add(destinoId);
+	        for (Integer cid : idsOrdenados) {
+	            efectivoRepository.findByIdForUpdate(cid)
+	                    .orElseThrow(() -> new RuntimeException("Caja no encontrada: " + cid));
 	        }
-	        if (destino != null) {
-	            destino.setSaldo(round2((destino.getSaldo() != null ? destino.getSaldo() : 0.0) - monto));
-	            efectivoRepository.save(destino);
-	            propagarDeltaCaja(destino.getId(), m.getFecha(), -monto);
+	        if (origenId != null) {
+	            efectivoRepository.incrementarSaldo(origenId, monto);
+	            propagarDeltaCaja(origenId, m.getFecha(), monto);
+	        }
+	        if (destinoId != null) {
+	            efectivoRepository.incrementarSaldo(destinoId, -monto);
+	            propagarDeltaCaja(destinoId, m.getFecha(), -monto);
 	        }
 	        movimientoRepository.delete(m);
 	        return;
@@ -1500,9 +1572,12 @@ public class MovimientoServiceImplement implements MovimientoService {
 
 	        // 3) Quitar de la caja el monto que había entrado.
 	        if (caja != null) {
-	            caja.setSaldo(round2((caja.getSaldo() != null ? caja.getSaldo() : 0.0) - monto));
-	            efectivoRepository.save(caja);
-	            propagarDeltaCaja(caja.getId(), m.getFecha(), -monto);
+	            // Lock de fila — ver EfectivoRepository.obtenerSaldoFresco.
+	            Integer cajaId = caja.getId();
+	            efectivoRepository.findByIdForUpdate(cajaId)
+	                    .orElseThrow(() -> new RuntimeException("Caja no encontrada: " + cajaId));
+	            efectivoRepository.incrementarSaldo(cajaId, -monto);
+	            propagarDeltaCaja(cajaId, m.getFecha(), -monto);
 	        }
 
 	        Long solicitudRetiroId = m.getSolicitudRetiroId();
