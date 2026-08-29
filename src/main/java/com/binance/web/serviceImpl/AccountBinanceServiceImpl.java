@@ -247,35 +247,54 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
 		System.out.println("🔴 Restando " + amount + " USDT a cuenta: " + name);
 	}
 
+	/**
+	 * Valor total del portafolio en USDT, leído en vivo de todas las cuentas.
+	 *
+	 * Se consulta EN PARALELO. Antes recorría las cuentas una por una esperando a que cada API
+	 * (Binance, TronScan, Solscan, Bybit) respondiera antes de pasar a la siguiente: con 5
+	 * cuentas a 2 segundos cada una eran 10 segundos de espera. Ahora el tiempo total es el de
+	 * la cuenta MÁS LENTA, no la suma de todas — mismo criterio que ya se usaba en
+	 * getAllActiveOrders para las órdenes activas.
+	 *
+	 * Cada cuenta va en su propio try/catch: si una API falla, se suma lo que respondieron las
+	 * demás en vez de perder el total completo.
+	 */
 	@Override
 	public Double getTotalExternalBalance() {
 		List<AccountBinance> cuentas = accountBinanceRepository.findAll();
-		double total = 0.0;
 
-		for (AccountBinance account : cuentas) {
-			try {
-				String tipo = account.getTipo() != null ? account.getTipo().toUpperCase() : "";
-				if ("BINANCE".equals(tipo)) {
-					Double balance = binanceService.getGeneralBalanceInUSDT(account.getName());
-					total += balance != null ? balance : 0.0;
-				} else if ("TRUST".equals(tipo) || "TRUSTWALLET".equals(tipo)) {
-					total += tronScanService.getTotalAssetTokenOverview(account.getAddress());
-				} else if ("SOLANA".equals(tipo) || "PHANTOM".equals(tipo)) {
-					total += solscanService.getTotalAssetUsd(account.getAddress());
-				} else if ("BYBIT".equals(tipo) || "BYBIP".equals(tipo)) {
-					Map<String, Double> balances = bybitService.getBalancesByAsset(account.getApiKey(), account.getApiSecret());
-					Map<String, Double> priceCache = new HashMap<>();
-					for (Map.Entry<String, Double> e : balances.entrySet()) {
-						double qty = e.getValue() != null ? e.getValue() : 0.0;
-						if (qty <= 0) continue;
-						total += qty * usdtPrice(e.getKey(), priceCache);
+		return cuentas.parallelStream()
+				.mapToDouble(account -> {
+					try {
+						String tipo = account.getTipo() != null ? account.getTipo().toUpperCase() : "";
+						if ("BINANCE".equals(tipo)) {
+							Double balance = binanceService.getGeneralBalanceInUSDT(account.getName());
+							return balance != null ? balance : 0.0;
+						} else if ("TRUST".equals(tipo) || "TRUSTWALLET".equals(tipo)) {
+							return tronScanService.getTotalAssetTokenOverview(account.getAddress());
+						} else if ("SOLANA".equals(tipo) || "PHANTOM".equals(tipo)) {
+							return solscanService.getTotalAssetUsd(account.getAddress());
+						} else if ("BYBIT".equals(tipo) || "BYBIP".equals(tipo)) {
+							Map<String, Double> balances = bybitService.getBalancesByAsset(
+									account.getApiKey(), account.getApiSecret());
+							// El mapa de precios se crea DENTRO del lambda: cada hilo tiene el
+							// suyo, así no se comparte un HashMap entre hilos (no es seguro).
+							Map<String, Double> priceCache = new HashMap<>();
+							double sub = 0.0;
+							for (Map.Entry<String, Double> e : balances.entrySet()) {
+								double qty = e.getValue() != null ? e.getValue() : 0.0;
+								if (qty <= 0) continue;
+								sub += qty * usdtPrice(e.getKey(), priceCache);
+							}
+							return sub;
+						}
+						return 0.0;
+					} catch (Exception e) {
+						System.out.println("⚠️ Error con cuenta " + account.getName() + ": " + e.getMessage());
+						return 0.0;
 					}
-				}
-			} catch (Exception e) {
-				System.out.println("⚠️ Error con cuenta " + account.getName() + ": " + e.getMessage());
-			}
-		}
-		return total;
+				})
+				.sum();
 	}
 
 	/**
@@ -294,30 +313,34 @@ public class AccountBinanceServiceImpl implements AccountBinanceService {
 	@Override
 	public Double getTotalExternalUsdt() {
 		List<AccountBinance> cuentas = accountBinanceRepository.findAll();
-		double total = 0.0;
 
-		for (AccountBinance account : cuentas) {
-			try {
-				String tipo = account.getTipo() != null ? account.getTipo().toUpperCase() : "";
+		// En paralelo, por la misma razón que getTotalExternalBalance: el Balance General
+		// dependía de esperar a cada API una tras otra.
+		return cuentas.parallelStream()
+				.mapToDouble(account -> {
+					try {
+						String tipo = account.getTipo() != null ? account.getTipo().toUpperCase() : "";
 
-				if ("BINANCE".equals(tipo)) {
-					Double usdt = binanceService.getUsdtBalance(account.getName());
-					total += usdt != null ? usdt : 0.0;
+						if ("BINANCE".equals(tipo)) {
+							Double usdt = binanceService.getUsdtBalance(account.getName());
+							return usdt != null ? usdt : 0.0;
 
-				} else if ("TRUST".equals(tipo) || "TRUSTWALLET".equals(tipo)) {
-					total += soloUsdt(tronScanService.getBalancesByAsset(account.getAddress()));
+						} else if ("TRUST".equals(tipo) || "TRUSTWALLET".equals(tipo)) {
+							return soloUsdt(tronScanService.getBalancesByAsset(account.getAddress()));
 
-				} else if ("SOLANA".equals(tipo) || "PHANTOM".equals(tipo)) {
-					total += soloUsdt(solscanService.getBalancesByAsset(account.getAddress()));
+						} else if ("SOLANA".equals(tipo) || "PHANTOM".equals(tipo)) {
+							return soloUsdt(solscanService.getBalancesByAsset(account.getAddress()));
 
-				} else if ("BYBIT".equals(tipo) || "BYBIP".equals(tipo)) {
-					total += soloUsdt(bybitService.getBalancesByAsset(account.getApiKey(), account.getApiSecret()));
-				}
-			} catch (Exception e) {
-				System.out.println("⚠️ [UsdtTotal] Error con cuenta " + account.getName() + ": " + e.getMessage());
-			}
-		}
-		return total;
+						} else if ("BYBIT".equals(tipo) || "BYBIP".equals(tipo)) {
+							return soloUsdt(bybitService.getBalancesByAsset(account.getApiKey(), account.getApiSecret()));
+						}
+						return 0.0;
+					} catch (Exception e) {
+						System.out.println("⚠️ [UsdtTotal] Error con cuenta " + account.getName() + ": " + e.getMessage());
+						return 0.0;
+					}
+				})
+				.sum();
 	}
 
 	/** Saca la cantidad de USDT de un mapa de saldos por moneda, ignorando el resto. */

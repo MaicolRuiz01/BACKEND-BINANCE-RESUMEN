@@ -136,7 +136,7 @@ public class RetiradorServiceEdgeCasesTest {
     @Test
     void montoReal_nulo_lanzaExcepcion() {
         solicitud.setDetalles(Collections.singletonList(detalleCajero(2000.0)));
-        when(solicitudRepository.findById(1L)).thenReturn(Optional.of(solicitud));
+        when(solicitudRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(solicitud));
 
         assertThrows(IllegalStateException.class,
                 () -> retiradorService.confirmarSolicitudConMontoReal(1L, null));
@@ -146,7 +146,7 @@ public class RetiradorServiceEdgeCasesTest {
     @Test
     void montoReal_cero_lanzaExcepcion() {
         solicitud.setDetalles(Collections.singletonList(detalleCajero(2000.0)));
-        when(solicitudRepository.findById(1L)).thenReturn(Optional.of(solicitud));
+        when(solicitudRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(solicitud));
 
         assertThrows(IllegalStateException.class,
                 () -> retiradorService.confirmarSolicitudConMontoReal(1L, 0.0));
@@ -155,7 +155,7 @@ public class RetiradorServiceEdgeCasesTest {
     @Test
     void montoReal_negativo_lanzaExcepcion() {
         solicitud.setDetalles(Collections.singletonList(detalleCajero(2000.0)));
-        when(solicitudRepository.findById(1L)).thenReturn(Optional.of(solicitud));
+        when(solicitudRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(solicitud));
 
         assertThrows(IllegalStateException.class,
                 () -> retiradorService.confirmarSolicitudConMontoReal(1L, -500.0));
@@ -175,7 +175,7 @@ public class RetiradorServiceEdgeCasesTest {
         d2.setMontoCorresponsal(3000.0);
 
         solicitud.setDetalles(List.of(d1, d2));
-        when(solicitudRepository.findById(1L)).thenReturn(Optional.of(solicitud));
+        when(solicitudRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(solicitud));
 
         IllegalStateException ex = assertThrows(IllegalStateException.class,
                 () -> retiradorService.confirmarSolicitudConMontoReal(1L, 1800.0));
@@ -191,7 +191,7 @@ public class RetiradorServiceEdgeCasesTest {
         d.setMontoCajero(2000.0);
         d.setMontoCorresponsal(3000.0);
         solicitud.setDetalles(Collections.singletonList(d));
-        when(solicitudRepository.findById(1L)).thenReturn(Optional.of(solicitud));
+        when(solicitudRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(solicitud));
 
         assertThrows(IllegalStateException.class,
                 () -> retiradorService.confirmarSolicitudConMontoReal(1L, 4500.0));
@@ -200,7 +200,7 @@ public class RetiradorServiceEdgeCasesTest {
     @Test
     void montoReal_solicitudYaCompletada_lanzaExcepcion() {
         solicitud.setEstado(EstadoSolicitud.COMPLETADO);
-        when(solicitudRepository.findById(1L)).thenReturn(Optional.of(solicitud));
+        when(solicitudRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(solicitud));
 
         assertThrows(IllegalStateException.class,
                 () -> retiradorService.confirmarSolicitudConMontoReal(1L, 1800.0));
@@ -209,7 +209,7 @@ public class RetiradorServiceEdgeCasesTest {
     @Test
     void montoReal_solicitudCancelada_lanzaExcepcion() {
         solicitud.setEstado(EstadoSolicitud.CANCELADO);
-        when(solicitudRepository.findById(1L)).thenReturn(Optional.of(solicitud));
+        when(solicitudRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(solicitud));
 
         assertThrows(IllegalStateException.class,
                 () -> retiradorService.confirmarSolicitudConMontoReal(1L, 1800.0));
@@ -218,7 +218,7 @@ public class RetiradorServiceEdgeCasesTest {
     @Test
     void montoReal_sinRetiradorAsignado_lanzaExcepcion() {
         solicitud.setRetirador(null);
-        when(solicitudRepository.findById(1L)).thenReturn(Optional.of(solicitud));
+        when(solicitudRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(solicitud));
 
         assertThrows(IllegalStateException.class,
                 () -> retiradorService.confirmarSolicitudConMontoReal(1L, 1800.0));
@@ -226,7 +226,7 @@ public class RetiradorServiceEdgeCasesTest {
 
     @Test
     void montoReal_solicitudInexistente_lanzaExcepcion() {
-        when(solicitudRepository.findById(99L)).thenReturn(Optional.empty());
+        when(solicitudRepository.findByIdForUpdate(99L)).thenReturn(Optional.empty());
 
         assertThrows(RuntimeException.class,
                 () -> retiradorService.confirmarSolicitudConMontoReal(99L, 1800.0));
@@ -236,7 +236,7 @@ public class RetiradorServiceEdgeCasesTest {
     void montoReal_excedeSaldoDisponible_lanzaExcepcionYNoMutaBalance() {
         cuenta.setBalance(5000.0);
         solicitud.setDetalles(Collections.singletonList(detalleCajero(2000.0)));
-        when(solicitudRepository.findById(1L)).thenReturn(Optional.of(solicitud));
+        when(solicitudRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(solicitud));
 
         // Pide registrar que en realidad retiró 6.000, pero la cuenta solo tiene 5.000.
         assertThrows(IllegalStateException.class,
@@ -250,7 +250,7 @@ public class RetiradorServiceEdgeCasesTest {
         cuenta.setBalance(20000.0);
         cuenta.setCupoCajeroDisponibleHoy(1000.0); // ya casi agotado hoy
         solicitud.setDetalles(Collections.singletonList(detalleCajero(500.0)));
-        when(solicitudRepository.findById(1L)).thenReturn(Optional.of(solicitud));
+        when(solicitudRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(solicitud));
 
         IllegalStateException ex = assertThrows(IllegalStateException.class,
                 () -> retiradorService.confirmarSolicitudConMontoReal(1L, 1500.0));
@@ -265,7 +265,7 @@ public class RetiradorServiceEdgeCasesTest {
     void montoReal_menorAlSolicitado_descuentaMontoRealYAnotaMotivo() {
         cuenta.setBalance(20000.0);
         solicitud.setDetalles(Collections.singletonList(detalleCajero(2000.0)));
-        when(solicitudRepository.findById(1L)).thenReturn(Optional.of(solicitud));
+        when(solicitudRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(solicitud));
         when(solicitudRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(accountCopRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(movimientoRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -290,7 +290,7 @@ public class RetiradorServiceEdgeCasesTest {
     void montoReal_igualAlSolicitado_noGeneraMotivo() {
         cuenta.setBalance(20000.0);
         solicitud.setDetalles(Collections.singletonList(detalleCajero(2000.0)));
-        when(solicitudRepository.findById(1L)).thenReturn(Optional.of(solicitud));
+        when(solicitudRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(solicitud));
         when(solicitudRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(accountCopRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(movimientoRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -309,21 +309,21 @@ public class RetiradorServiceEdgeCasesTest {
 
     @Test
     void confirmarSolicitud_inexistente_lanzaExcepcion() {
-        when(solicitudRepository.findById(42L)).thenReturn(Optional.empty());
+        when(solicitudRepository.findByIdForUpdate(42L)).thenReturn(Optional.empty());
         assertThrows(RuntimeException.class, () -> retiradorService.confirmarSolicitud(42L));
     }
 
     @Test
     void confirmarSolicitud_cancelada_lanzaExcepcion() {
         solicitud.setEstado(EstadoSolicitud.CANCELADO);
-        when(solicitudRepository.findById(1L)).thenReturn(Optional.of(solicitud));
+        when(solicitudRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(solicitud));
         assertThrows(IllegalStateException.class, () -> retiradorService.confirmarSolicitud(1L));
     }
 
     @Test
     void confirmarSolicitud_sinRetirador_lanzaExcepcion() {
         solicitud.setRetirador(null);
-        when(solicitudRepository.findById(1L)).thenReturn(Optional.of(solicitud));
+        when(solicitudRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(solicitud));
         assertThrows(IllegalStateException.class, () -> retiradorService.confirmarSolicitud(1L));
     }
 
@@ -331,7 +331,7 @@ public class RetiradorServiceEdgeCasesTest {
     void confirmarSolicitud_saldoInsuficiente_noMutaBalance() {
         cuenta.setBalance(1000.0);
         solicitud.setDetalles(Collections.singletonList(detalleCajero(5000.0)));
-        when(solicitudRepository.findById(1L)).thenReturn(Optional.of(solicitud));
+        when(solicitudRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(solicitud));
 
         assertThrows(IllegalStateException.class, () -> retiradorService.confirmarSolicitud(1L));
         assertEquals(1000.0, cuenta.getBalance());
@@ -344,7 +344,7 @@ public class RetiradorServiceEdgeCasesTest {
         cuenta.setBalance(20000.0);
         cuenta.setCupoCajeroDisponibleHoy(300.0);
         solicitud.setDetalles(Collections.singletonList(detalleCajero(2000.0)));
-        when(solicitudRepository.findById(1L)).thenReturn(Optional.of(solicitud));
+        when(solicitudRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(solicitud));
 
         IllegalStateException ex = assertThrows(IllegalStateException.class,
                 () -> retiradorService.confirmarSolicitud(1L));
@@ -360,7 +360,7 @@ public class RetiradorServiceEdgeCasesTest {
     void confirmarSolicitud_montoNegativo_incrementaSaldoEnVezDeRechazar_BUG() {
         cuenta.setBalance(20000.0);
         solicitud.setDetalles(Collections.singletonList(detalleCajero(-5000.0)));
-        when(solicitudRepository.findById(1L)).thenReturn(Optional.of(solicitud));
+        when(solicitudRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(solicitud));
         when(solicitudRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(accountCopRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         // OJO: NO se stubea movimientoRepository.save aquí a propósito — con un monto

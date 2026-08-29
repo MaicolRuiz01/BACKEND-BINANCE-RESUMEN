@@ -56,6 +56,11 @@ import com.binance.web.util.TraspasoWalletService;
 @RequiredArgsConstructor
 public class SpotOrdersController {
 
+    /** Ventana hacia atrás para buscar COMPRAS. Misma propiedad que usan BuyDollarsServiceImpl
+     *  y PaymentController, para que las tres fuentes miren siempre el mismo rango. */
+    @org.springframework.beans.factory.annotation.Value("${compras.sync.lookback-horas:36}")
+    private int lookbackHorasCompras;
+
     private final BinanceService binanceService;
     private final SellDollarsRepository sellDollarsRepository;
     private final BuyDollarsRepository buyDollarsRepository;
@@ -163,6 +168,8 @@ public class SpotOrdersController {
     @GetMapping("/compras-no-registradas")
     public ResponseEntity<List<BuyDollarsDto>> getComprasNoRegistradas(
             @RequestParam(defaultValue = "30") int limit) {
+        // Solo aplica a COMPRAS. Las ventas y los traspasos de más abajo tienen su propio
+        // camino de sincronización y se dejan como estaban.
 
         List<BuyDollarsDto> resultado = new ArrayList<>();
         ObjectMapper mapper = new ObjectMapper();
@@ -241,7 +248,11 @@ public class SpotOrdersController {
                     if (txId != null && internalTxIds.contains(txId.trim())) continue;
 
                     LocalDateTime fecha = parseFecha(tsStr);
-                    if (fecha != null && fecha.toLocalDate().isEqual(hoy)) {
+                    // Antes era isEqual(hoy): un depósito de anoche que nadie alcanzara a importar
+                    // antes de medianoche quedaba fuera PARA SIEMPRE. Ahora cubre la ventana
+                    // completa (36 h por defecto), igual que el sync de ventas P2P.
+                    if (fecha != null && !fecha.isBefore(
+                            LocalDateTime.now(zoneId).minusHours(Math.max(1, lookbackHorasCompras)))) {
                         // El depósito de Binance NO trae el remitente; se resuelve on-chain por txId.
                         String remitente = resolverRemitenteOnChain(txId, network);
 

@@ -136,11 +136,22 @@ public class PaymentController {
 		return ResponseEntity.ok(out);
 	}
 
+	/**
+	 * Ventana hacia atrás para buscar compras. Antes esto miraba SOLO el día de hoy, y como la
+	 * importación se dispara al abrir la pantalla de asignaciones, una compra hecha de noche que
+	 * nadie alcanzaba a importar antes de medianoche quedaba fuera para siempre: no acreditaba al
+	 * proveedor ni entraba a la tasa promedio. 36 horas es la misma ventana que usa el sync de
+	 * ventas P2P, que tenía exactamente este mismo problema.
+	 */
+	@org.springframework.beans.factory.annotation.Value("${compras.sync.lookback-horas:36}")
+	private int lookbackHoras;
+
 	@GetMapping("/compras-binancepay")
 	public ResponseEntity<List<BuyDollarsDto>> getComprasNoRegistradas() {
 		List<BuyDollarsDto> resultados = new ArrayList<>();
 		try {
-			LocalDate hoy = LocalDate.now(ZoneId.of("America/Bogota"));
+			LocalDateTime desde = LocalDateTime.now(ZoneId.of("America/Bogota"))
+					.minusHours(Math.max(1, lookbackHoras));
 			Set<String> userBinanceValidos = accountBinanceRepository.findAllUserBinances();
 			Set<String> idsRegistrados     = buyDollarsRepository.findAllDepositIds();
 
@@ -149,7 +160,7 @@ public class PaymentController {
 					double monto = tx.getAmount();
 					LocalDateTime fecha = tx.getTransactionTime();
 					if (monto <= 0 || idsRegistrados.contains(tx.getOrderId())
-							|| fecha == null || !fecha.toLocalDate().isEqual(hoy)) continue;
+							|| fecha == null || fecha.isBefore(desde)) continue;
 					if (tx.getPayerInfo() == null || userBinanceValidos.contains(tx.getPayerInfo().getName())) continue;
 
 					BuyDollarsDto dto = new BuyDollarsDto();

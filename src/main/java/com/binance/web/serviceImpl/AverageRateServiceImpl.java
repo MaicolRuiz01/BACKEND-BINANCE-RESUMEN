@@ -29,6 +29,35 @@ public class AverageRateServiceImpl implements AverageRateService{
 	
 	private static final ZoneId ZONE_BOGOTA = ZoneId.of("America/Bogota");
 
+	/**
+	 * ESCALA MILES — el detalle que rompía este cálculo.
+	 *
+	 * En todo el sistema los montos se guardan divididos por mil, para que el operario no tenga
+	 * que leer cifras enormes: una compra de 16.129 USDT se guarda como 16,129, y sus 50.886.995
+	 * pesos como 50.887. Ver BuyDollarsServiceImpl (setAmount .../1000) y SellDollarsServiceImpl.
+	 * La TASA en cambio no se divide: 3.155 son 3.155 pesos por USDT (dividir arriba y abajo por
+	 * mil deja el mismo cociente).
+	 *
+	 * El saldo que devuelve accountBinanceService viene CRUDO desde las APIs: 4.648 USDT son
+	 * 4.648. Antes se restaba ese saldo crudo contra la compra en miles, o sea que una compra de
+	 * 16.129 USDT entraba al promedio pesando 16. Con la base intacta y la compra mil veces más
+	 * chica, la tasa quedaba anclada: se movía centavos por compra y nunca llegaba al precio real
+	 * (marcaba 3.064 mientras se compraba a 3.155, y esa diferencia se reportaba como ganancia).
+	 *
+	 * Por eso el saldo se pasa a miles apenas se lee, y de ahí en adelante TODO en este servicio
+	 * está en la misma escala.
+	 */
+	private static final double ESCALA_MILES = 1000.0;
+
+	/** Saldo real de USDT en las cuentas, convertido a la escala miles del resto del sistema. */
+	private double saldoUsdtEnMiles() {
+		// getTotalExternalUsdt (y no getTotalExternalBalance) a propósito: el otro convierte SOL,
+		// TRX, LINEA y demás monedas a dólares al precio del momento, así que la tasa promedio del
+		// USDT se movía sola cuando se movía el mercado, sin haber comprado ni vendido nada.
+		Double crudo = accountBinanceService.getTotalExternalUsdt();
+		return (crudo != null ? crudo : 0.0) / ESCALA_MILES;
+	}
+
 	@Override
 	public AverageRate getUltimaTasaPromedio() {
 		return averageRateRepository.findTopByOrderByIdDesc().orElse(null);
@@ -50,7 +79,8 @@ public class AverageRateServiceImpl implements AverageRateService{
             throw new IllegalStateException("La tasa promedio inicial ya fue configurada.");
         }
 
-        Double saldoInicialUsdt = accountBinanceService.getTotalExternalBalance().doubleValue();
+        // En escala miles, igual que las compras contra las que después se va a promediar.
+        Double saldoInicialUsdt = saldoUsdtEnMiles();
 
         // Día lógico (pero solo como variable local)
         LocalDate dia = fecha.atZone(ZONE_BOGOTA).toLocalDate();
@@ -91,9 +121,9 @@ public class AverageRateServiceImpl implements AverageRateService{
         LocalDate dia = ahora.atZone(ZONE_BOGOTA).toLocalDate();
         LocalDateTime inicioDia = dia.atStartOfDay();
 
-        Double saldoTotalInternoActual = accountBinanceService
-                .getTotalExternalBalance()
-                .doubleValue();
+        // En escala miles: montoUsdtCompra y otrosPendientes también lo están, así que las tres
+        // cantidades que se restan más abajo hablan por fin el mismo idioma.
+        Double saldoTotalInternoActual = saldoUsdtEnMiles();
 
         AverageRate sesion = averageRateRepository.findTopBySesionAbiertaTrueOrderByFechaDesc().orElse(null);
 
@@ -198,6 +228,8 @@ public class AverageRateServiceImpl implements AverageRateService{
         AverageRate guardada = averageRateRepository.save(sesion);
 
         // ── Registro de diagnóstico ──
+        // OJO al leer esta tabla: las cantidades van en ESCALA MILES, igual que en todo el
+        // sistema. Un 16,129 en compra_usdt son 16.129 USDT reales. Las tasas sí van tal cual.
         // Va en try/catch y al final a propósito: si falla, la asignación de la compra ya se
         // hizo y no puede quedar a medias por un problema al escribir un dato informativo.
         try {

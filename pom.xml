@@ -168,7 +168,23 @@
 					<encoding>UTF-8</encoding>
 				</configuration>
 			</plugin>
-		</plugins>
+					<!--
+				Mockito necesita instrumentar clases en tiempo de ejecucion. El proyecto declara
+				Java 17 pero se esta desarrollando sobre Java 25, y la version de Mockito que trae
+				Spring Boot 3.4.3 todavia no soporta esa JVM: falla con "Mockito cannot mock this
+				class" sobre clases perfectamente normales.
+
+				Este flag le pide a ByteBuddy que lo intente igual en JVMs que aun no reconoce.
+				Lo ideal sigue siendo correr las pruebas con Java 17 o 21.
+			-->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<configuration>
+					<argLine>-Dnet.bytebuddy.experimental=true</argLine>
+				</configuration>
+			</plugin>
+</plugins>
 	</build>
 
 </project>

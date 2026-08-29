@@ -46,6 +46,7 @@ import java.util.Optional;
 
 
 @Service
+@lombok.extern.slf4j.Slf4j
 public class BuyDollarsServiceImpl implements BuyDollarsService {
 
     @Autowired
@@ -178,9 +179,30 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
 	        return buyDollarsRepository.save(existing);
 	    }
 
+	/**
+	 * Ventana hacia atrás para buscar compras nuevas.
+	 *
+	 * Antes la importación automática miraba SOLO el día de hoy. Como además nadie la dispara
+	 * sola —se lanza al abrir la pantalla de asignaciones—, una compra hecha de noche que nadie
+	 * alcanzaba a importar antes de medianoche quedaba fuera PARA SIEMPRE: no acreditaba al
+	 * proveedor, no entraba a la tasa promedio y no sumaba al balance. Eso explica el "a veces
+	 * el sistema no agarra todas las compras".
+	 *
+	 * 36 horas es la misma ventana que usa el sync de ventas P2P, que tenía este mismo bug.
+	 * Re-importar no duplica: cada compra se filtra por idDeposit y por dedupeKey.
+	 */
+	@org.springframework.beans.factory.annotation.Value("${compras.sync.lookback-horas:36}")
+	private int lookbackHoras;
+
+	/** Cuántos movimientos spot pedir por cuenta. Si en la ventana hubo más que esto, los más
+	 *  viejos se caen por el borde y se pierden. */
+	@org.springframework.beans.factory.annotation.Value("${compras.sync.spot-limit:80}")
+	private int spotLimit;
+
 	@Override
     public void registrarComprasAutomaticamente() {
-        registrarComprasAutomaticamente(0);
+        // Antes pasaba 0, que significaba "solo hoy". Ahora cubre la ventana completa.
+        registrarComprasAutomaticamente((int) Math.ceil(Math.max(1, lookbackHoras) / 24.0));
     }
 
     /** Igual que el automático, pero permite mirar depósitos de Bybit de hasta {diasAtras} días
@@ -191,7 +213,7 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
         try {
             // ✅ Modificación 1: Los controladores devuelven una lista de DTOs genéricos
             List<BuyDollarsDto> binancePay = binancePayController.getComprasNoRegistradas().getBody();
-            List<BuyDollarsDto> spot = spotOrdersController.getComprasNoRegistradas(20).getBody();
+            List<BuyDollarsDto> spot = spotOrdersController.getComprasNoRegistradas(spotLimit).getBody();
             List<BuyDollarsDto> trust = tronScanController.getUSDTIncomingTransfers().getBody();
            // List<BuyDollarsDto> sol = solanaController.getSolanaIncomingTransfers().getBody(); miton dijo que no interesaba las entradas de solana
             Set<String> existentes = buyDollarsRepository.findAll().stream()
@@ -224,17 +246,38 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
             //if (sol != null) todas.addAll(sol);
             todas.sort(Comparator.comparing(BuyDollarsDto::getDate));
 
+            // Contadores para dejar rastro de lo que se descarta. Antes todos los "continue" eran
+            // mudos: si una compra se caía acá, nadie se enteraba nunca.
+            int nuevas = 0, yaEstaban = 0, traspasos = 0;
+            int sinIdDeposito = 0, cuentaDesconocida = 0, fallaron = 0;
+
             for (BuyDollarsDto dto : todas) {
-                if (dto.getIdDeposit() == null || existentes.contains(dto.getIdDeposit())) {
+              // Cada compra se procesa aislada: si una revienta, las demás siguen. Antes una sola
+              // excepción abortaba el lote entero y todo lo que venía después se perdía.
+              try {
+                if (dto.getIdDeposit() == null) {
+                    sinIdDeposito++;
+                    log.warn("[Compras] Descartada sin idDeposit — cuenta={} monto={} fecha={}",
+                            dto.getNameAccount(), dto.getAmount(), dto.getDate());
+                    continue;
+                }
+                if (existentes.contains(dto.getIdDeposit())) {
+                    yaEstaban++;
                     continue;
                 }
 
                 AccountBinance account = accountBinanceRepository.findByName(dto.getNameAccount());
                 if (account == null) {
+                    cuentaDesconocida++;
+                    // Pasa si le cambian el nombre a la cuenta en la BD pero la API sigue
+                    // devolviendo el viejo. La compra existe y se está perdiendo.
+                    log.warn("[Compras] Descartada: no hay cuenta llamada '{}' — idDeposit={} monto={}",
+                            dto.getNameAccount(), dto.getIdDeposit(), dto.getAmount());
                     continue;
                 }
                 String dedupeKey = buildDedupeKey(dto);
                 if (buyDollarsRepository.findByDedupeKey(dedupeKey).isPresent()) {
+                    yaEstaban++;
                     continue;
                   }
 
@@ -267,6 +310,12 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
                         transaccionesRepository.save(t);
                     }
                     existentes.add(dto.getIdDeposit());
+                    traspasos++;
+                    // Se deja rastro porque un falso positivo acá convierte una COMPRA REAL en un
+                    // traspaso: no le acredita al proveedor y no entra a la tasa promedio.
+                    log.info("[Compras] Tratada como traspaso (no es compra) — idDeposit={} monto={} origen={}",
+                            dto.getIdDeposit(), dto.getAmount(),
+                            origenBybit != null ? origenBybit.getName() : "hash desconocido");
                     continue;
                 }
 
@@ -287,9 +336,26 @@ public class BuyDollarsServiceImpl implements BuyDollarsService {
                 nueva.setTxId(dto.getTxId());
                 buyDollarsRepository.save(nueva);
                 existentes.add(dto.getIdDeposit());
+                nuevas++;
+                log.info("[Compras] Importada — idDeposit={} cuenta={} monto={} USDT fecha={}",
+                        dto.getIdDeposit(), dto.getNameAccount(), dto.getAmount(), dto.getDate());
+
+              } catch (Exception e) {
+                // No se relanza: una compra que falla no puede tumbar el resto del lote.
+                fallaron++;
+                log.error("[Compras] Falló al importar idDeposit={} cuenta={} — {}",
+                        dto.getIdDeposit(), dto.getNameAccount(), e.getMessage(), e);
+              }
             }
 
+            log.info("[Compras] Resumen: {} candidata(s) → {} nueva(s), {} ya estaban, "
+                    + "{} traspaso(s), {} sin idDeposit, {} con cuenta desconocida, {} con error.",
+                    todas.size(), nuevas, yaEstaban, traspasos,
+                    sinIdDeposito, cuentaDesconocida, fallaron);
+
         } catch (Exception e) {
+            // Solo llega acá si falló algo global (no se pudo consultar una fuente, por ejemplo).
+            // Se relanza para que la importación manual muestre el error en pantalla.
             throw new RuntimeException("Error al registrar compras automáticamente", e);
         }
     }

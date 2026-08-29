@@ -107,7 +107,7 @@ public class Retiro4x1000Test {
         
         solicitud.setDetalles(Collections.singletonList(detalle));
 
-        when(solicitudRepository.findById(1L)).thenReturn(Optional.of(solicitud));
+        when(solicitudRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(solicitud));
         when(solicitudRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(accountCopRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -134,7 +134,7 @@ public class Retiro4x1000Test {
         
         solicitud.setDetalles(Collections.singletonList(detalle));
 
-        when(solicitudRepository.findById(1L)).thenReturn(Optional.of(solicitud));
+        when(solicitudRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(solicitud));
         when(solicitudRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(accountCopRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -166,7 +166,7 @@ public class Retiro4x1000Test {
 
         solicitud.setDetalles(Collections.singletonList(detalle));
 
-        when(solicitudRepository.findById(1L)).thenReturn(Optional.of(solicitud));
+        when(solicitudRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(solicitud));
         when(solicitudRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(accountCopRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -194,7 +194,7 @@ public class Retiro4x1000Test {
 
         solicitud.setDetalles(Collections.singletonList(detalle));
 
-        when(solicitudRepository.findById(1L)).thenReturn(Optional.of(solicitud));
+        when(solicitudRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(solicitud));
         when(solicitudRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(accountCopRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 

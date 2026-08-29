@@ -72,6 +72,9 @@ class HistoricoCajaTest {
 
     @Test
     void editarElMasViejo_propagaElDeltaATodosLosPosteriores() {
+        // El servicio usa el resultado de save() (para sincronizar el mensaje de Telegram),
+        // asi que el simulacro debe devolver lo que recibe. Sin esto llega null y revienta.
+        when(movimientoRepository.save(any(Movimiento.class))).thenAnswer(inv -> inv.getArgument(0));
         when(movimientoRepository.findById(1)).thenReturn(Optional.of(daniel));
         when(movimientoRepository.findByCaja_IdAndFechaAfterOrderByFechaAsc(1, daniel.getFecha()))
                 .thenReturn(List.of(marcela, diana));
@@ -87,6 +90,9 @@ class HistoricoCajaTest {
 
     @Test
     void editarElMasNuevo_nuncaAfectaLosMovimientosAnteriores() {
+        // El servicio usa el resultado de save() (para sincronizar el mensaje de Telegram),
+        // asi que el simulacro debe devolver lo que recibe. Sin esto llega null y revienta.
+        when(movimientoRepository.save(any(Movimiento.class))).thenAnswer(inv -> inv.getArgument(0));
         when(movimientoRepository.findById(3)).thenReturn(Optional.of(diana));
         when(movimientoRepository.findByCaja_IdAndFechaAfterOrderByFechaAsc(1, diana.getFecha()))
                 .thenReturn(List.of()); // no hay nada después de Diana

@@ -184,7 +184,10 @@ public class TelegramWebhookHandlersTest {
         handleMontoRealTexto.invoke(webhookService, pending, 555L, "1800");
 
         verify(retiradorService).confirmarSolicitudConMontoReal(42L, 1800.0);
-        verify(telegramService).sendMessage(eq("555"), contains("Retiro registrado"));
+        // El servicio ya NO manda un mensaje nuevo: EDITA el que estaba ("Escribe el monto")
+        // y lo reemplaza por el resumen. Antes esta prueba esperaba sendMessage("Retiro registrado"),
+        // texto que el servicio dejo de usar.
+        verify(telegramService).editMessageTextOnly(eq("555"), eq(900), contains("Retiro completado"));
         assertFalse(pendingMap().containsKey(555L), "El estado pendiente debe limpiarse tras confirmar con éxito");
     }
 
