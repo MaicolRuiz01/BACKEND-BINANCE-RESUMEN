@@ -45,4 +45,32 @@ public interface ConciliacionBancariaService {
      * polling. Vacío si no hay ninguna pendiente.
      */
     Optional<String> obtenerYConsumirPendiente();
+
+    /**
+     * Registra el resultado de UN intento de acceso a una cuenta Bancolombia,
+     * venga de donde venga: del lote que manda conciliacion_bancaria.py (ver
+     * procesarResultado) o de un evento en vivo del bot de Movimientos (ver
+     * MovimientosBridgeService, eventos "conexion_exitosa"/"error_login").
+     * Único punto de escritura para disponibleBanco/ultimoErrorConciliacion —
+     * así ambos canales quedan con el mismo comportamiento seguro.
+     *
+     * A PROPÓSITO: nunca bloquea la cuenta ni la saca de P2P por sí sola (ver
+     * el comentario largo en la implementación) — eso queda siempre como una
+     * decisión manual desde Saldos → "Bloquear cuenta".
+     *
+     * @return true si se encontró y actualizó una cuenta con ese nombre
+     *         (sin ambigüedad), false si no se encontró o el nombre matcheó
+     *         más de una cuenta.
+     */
+    boolean registrarResultadoCuenta(String nombreCuenta, boolean disponible,
+            Double saldoRealBanco, String motivoError);
+
+    /**
+     * Busca una cuenta Bancolombia por nombre (normalizado, sin tildes;
+     * ambiguo = no encontrado) — usado por MovimientosBridgeServiceImpl para
+     * filtrar qué eventos se reenvían al bot de Telegram "Cuentas P2P": solo
+     * las cuentas con activaParaP2P=true. Devuelve vacío si no se encuentra
+     * o el nombre es ambiguo.
+     */
+    Optional<AccountCop> buscarCuentaBancolombiaPorNombre(String nombreCuenta);
 }

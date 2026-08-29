@@ -3,6 +3,8 @@ package com.binance.web.conciliacion;
 import com.binance.web.Entity.AccountCop;
 import com.binance.web.Entity.BankType;
 import com.binance.web.Repository.AccountCopRepository;
+import com.binance.web.detencion.DetencionService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,6 +17,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
+@Slf4j
 @Service
 public class ConciliacionBancariaServiceImpl implements ConciliacionBancariaService {
 
@@ -27,15 +30,23 @@ public class ConciliacionBancariaServiceImpl implements ConciliacionBancariaServ
     private final ConciliacionBotChatRepository conciliacionBotChatRepository;
     private final ConciliacionBotTelegramClient conciliacionBotTelegramClient;
     private final ConciliacionSolicitudRepository conciliacionSolicitudRepository;
+    // OJO: DetencionService directo, NO CuentaP2PSyncService — CuentaP2PSyncService
+    // depende de ConciliacionBancariaService (para el lado "activar"), así que
+    // inyectarlo acá también crearía una dependencia circular entre los dos
+    // beans. DetencionService no depende de nada de conciliación, así que no
+    // tiene ese problema.
+    private final DetencionService detencionService;
 
     public ConciliacionBancariaServiceImpl(AccountCopRepository accountCopRepository,
             ConciliacionBotChatRepository conciliacionBotChatRepository,
             ConciliacionBotTelegramClient conciliacionBotTelegramClient,
-            ConciliacionSolicitudRepository conciliacionSolicitudRepository) {
+            ConciliacionSolicitudRepository conciliacionSolicitudRepository,
+            DetencionService detencionService) {
         this.accountCopRepository = accountCopRepository;
         this.conciliacionBotChatRepository = conciliacionBotChatRepository;
         this.conciliacionBotTelegramClient = conciliacionBotTelegramClient;
         this.conciliacionSolicitudRepository = conciliacionSolicitudRepository;
+        this.detencionService = detencionService;
     }
 
     /** Minúsculas, sin tildes, espacios colapsados — mismo criterio que usa el
@@ -55,68 +66,115 @@ public class ConciliacionBancariaServiceImpl implements ConciliacionBancariaServ
             return response;
         }
 
+        for (ConciliacionResultadoDto.Item item : request.getResultados()) {
+            String nombreOriginal = item.getCuenta() != null ? item.getCuenta() : "(sin nombre)";
+            boolean actualizada = registrarResultadoCuenta(
+                    nombreOriginal,
+                    Boolean.TRUE.equals(item.getDisponible()),
+                    item.getSaldoRealBanco(),
+                    item.getError());
+            if (actualizada) {
+                response.getActualizados().add(nombreOriginal);
+            } else {
+                response.getNoEncontrados().add(nombreOriginal);
+            }
+        }
+
+        return response;
+    }
+
+    /**
+     * Busca UNA cuenta Bancolombia por nombre, con el mismo criterio robusto
+     * (normalizado, sin tildes, y trata un nombre ambiguo como "no
+     * encontrado" en vez de arriesgarse a devolver la cuenta equivocada) que
+     * ya usaba registrarResultadoCuenta. Extraído como método público para
+     * que MovimientosBridgeServiceImpl pueda preguntar "¿esta cuenta está
+     * activa en P2P?" antes de reenviar un evento al bot de Telegram
+     * "Cuentas P2P" — ver el filtro agregado ahí (agosto 2026).
+     */
+    @Override
+    public Optional<AccountCop> buscarCuentaBancolombiaPorNombre(String nombreCuenta) {
+        if (nombreCuenta == null || nombreCuenta.isBlank()) return Optional.empty();
+
         List<AccountCop> cuentasBancolombia = accountCopRepository.findByBankType(BankType.BANCOLOMBIA);
 
         // Agrupa por nombre normalizado — si dos cuentas normalizan igual, el
-        // nombre queda AMBIGUO y se reporta como "no encontrado" en vez de
-        // arriesgarse a actualizar la cuenta equivocada.
+        // nombre queda AMBIGUO y se trata como "no encontrado" en vez de
+        // arriesgarse a actualizar/devolver la cuenta equivocada.
         Map<String, List<AccountCop>> porNombre = new HashMap<>();
         for (AccountCop c : cuentasBancolombia) {
             porNombre.computeIfAbsent(normalizar(c.getName()), k -> new ArrayList<>()).add(c);
         }
 
-        for (ConciliacionResultadoDto.Item item : request.getResultados()) {
-            String nombreOriginal = item.getCuenta() != null ? item.getCuenta() : "(sin nombre)";
-            List<AccountCop> candidatos = porNombre.get(normalizar(nombreOriginal));
+        List<AccountCop> candidatos = porNombre.get(normalizar(nombreCuenta));
+        if (candidatos == null || candidatos.size() != 1) {
+            return Optional.empty();
+        }
+        return Optional.of(candidatos.get(0));
+    }
 
-            if (candidatos == null || candidatos.size() != 1) {
-                response.getNoEncontrados().add(nombreOriginal);
-                continue;
-            }
+    @Override
+    @Transactional
+    public boolean registrarResultadoCuenta(String nombreCuenta, boolean disponible,
+            Double saldoRealBanco, String motivoError) {
+        if (nombreCuenta == null || nombreCuenta.isBlank()) return false;
 
-            AccountCop cuenta = candidatos.get(0);
-            boolean disponible = Boolean.TRUE.equals(item.getDisponible());
-
-            cuenta.setUltimaConciliacion(LocalDateTime.now());
-            cuenta.setDisponibleBanco(item.getDisponible());
-
-            if (disponible) {
-                cuenta.setUltimoErrorConciliacion(null);
-                Double saldoReal = item.getSaldoRealBanco();
-                Double saldoPochonance = cuenta.getBalance();
-                cuenta.setUltimoDesfaseBanco(
-                        (saldoReal != null && saldoPochonance != null)
-                                ? Math.round((saldoReal - saldoPochonance) * 100.0) / 100.0
-                                : null);
-
-                // Auto-desbloqueo: si el bot había bloqueado esta cuenta antes (por no
-                // poder leerla) y ahora sí la lee bien, se desbloquea sola. Si está
-                // bloqueada pero NO fue el bot quien la bloqueó (bloqueo manual desde
-                // Saldos), no se toca — un humano la desbloquea cuando quiera.
-                if (Boolean.TRUE.equals(cuenta.getBloqueada()) && Boolean.TRUE.equals(cuenta.getBloqueadaPorBot())) {
-                    cuenta.setBloqueada(false);
-                    cuenta.setBloqueadaPorBot(false);
-                }
-            } else {
-                cuenta.setUltimoDesfaseBanco(null);
-                cuenta.setUltimoErrorConciliacion(item.getError());
-
-                // El bot no pudo leer la cuenta (posible bloqueo u otra falla del banco)
-                // -> se bloquea automáticamente en Pochonance, igual que el botón manual
-                // de "Bloquear cuenta" en Saldos (sale de P2P de inmediato). Se marca
-                // bloqueadaPorBot=true para poder distinguirlo de un bloqueo manual y
-                // permitir el auto-desbloqueo más adelante.
-                cuenta.setBloqueada(true);
-                cuenta.setBloqueadaPorBot(true);
-                // Mismo efecto que el botón manual "Bloquear cuenta": sale de P2P de inmediato.
-                cuenta.setActivaParaP2P(false);
-            }
-
-            accountCopRepository.save(cuenta);
-            response.getActualizados().add(nombreOriginal);
+        Optional<AccountCop> encontrada = buscarCuentaBancolombiaPorNombre(nombreCuenta);
+        if (encontrada.isEmpty()) {
+            log.warn("[Conciliacion] '{}' no encontrada o ambigua — se ignora.", nombreCuenta);
+            return false;
         }
 
-        return response;
+        AccountCop cuenta = encontrada.get();
+        cuenta.setUltimaConciliacion(LocalDateTime.now());
+        cuenta.setDisponibleBanco(disponible);
+
+        if (disponible) {
+            cuenta.setUltimoErrorConciliacion(null);
+            Double saldoPochonance = cuenta.getBalance();
+            cuenta.setUltimoDesfaseBanco(
+                    (saldoRealBanco != null && saldoPochonance != null)
+                            ? Math.round((saldoRealBanco - saldoPochonance) * 100.0) / 100.0
+                            : null);
+
+            // Auto-desbloqueo: si un bloqueo manual anterior (bloqueadaPorBot=true, de
+            // cuando esto SÍ auto-bloqueaba) sigue puesto y ahora la cuenta responde
+            // bien, se desbloquea sola. Si bloqueada=true pero NO fue el bot quien la
+            // bloqueó, no se toca — un humano la desbloquea cuando quiera.
+            if (Boolean.TRUE.equals(cuenta.getBloqueada()) && Boolean.TRUE.equals(cuenta.getBloqueadaPorBot())) {
+                cuenta.setBloqueada(false);
+                cuenta.setBloqueadaPorBot(false);
+            }
+        } else {
+            cuenta.setUltimoDesfaseBanco(null);
+            cuenta.setUltimoErrorConciliacion(motivoError);
+
+            // A PROPÓSITO (fix agosto 2026): esto YA NO bloquea la cuenta automáticamente.
+            // Antes sí lo hacía, y un fallo del BOT (ej. sin credenciales de Bitwarden en
+            // la máquina que corría el chequeo, no un bloqueo real del banco) terminó
+            // bloqueando en cadena TODAS las cuentas de un tirón — ver incidente
+            // 15/08/2026 documentado en el bot. "No pude acceder" no es lo mismo que "el
+            // banco confirmó que está bloqueada". Bloquear de verdad sigue siendo SIEMPRE
+            // una acción manual desde Saldos → "Bloquear cuenta".
+            //
+            // Lo que SÍ hace ahora (agosto 2026, confirmado con Milton): si la cuenta
+            // seguía activa en P2P, se desactiva — no tiene sentido seguir mandándole
+            // ventas a una cuenta que el bot no pudo confirmar que sirve. Esto es MUCHO
+            // más suave que bloquear: no toca `bloqueada`, se puede reactivar a mano en
+            // cualquier momento, y al desactivarse dispara la detención del monitoreo
+            // (ver CuentaP2PSyncService) para no dejar la sesión de Chrome corriendo sin
+            // motivo.
+            if (Boolean.TRUE.equals(cuenta.getActivaParaP2P())) {
+                cuenta.setActivaParaP2P(false);
+                accountCopRepository.save(cuenta);
+                detencionService.solicitarDetencion(cuenta);
+                log.warn("[Conciliacion] '{}' desactivada de P2P automáticamente — el bot no pudo confirmarla ({}).",
+                        cuenta.getName(), motivoError);
+            }
+        }
+
+        accountCopRepository.save(cuenta);
+        return true;
     }
 
     @Override
@@ -135,6 +193,13 @@ public class ConciliacionBancariaServiceImpl implements ConciliacionBancariaServ
     @Transactional
     public void solicitarConciliacion(AccountCop cuenta) {
         if (cuenta == null || cuenta.getName() == null || cuenta.getName().isBlank()) return;
+
+        // Dedupe: si ya hay una pendiente para esta cuenta, no duplicar (ver
+        // el comentario en ConciliacionSolicitudRepository.findFirstByCuentaAndConsumidaFalse).
+        if (conciliacionSolicitudRepository.findFirstByCuentaAndConsumidaFalse(cuenta.getName()).isPresent()) {
+            log.info("[Conciliacion] Ya había una solicitud pendiente para '{}' — no se duplica.", cuenta.getName());
+            return;
+        }
 
         // Este es el mecanismo REAL que el bot usa para enterarse: encola una
         // solicitud pendiente que el bot consume vía polling

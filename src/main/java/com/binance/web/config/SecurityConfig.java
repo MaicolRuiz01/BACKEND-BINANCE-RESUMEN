@@ -52,6 +52,14 @@ public class SecurityConfig {
                         // se autentica con API key propia (X-Bot-Api-Key), validada a mano
                         // dentro de ConciliacionBancariaController, no con el JWT normal.
                         .requestMatchers("/conciliacion/**").permitAll()
+                        // Bot "Cuentas P2P" — recibe eventos de pochonance_bridge.py y el polling
+                        // de pochonance_activador.py (Movimientos), mismo esquema que
+                        // /conciliacion/**: API key propia validada a mano dentro de
+                        // MovimientosBridgeController (X-Bot-Api-Key), no JWT. Wildcard (no solo
+                        // /evento) para cubrir también /movimientos/activacion/pendiente y
+                        // /movimientos/activacion/resultado sin tener que tocar esto de nuevo
+                        // cada vez que se agregue un endpoint más a ese controller.
+                        .requestMatchers("/movimientos/**").permitAll()
                         // Todo lo demás requiere autenticación
                         .anyRequest().authenticated()
                 )
