@@ -1,6 +1,7 @@
 package com.binance.web.activacion;
 
 import com.binance.web.Entity.AccountCop;
+import com.binance.web.Repository.AccountCopRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -25,6 +26,7 @@ import java.util.Optional;
 public class ActivacionServiceImpl implements ActivacionService {
 
     private final ActivacionSolicitudRepository activacionSolicitudRepository;
+    private final AccountCopRepository accountCopRepository;
 
     @Override
     @Transactional
@@ -48,12 +50,34 @@ public class ActivacionServiceImpl implements ActivacionService {
     @Override
     @Transactional
     public Optional<String> obtenerYConsumirPendiente() {
-        return activacionSolicitudRepository.findFirstByConsumidaFalseOrderByCreadaEnAsc()
-                .map(solicitud -> {
-                    solicitud.setConsumida(true);
-                    activacionSolicitudRepository.save(solicitud);
-                    return solicitud.getCuenta();
-                });
+        // Incidente 31/08/2026: como esta cola nunca expiraba ni se cancelaba
+        // entre sí (ver DetencionServiceImpl), una cuenta que se activaba y
+        // desactivaba varias veces en P2P mientras el bot estaba apagado
+        // (p.ej. por la rotación automática de JornadaController) dejaba
+        // filas encoladas de AMBAS colas, sin relación con su estado ACTUAL.
+        // Al arrancar el bot, se le entregaba todo el historial de golpe —
+        // incluidas activaciones de cuentas que ya no estaban seleccionadas
+        // en P2P (saturando RAM de Chrome con logins innecesarios). Ahora,
+        // antes de entregar una solicitud, se revisa el estado REAL de la
+        // cuenta en AccountCop; si ya no aplica, se descarta (se marca
+        // consumida igual, para no reprocesarla) y se sigue con la siguiente.
+        Optional<ActivacionSolicitud> siguiente;
+        while ((siguiente = activacionSolicitudRepository.findFirstByConsumidaFalseOrderByCreadaEnAsc()).isPresent()) {
+            ActivacionSolicitud solicitud = siguiente.get();
+            solicitud.setConsumida(true);
+            activacionSolicitudRepository.save(solicitud);
+
+            String cuenta = solicitud.getCuenta();
+            AccountCop cuentaActual = accountCopRepository.findByName(cuenta);
+            boolean activaEnP2PAhora = cuentaActual != null && Boolean.TRUE.equals(cuentaActual.getActivaParaP2P());
+
+            if (activaEnP2PAhora) {
+                return Optional.of(cuenta);
+            }
+            log.info("[Activación] Descartada solicitud obsoleta de '{}' — ya no está activa en P2P "
+                    + "(se encoló en su momento, pero el estado cambió antes de que el bot la consumiera).", cuenta);
+        }
+        return Optional.empty();
     }
 
     @Override

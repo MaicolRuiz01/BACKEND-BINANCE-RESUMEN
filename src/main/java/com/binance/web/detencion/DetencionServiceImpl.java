@@ -1,6 +1,7 @@
 package com.binance.web.detencion;
 
 import com.binance.web.Entity.AccountCop;
+import com.binance.web.Repository.AccountCopRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -22,6 +23,7 @@ import java.util.Optional;
 public class DetencionServiceImpl implements DetencionService {
 
     private final DetencionSolicitudRepository detencionSolicitudRepository;
+    private final AccountCopRepository accountCopRepository;
 
     @Override
     @Transactional
@@ -44,12 +46,27 @@ public class DetencionServiceImpl implements DetencionService {
     @Override
     @Transactional
     public Optional<String> obtenerYConsumirPendiente() {
-        return detencionSolicitudRepository.findFirstByConsumidaFalseOrderByCreadaEnAsc()
-                .map(solicitud -> {
-                    solicitud.setConsumida(true);
-                    detencionSolicitudRepository.save(solicitud);
-                    return solicitud.getCuenta();
-                });
+        // Mismo fix que ActivacionServiceImpl (incidente 31/08/2026): antes de
+        // entregar una solicitud de detención se revisa el estado REAL de la
+        // cuenta — si volvió a estar activa en P2P antes de que el bot la
+        // consumiera, la solicitud ya no aplica y se descarta.
+        Optional<DetencionSolicitud> siguiente;
+        while ((siguiente = detencionSolicitudRepository.findFirstByConsumidaFalseOrderByCreadaEnAsc()).isPresent()) {
+            DetencionSolicitud solicitud = siguiente.get();
+            solicitud.setConsumida(true);
+            detencionSolicitudRepository.save(solicitud);
+
+            String cuenta = solicitud.getCuenta();
+            AccountCop cuentaActual = accountCopRepository.findByName(cuenta);
+            boolean activaEnP2PAhora = cuentaActual != null && Boolean.TRUE.equals(cuentaActual.getActivaParaP2P());
+
+            if (!activaEnP2PAhora) {
+                return Optional.of(cuenta);
+            }
+            log.info("[Detención] Descartada solicitud obsoleta de '{}' — volvió a estar activa en P2P "
+                    + "antes de que el bot la consumiera.", cuenta);
+        }
+        return Optional.empty();
     }
 
     @Override
