@@ -72,5 +72,31 @@ public class MovimientoEventoDto {
     /** Solo presente cuando evento = "error_login". Puede venir null. */
     private String motivo;
 
+    /**
+     * Lista de chat IDs (separados por coma) que deben recibir este evento en
+     * el bot "Cuentas P2P" — se arma en Python a partir de chats_id.json
+     * (Movimientos/notificar.py → _leer_chat_ids), para que Cuentas P2P
+     * notifique EXACTAMENTE a los mismos chats que ya usa el sistema de
+     * Movimientos, en vez de mantener una lista aparte y fija en
+     * application-prod.properties (a pedido de Milton, 31/08/2026). Si viene
+     * null/vacío (p.ej. una prueba manual sin este campo), el backend cae de
+     * vuelta a app.cuentasp2p.chats-confiables.
+     */
+    @JsonProperty("chats_confiables")
+    private String chatsConfiables;
+
+    /**
+     * Subconjunto de chatsConfiables (separados por coma) que debe recibir el
+     * mensaje COMPLETO en vez del resumido — mismo criterio que FULL_NOTIF_IDS
+     * en Movimientos/config.py, usado por notificar.py → _notificar_tx. Solo
+     * aplica al evento "movimiento" (ver formatearMovimientoCorto); para los
+     * demás tipos de evento no hay versión resumida, siempre se manda el
+     * mensaje completo. Si viene null/vacío, se trata a TODOS los chats como
+     * si estuvieran en la lista completa (compatibilidad con pruebas manuales
+     * que no manden este campo).
+     */
+    @JsonProperty("chats_full")
+    private String chatsFull;
+
     private String timestamp;
 }
