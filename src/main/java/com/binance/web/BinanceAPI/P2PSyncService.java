@@ -226,9 +226,14 @@ public class P2PSyncService {
         double pesosCop    = pesosCopRaw / 1_000.0;
         double dollarsUs   = obj.path("amount").asDouble(0.0) / 1_000.0;
         double tasa        = obj.path("unitPrice").asDouble(0.0);
-        double commission  = !obj.path("takerCommission").isNull()
+        // La comisión son USDT, igual que dollarsUs, así que va en la MISMA escala (miles).
+        // Antes se guardaba cruda: la utilidad hace (dólares + comisión) × tasa, o sea que una
+        // comisión cruda pesaba mil veces de más dentro del costo. No se había notado porque
+        // todas las ventas revisadas traen comisión 0 — pero en cuanto Binance cobre una, la
+        // utilidad de esa venta se iría al piso sin motivo.
+        double commission  = (!obj.path("takerCommission").isNull()
                 ? obj.path("takerCommission").asDouble(0.0)
-                : obj.path("commission").asDouble(0.0);
+                : obj.path("commission").asDouble(0.0)) / 1_000.0;
 
         SaleP2P sale = new SaleP2P();
         sale.setNumberOrder(obj.path("orderNumber").asText());

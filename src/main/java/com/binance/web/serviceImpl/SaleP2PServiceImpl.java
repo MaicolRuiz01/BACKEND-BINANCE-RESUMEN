@@ -99,6 +99,12 @@ public class SaleP2PServiceImpl implements SaleP2PService {
         return convertToDtoList(LocalDate.now(ZONE_BOGOTA), account);
     }
 
+    /**
+     * CÓDIGO MUERTO — nadie lo llama. Ojo si algún día se reactiva: guarda pesosCop, dollarsUs y
+     * commission CRUDOS, mientras que el importador real (P2PSyncService.buildSale) los guarda en
+     * escala miles como el resto del sistema. Reactivarlo tal cual metería filas mil veces más
+     * grandes en sale_p2p, que es justo el bug que tenía buy_p2p.
+     */
     private void createSaleP2pDirectly(String account, LocalDate today) {
         try {
             ZoneId zone = ZONE_BOGOTA;

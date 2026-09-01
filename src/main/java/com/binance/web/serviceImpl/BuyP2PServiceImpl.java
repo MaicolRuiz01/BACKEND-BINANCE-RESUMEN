@@ -72,20 +72,33 @@ public class BuyP2PServiceImpl implements BuyP2PService {
                 if (fechaOrden.isBefore(inicio) || !fechaOrden.isBefore(fin)) continue;
                 if (buyP2PRepository.existsByNumberOrder(orderNumber))         continue;
 
-                double pesosCopRaw = obj.path("totalPrice").asDouble(0.0);
+                double pesosCopRaw  = obj.path("totalPrice").asDouble(0.0);
+                double dollarsUsRaw = obj.path("amount").asDouble(0.0);
 
                 BuyP2P buy = new BuyP2P();
                 buy.setNumberOrder(orderNumber);
                 buy.setDate(fechaOrden);
                 buy.setPesosCop(pesosCopRaw / 1_000.0); // convertir a miles de COP
-                buy.setDollarsUs(obj.path("amount").asDouble(0.0));
 
-                double commission = !obj.path("takerCommission").isNull()
+                // ESCALA MILES — esta línea NO dividía, y era la única de todo el sistema.
+                //
+                // Los pesos de esta misma fila sí se dividían, así que buy_p2p quedaba descuadrada
+                // consigo misma: una compra de 10,53 USDT por 33.600 pesos guardaba 10,53 y 33,6,
+                // y la tasa implícita daba 3,2 en vez de 3.191. Como el balance suma esta columna
+                // junto a buy_dollars.amount (que sí está en miles), cada compra P2P se contaba
+                // MIL VECES más grande: la card "Asignar" marcaba -89.595 en vez de -56.303.
+                buy.setDollarsUs(dollarsUsRaw / 1_000.0);
+
+                double commissionRaw = !obj.path("takerCommission").isNull()
                         ? obj.path("takerCommission").asDouble(0.0)
                         : obj.path("commission").asDouble(0.0);
-                buy.setCommission(commission);
-                // tasa calculada sobre monto real para mantener tipo de cambio legible
-                buy.setTasa(buy.getDollarsUs() > 0 ? pesosCopRaw / buy.getDollarsUs() : 0.0);
+                // La comisión son USDT: va en la misma escala que dollarsUs, o al sumarlas
+                // (utilidad = (dólares + comisión) × tasa) la comisión pesaría mil veces de más.
+                buy.setCommission(commissionRaw / 1_000.0);
+
+                // La tasa se calcula con los montos CRUDOS a propósito: es pesos por USDT, un
+                // número real (~3.191) que no depende de la escala en que se guarden los montos.
+                buy.setTasa(dollarsUsRaw > 0 ? pesosCopRaw / dollarsUsRaw : 0.0);
 
                 AccountBinance ab = accountBinanceRepository.findByName(account);
                 buy.setBinanceAccount(ab);
