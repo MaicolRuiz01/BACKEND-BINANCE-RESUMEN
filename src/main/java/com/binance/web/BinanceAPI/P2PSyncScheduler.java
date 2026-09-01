@@ -26,6 +26,7 @@ public class P2PSyncScheduler {
     @Autowired private P2PSyncService syncService;
     @Autowired private P2PSseController sseController;
     @Autowired private P2PActiveOrderService activeOrderService;
+    @Autowired private AsignacionAutomaticaService asignacionService;
 
     // ─────────────────────────────────────────────────────────────
     // Tarea programada
@@ -72,6 +73,10 @@ public class P2PSyncScheduler {
                     log.info("[ActivePoll] Import inmediato tras completar: {} venta(s) nueva(s)", nuevas);
                 }
             }
+
+            // Asignación automática de cuentas COP a las ventas en curso (solo si el
+            // interruptor está encendido; el propio método no hace nada si está apagado).
+            asignacionService.ejecutar();
         } catch (Exception e) {
             log.warn("[ActivePoll] Error en polling de órdenes activas: {}", e.getMessage());
         }

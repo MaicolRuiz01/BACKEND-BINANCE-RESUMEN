@@ -19,6 +19,7 @@ import java.util.Map;
 public class P2PActiveOrderController {
 
     @Autowired private P2PActiveOrderService activeOrderService;
+    @Autowired private AsignacionAutomaticaService asignacionService;
 
     // ─────────────────────────────────────────────────────────────
     // Órdenes activas
@@ -45,6 +46,24 @@ public class P2PActiveOrderController {
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Asignación automática (interruptor global ON/OFF)
+    // ─────────────────────────────────────────────────────────────
+
+    /** GET /api/p2p/auto-asignacion → { "activa": true|false } */
+    @GetMapping("/auto-asignacion")
+    public ResponseEntity<?> getAutoAsignacion() {
+        return ResponseEntity.ok(Map.of("activa", asignacionService.isActiva()));
+    }
+
+    /** PUT /api/p2p/auto-asignacion  Body: { "activa": true|false } — prende/apaga el motor. */
+    @PutMapping("/auto-asignacion")
+    public ResponseEntity<?> setAutoAsignacion(@RequestBody Map<String, Boolean> body) {
+        boolean activa = body != null && Boolean.TRUE.equals(body.get("activa"));
+        asignacionService.setActiva(activa);
+        return ResponseEntity.ok(Map.of("activa", activa));
     }
 
     // ─────────────────────────────────────────────────────────────
