@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -68,8 +69,15 @@ public class ActivacionServiceImpl implements ActivacionService {
             activacionSolicitudRepository.save(solicitud);
 
             String cuenta = solicitud.getCuenta();
-            AccountCop cuentaActual = accountCopRepository.findByName(cuenta);
-            boolean activaEnP2PAhora = cuentaActual != null && Boolean.TRUE.equals(cuentaActual.getActivaParaP2P());
+            // findAllByName (no findByName): hay nombres duplicados en la tabla
+            // y findByName lanza IncorrectResultSizeDataAccessException apenas
+            // encuentra más de una (bug real encontrado el 31/08/2026, tumbaba
+            // /movimientos/detencion/pendiente con 400 en cada poll). Si el
+            // nombre es ambiguo (0 o >1 resultados), se trata como "no activa"
+            // — más seguro descartar la solicitud que reventar el endpoint.
+            List<AccountCop> coincidencias = accountCopRepository.findAllByName(cuenta);
+            boolean activaEnP2PAhora = coincidencias.size() == 1
+                    && Boolean.TRUE.equals(coincidencias.get(0).getActivaParaP2P());
 
             if (activaEnP2PAhora) {
                 return Optional.of(cuenta);
