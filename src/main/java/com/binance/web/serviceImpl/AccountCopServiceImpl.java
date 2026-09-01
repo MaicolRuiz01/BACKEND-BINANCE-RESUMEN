@@ -20,6 +20,7 @@ import com.binance.web.Entity.SaleP2pAccountCop;
 import com.binance.web.Repository.AccountCopRepository;
 import com.binance.web.Repository.SaleP2PRepository;
 import com.binance.web.Repository.SaleP2pAccountCopRepository;
+import com.binance.web.activacion.CuentaP2PSyncService;
 import com.binance.web.service.AccountCopService;
 import com.binance.web.service.RetiradorService;
 import com.binance.web.util.CupoDiarioRules;
@@ -31,13 +32,15 @@ public class AccountCopServiceImpl implements AccountCopService {
 	private final SaleP2pAccountCopRepository saleP2pAccountCopRepository;
 	private final SaleP2PRepository saleP2PRepository;
 	private final RetiradorService retiradorService;
+	private final CuentaP2PSyncService cuentaP2PSyncService;
 	private static final ZoneId ZONE_BOGOTA = ZoneId.of("America/Bogota");
 
-	public AccountCopServiceImpl(AccountCopRepository AccountCopRepository, SaleP2PRepository saleP2PRepository, SaleP2pAccountCopRepository saleP2pAccountCopRepository, RetiradorService retiradorService) {
+	public AccountCopServiceImpl(AccountCopRepository AccountCopRepository, SaleP2PRepository saleP2PRepository, SaleP2pAccountCopRepository saleP2pAccountCopRepository, RetiradorService retiradorService, CuentaP2PSyncService cuentaP2PSyncService) {
 	    this.AccountCopRepository = AccountCopRepository;
 	    this.saleP2PRepository = saleP2PRepository;
 	    this.saleP2pAccountCopRepository = saleP2pAccountCopRepository;
 	    this.retiradorService = retiradorService;
+	    this.cuentaP2PSyncService = cuentaP2PSyncService;
 	}
 
 	@Override
@@ -279,8 +282,16 @@ public class AccountCopServiceImpl implements AccountCopService {
 	    // Reemplaza el set de cuentas activas para P2P: solo las elegidas quedan activas — se
 	    // apaga cualquier otra que estuviera activa de una jornada anterior, para no acumular
 	    // cuentas activas sin control a medida que arrancan jornadas durante el día.
+	    //
+	    // Guardamos el estado ANTES de tocarlo para poder avisarle a Movimientos (vía
+	    // CuentaP2PSyncService) exactamente qué cuentas pasaron de inactiva->activa (hay que
+	    // arrancar el bot) o de activa->inactiva (hay que pararlo) — este método es el único
+	    // lugar donde la selección automática cambia activaParaP2P en lote, sin pasar por
+	    // AccountCopController.toggleActivaParaP2P.
 	    for (AccountCop acc : todas) {
+	        boolean estabaActivaAntes = Boolean.TRUE.equals(acc.getActivaParaP2P());
 	        acc.setActivaParaP2P(idsElegidas.contains(acc.getId()));
+	        cuentaP2PSyncService.sincronizar(acc, estabaActivaAntes);
 	    }
 	    AccountCopRepository.saveAll(todas);
 

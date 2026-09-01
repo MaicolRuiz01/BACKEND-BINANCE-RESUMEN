@@ -718,13 +718,15 @@ public class TelegramWebhookService {
             return;
         }
 
-        // Mismo resguardo que en "Entregar efectivo": releer la caja real de la BD
-        // en vez de confiar en un cálculo local, para nunca confirmar algo que no
-        // quedó realmente guardado.
-        Retirador retiradorActualizado = retiradorRepository.findByTelegramChatId(telegramUserId).orElse(null);
-        Double saldoReal = retiradorActualizado != null && retiradorActualizado.getEfectivo() != null
-                ? retiradorActualizado.getEfectivo().getSaldo()
-                : null;
+        // Mismo resguardo que en "Entregar efectivo"/"pago a proveedor": releer el
+        // saldo YA GUARDADO en base de datos con una consulta que ignora la caché
+        // de Hibernate (ver EfectivoRepository.obtenerSaldoFresco), en vez de
+        // volver a pedir el Retirador por retiradorRepository — eso devuelve la
+        // MISMA instancia ya cargada en esta transacción (incidente 29/08/2026,
+        // ver el comentario largo más abajo en handleEntregarMonto), así que
+        // "releer" no releía nada de verdad y avisaba (falsamente) que el gasto
+        // no se pudo confirmar aunque sí había quedado bien guardado.
+        Double saldoReal = efectivoRepository.obtenerSaldoFresco(retirador.getEfectivo().getId());
         double restante = saldoActual - monto;
         boolean seReflejoEnCaja = gastoGuardado != null && gastoGuardado.getId() != null
                 && saldoReal != null && Math.abs(saldoReal - restante) < 1.0;
@@ -737,6 +739,11 @@ public class TelegramWebhookService {
                     "⚠️ No se pudo confirmar que el gasto haya quedado registrado. Vuelve a intentar en un momento.");
             return;
         }
+
+        // Sincroniza el objeto en memoria con el saldo fresco para que el
+        // recordatorio de caja de abajo (enviarRecordatorioCaja) no muestre el
+        // valor viejo.
+        retirador.getEfectivo().setSaldo(saldoReal);
 
         pendingGastos.remove(telegramUserId);
 
