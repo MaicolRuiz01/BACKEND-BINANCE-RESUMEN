@@ -5,6 +5,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -157,6 +158,45 @@ public class BuyP2PServiceImpl implements BuyP2PService {
     // =========================
     // 3) ASIGNACIÓN CUENTAS COP
     // =========================
+    @Override
+    /**
+     * TODAS las compras P2P pendientes, sin filtro de fecha.
+     *
+     * Usa la MISMA consulta que el balance general (findNoAsignadasBeforeNullSafe), a propósito:
+     * así lo que se ve en la pestaña es exactamente lo que la card "Asignar" está restando. Antes
+     * la pantalla miraba solo el día de hoy mientras el balance contaba todo lo pendiente desde
+     * siempre, de modo que una compra de ayer restaba en la card y no aparecía en ninguna parte
+     * para poder asignarla.
+     *
+     * NULL-safe: incluye filas con asignado = null, que la consulta derivada ignoraba.
+     *
+     * Antes de leer se dispara la importación del día, igual que hacen las otras pestañas, para
+     * que una compra recién hecha aparezca sin tener que refrescar a mano.
+     */
+    @Override
+    public List<BuyP2PDto> getNoAsignadasTodas() {
+        LocalDate today = LocalDate.now(ZONE_BOGOTA);
+        for (AccountBinance acc : accountBinanceRepository.findByTipo("BINANCE")) {
+            try {
+                createBuyP2pDirectly(acc.getName(), today);
+            } catch (Exception e) {
+                // Que falle una cuenta no puede dejar la pantalla vacía: se sigue con las demás
+                // y de todos modos se devuelve lo que ya está guardado.
+                log.warn("[BuyP2P] No se pudo importar la cuenta {}: {}", acc.getName(), e.getMessage());
+            }
+        }
+
+        // Límite superior abierto (mañana): equivale a "sin tope", pero reusa la consulta existente.
+        LocalDateTime sinTope = today.plusDays(1).atStartOfDay();
+
+        return buyP2PRepository.findNoAsignadasBeforeNullSafe(sinTope).stream()
+                .map(this::toDto)
+                .sorted(Comparator.comparing(
+                        (BuyP2PDto d) -> d.getDate() == null ? LocalDateTime.MIN : d.getDate())
+                        .reversed())
+                .collect(Collectors.toList());
+    }
+
     @Override
     public String processAssignAccountCop(Integer buyId, List<AssignAccountDto> accounts) {
         BuyP2P buy = buyP2PRepository.findById(buyId).orElse(null);

@@ -31,6 +31,16 @@ public class BuyP2PController {
         return ResponseEntity.ok(buyP2PService.getTodayNoAsignadasAllAccounts());
     }
 
+    /**
+     * TODAS las pendientes, sin filtrar por fecha — es la que usa la pestaña "COMPRAS P2P".
+     * Las dos de arriba solo traen las de hoy, y una compra de ayer sin asignar seguía restando
+     * en la card "Asignar" sin aparecer en ninguna pantalla.
+     */
+    @GetMapping("/no-asignadas")
+    public ResponseEntity<List<BuyP2PDto>> noAsignadasTodas() {
+        return ResponseEntity.ok(buyP2PService.getNoAsignadasTodas());
+    }
+
     @PostMapping("/assign-account-cop")
     public ResponseEntity<String> assign(@RequestParam Integer buyId,
                                          @RequestBody List<AssignAccountDto> accounts) {

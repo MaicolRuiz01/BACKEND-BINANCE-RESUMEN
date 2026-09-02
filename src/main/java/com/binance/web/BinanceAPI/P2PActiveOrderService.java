@@ -87,6 +87,26 @@ public class P2PActiveOrderService {
                         return java.util.stream.Stream.empty();
                     }
                 })
+                // ORDEN GLOBAL — de la venta más reciente a la más antigua.
+                //
+                // Antes no se ordenaba en ninguna parte: ni acá, ni en el frontend, ni en la
+                // tabla. El resultado era la concatenación de las listas de cada cuenta, así que
+                // con UNA sola cuenta parecía ordenado (Binance devuelve sus órdenes seguidas)
+                // pero con DOS quedaban en bloques: primero todas las de una cuenta y después
+                // todas las de la otra, mezclando fechas. El operador veía la lista desordenada.
+                //
+                // createTime viene como "yyyy-MM-dd HH:mm:ss", que ordenado como texto da el
+                // mismo resultado que ordenado como fecha, sin tener que volver a parsearlo.
+                // Las órdenes sin fecha van al final (cadena vacía).
+                //
+                // El desempate por orderNumber no es cosmético: si dos órdenes caen en el mismo
+                // segundo y el orden entre ellas quedara al azar, se intercambiarían de lugar en
+                // cada refresco y la fila que el operador está mirando le saltaría sola.
+                .sorted(Comparator
+                        .comparing((ActiveP2POrderDto o) ->
+                                o.getCreateTime() == null ? "" : o.getCreateTime())
+                        .thenComparing(o -> o.getOrderNumber() == null ? "" : o.getOrderNumber())
+                        .reversed())
                 .collect(java.util.stream.Collectors.toList());
     }
 
