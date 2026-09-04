@@ -16,7 +16,6 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -33,10 +32,6 @@ import java.util.Map;
  * - POST /activacion/resultado → pochonance_activador.py (arrancar el
  *   monitoreo de una cuenta activada en "Cuentas P2P"). Ver ActivacionService
  *   para el contrato completo y por qué es polling, no un mensaje de Telegram.
- * - POST /heartbeat            → pochonance_activador.py, periódico: reporta
- *   qué cuentas tiene corriendo AHORA MISMO, para que el backend reencole
- *   activaciones/detenciones que se hayan perdido silenciosamente. Ver
- *   MovimientosHeartbeatService.
  */
 @Slf4j
 @RestController
@@ -47,7 +42,6 @@ public class MovimientosBridgeController {
     private final MovimientosBridgeService movimientosBridgeService;
     private final ActivacionService activacionService;
     private final DetencionService detencionService;
-    private final MovimientosHeartbeatService movimientosHeartbeatService;
 
     @Value("${app.cuentasp2p.bridge-api-key:}")
     private String apiKeyEsperada;
@@ -142,29 +136,6 @@ public class MovimientosBridgeController {
         if (err != null) return err;
 
         detencionService.procesarResultado(resultado);
-        return ResponseEntity.ok(Map.of("ok", true));
-    }
-
-    /**
-     * El bot (pochonance_activador.py) llama esto periódicamente (cada
-     * INTERVALO_HEARTBEAT_SEGUNDOS, ver ese archivo) reportando qué cuentas
-     * tiene corriendo AHORA MISMO. Sirve de red de seguridad para el caso en
-     * que una orden de activar o detener se pierda silenciosamente (ej. justo
-     * cuando Chrome se reinicia por RAM alta) — ver MovimientosHeartbeatService
-     * para el detalle completo y el incidente que lo motivó.
-     */
-    @PostMapping("/heartbeat")
-    public ResponseEntity<?> heartbeat(
-            @RequestHeader(value = "X-Bot-Api-Key", required = false) String apiKeyRecibida,
-            @RequestBody(required = false) MovimientosHeartbeatDto body) {
-
-        ResponseEntity<Map<String, String>> err = _errorSiApiKeyInvalida(apiKeyRecibida);
-        if (err != null) return err;
-
-        List<String> cuentasActivas = (body != null && body.getCuentasActivas() != null)
-                ? body.getCuentasActivas()
-                : List.of();
-        movimientosHeartbeatService.reconciliar(cuentasActivas);
         return ResponseEntity.ok(Map.of("ok", true));
     }
 }

@@ -37,11 +37,6 @@ public interface AccountCopRepository extends JpaRepository<AccountCop, Integer>
 	/** Todas las cuentas de un banco (ej. BANCOLOMBIA) — para emparejar por nombre en la conciliación bancaria. */
 	List<AccountCop> findByBankType(BankType bankType);
 
-	/** Cuentas actualmente marcadas activas para P2P — usado por el heartbeat de
-	 *  reconciliación (MovimientosHeartbeatServiceImpl) para detectar cuentas que
-	 *  deberían estar corriendo en Movimientos pero no lo están. */
-	List<AccountCop> findByActivaParaP2PTrue();
-
 	/** ¿Existe una cuenta con ese número EN EL MISMO BANCO? (para crear) */
 	boolean existsByNumeroCuentaAndBankType(String numeroCuenta, BankType bankType);
 
