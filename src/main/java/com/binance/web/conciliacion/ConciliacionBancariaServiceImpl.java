@@ -226,38 +226,11 @@ public class ConciliacionBancariaServiceImpl implements ConciliacionBancariaServ
     @Override
     @Transactional
     public Optional<String> obtenerYConsumirPendiente() {
-        // Incidente 31/08/2026: ESTE es el método real que consume el bot vía
-        // GET /conciliacion/pendiente (el que llama pochonance_activador.py
-        // para "activación" — /movimientos/activacion/pendiente, atendido por
-        // ActivacionServiceImpl, está muerto, nada lo consume hoy). Tenía el
-        // mismo problema que ya se había corregido en ActivacionServiceImpl/
-        // DetencionServiceImpl pero en el archivo equivocado: nunca expiraba
-        // ni se revalidaba contra el estado actual, así que al arrancar el bot
-        // se le entregaba TODO el historial de solicitudes viejas de una vez,
-        // incluidas cuentas que ya no estaban seleccionadas en P2P (de ahí el
-        // aluvión de activaciones y los crashes de RAM en Chrome). Ahora se
-        // revisa el activaParaP2P real antes de entregar cada una.
-        Optional<ConciliacionSolicitud> siguiente;
-        while ((siguiente = conciliacionSolicitudRepository.findFirstByConsumidaFalseOrderByCreadaEnAsc()).isPresent()) {
-            ConciliacionSolicitud solicitud = siguiente.get();
-            solicitud.setConsumida(true);
-            conciliacionSolicitudRepository.save(solicitud);
-
-            String cuenta = solicitud.getCuenta();
-            // buscarCuentaBancolombiaPorNombre ya tolera nombres duplicados/
-            // ambiguos (los trata como "no encontrada" en vez de reventar) —
-            // ver el método más arriba en esta misma clase.
-            boolean activaEnP2PAhora = buscarCuentaBancolombiaPorNombre(cuenta)
-                    .map(AccountCop::getActivaParaP2P)
-                    .map(Boolean.TRUE::equals)
-                    .orElse(false);
-
-            if (activaEnP2PAhora) {
-                return Optional.of(cuenta);
-            }
-            log.info("[Conciliacion] Descartada solicitud de activación obsoleta de '{}' — ya no está activa en P2P "
-                    + "(se encoló en su momento, pero el estado cambió antes de que el bot la consumiera).", cuenta);
-        }
-        return Optional.empty();
+        return conciliacionSolicitudRepository.findFirstByConsumidaFalseOrderByCreadaEnAsc()
+                .map(solicitud -> {
+                    solicitud.setConsumida(true);
+                    conciliacionSolicitudRepository.save(solicitud);
+                    return solicitud.getCuenta();
+                });
     }
 }

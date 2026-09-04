@@ -23,17 +23,6 @@ public interface AccountCopRepository extends JpaRepository<AccountCop, Integer>
     Optional<AccountCop> findByIdForUpdate(@Param("id") Integer id);
 	AccountCop findByName(String name);
 
-	/**
-	 * Igual que findByName pero tolera nombres duplicados sin lanzar
-	 * IncorrectResultSizeDataAccessException ("Query did not return a unique
-	 * result") — bug encontrado el 31/08/2026 en ActivacionServiceImpl /
-	 * DetencionServiceImpl: hay cuentas con el mismo name en la tabla, y
-	 * findByName() explota apenas encuentra más de una. Quien llame a este
-	 * método debe decidir qué hacer si la lista trae 0 o más de 1 resultado
-	 * (normalmente: tratarlo como "no encontrada / ambigua").
-	 */
-	List<AccountCop> findAllByName(String name);
-
 	/** Todas las cuentas de un banco (ej. BANCOLOMBIA) — para emparejar por nombre en la conciliación bancaria. */
 	List<AccountCop> findByBankType(BankType bankType);
 

@@ -71,15 +71,6 @@ public class MovimientosBridgeServiceImpl implements MovimientosBridgeService {
             return;
         }
 
-        // A pedido de Milton (31/08/2026): Cuentas P2P debe respetar la MISMA
-        // regla completo/resumido que ya usa notificar.py → _notificar_tx en
-        // Movimientos (FULL_NOTIF_IDS reciben completo, el resto resumido).
-        // Solo "movimiento" tiene versión resumida real (igual que en Python,
-        // donde cambio_saldo/conexion_exitosa/error_login siempre van completos).
-        String textoCorto = "movimiento".equals(evento.getEvento())
-                ? formatearMovimientoCorto(evento)
-                : texto;
-
         // Filtro (agosto 2026, a pedido de Milton): el bot de Movimientos puede
         // monitorear cuentas de forma manual (bot saldo en Telegram) SIN que
         // estén seleccionadas en "Cuentas P2P" — eso debe seguir funcionando
@@ -97,31 +88,15 @@ public class MovimientosBridgeServiceImpl implements MovimientosBridgeService {
             return;
         }
 
-        // A pedido de Milton (31/08/2026): Cuentas P2P debe notificar a los
-        // MISMOS chats que ya usa el sistema de Movimientos (chats_id.json en
-        // Python), no a una lista fija aparte. Si el evento trae chats_confiables
-        // (lo manda pochonance_bridge.py, leído fresco de chats_id.json en cada
-        // envío) se usa esa; si no viene (p.ej. una prueba manual sin ese campo),
-        // se cae de vuelta a la lista fija de application-prod.properties.
-        List<String> chats = (evento.getChatsConfiables() != null && !evento.getChatsConfiables().isBlank())
-                ? parsearChats(evento.getChatsConfiables())
-                : chatsConfiables();
+        List<String> chats = chatsConfiables();
         if (chats.isEmpty()) {
-            log.warn("[CuentasP2P Bridge] No hay chats confiables (ni en el evento ni en app.cuentasp2p.chats-confiables) — evento de '{}' no se le manda a nadie.",
+            log.warn("[CuentasP2P Bridge] No hay chats confiables configurados (app.cuentasp2p.chats-confiables) — evento de '{}' no se le manda a nadie.",
                     evento.getCuenta());
             return;
         }
 
-        // Si chatsFull no viene (p.ej. prueba manual sin ese campo), se trata a
-        // TODOS los chats como si recibieran el mensaje completo — mismo
-        // comportamiento que ya teníamos antes de este cambio.
-        List<String> chatsFull = (evento.getChatsFull() != null && !evento.getChatsFull().isBlank())
-                ? parsearChats(evento.getChatsFull())
-                : null;
-
         for (String chatId : chats) {
-            boolean recibeCompleto = (chatsFull == null) || chatsFull.contains(chatId);
-            cuentasP2PTelegramService.sendMessage(chatId, recibeCompleto ? texto : textoCorto);
+            cuentasP2PTelegramService.sendMessage(chatId, texto);
         }
         log.info("[CuentasP2P Bridge] Evento '{}' de '{}' enviado a {} chat(s).",
                 evento.getEvento(), evento.getCuenta(), chats.size());
@@ -146,25 +121,6 @@ public class MovimientosBridgeServiceImpl implements MovimientosBridgeService {
             sb.append("\n🔖 ").append(e.getReferencia());
         }
         return sb.toString();
-    }
-
-    // ── Formateo — versión resumida, mismo layout que msg_corto en
-    // notificar.py → _notificar_tx ("Mensaje compacto (operadores externos)").
-    // Usa descripcionCorta, que ya viene calculada desde Python
-    // (NotificarMixin._desc_corta) — no se reimplementa esa lógica acá para
-    // no tener el mismo criterio de acortado en dos lenguajes distintos.
-    private String formatearMovimientoCorto(MovimientoEventoDto e) {
-        boolean esSalida = "salida".equalsIgnoreCase(e.getTipo());
-        String emoji = esSalida ? "🔴" : "🟢";
-        String accion = esSalida ? "Salió" : "Entró";
-        String flechaAccion = esSalida ? "📤" : "📥";
-        String monto = formatearMonto(e.getMonto());
-        String descBreve = (e.getDescripcionCorta() == null || e.getDescripcionCorta().isBlank())
-                ? "—" : e.getDescripcionCorta();
-
-        return emoji + " *" + nvl(e.getCuenta()) + "*\n"
-                + flechaAccion + " " + accion + ": `" + monto + "`\n"
-                + "💳 " + descBreve;
     }
 
     // ── Formateo — evento sin transacción identificada (solo delta de saldo) ──
@@ -222,15 +178,11 @@ public class MovimientosBridgeServiceImpl implements MovimientosBridgeService {
     }
 
     private List<String> chatsConfiables() {
-        return parsearChats(chatsConfiablesRaw);
-    }
-
-    private List<String> parsearChats(String raw) {
         List<String> resultado = new ArrayList<>();
-        if (raw == null || raw.isBlank()) {
+        if (chatsConfiablesRaw == null || chatsConfiablesRaw.isBlank()) {
             return resultado;
         }
-        for (String parte : raw.split(",")) {
+        for (String parte : chatsConfiablesRaw.split(",")) {
             String limpio = parte.trim();
             if (!limpio.isEmpty()) {
                 resultado.add(limpio);

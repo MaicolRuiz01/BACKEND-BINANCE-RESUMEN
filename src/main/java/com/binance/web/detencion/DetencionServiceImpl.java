@@ -8,7 +8,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.Optional;
 
 /**
@@ -58,14 +57,8 @@ public class DetencionServiceImpl implements DetencionService {
             detencionSolicitudRepository.save(solicitud);
 
             String cuenta = solicitud.getCuenta();
-            // findAllByName (no findByName): ver el comentario igual en
-            // ActivacionServiceImpl — findByName lanza excepción con nombres
-            // duplicados (bug real del 31/08/2026, causaba 400 en cada poll de
-            // /movimientos/detencion/pendiente). Ambiguo (0 o >1) → se trata
-            // como "no activa" (deja pasar la detención en vez de reventar).
-            List<AccountCop> coincidencias = accountCopRepository.findAllByName(cuenta);
-            boolean activaEnP2PAhora = coincidencias.size() == 1
-                    && Boolean.TRUE.equals(coincidencias.get(0).getActivaParaP2P());
+            AccountCop cuentaActual = accountCopRepository.findByName(cuenta);
+            boolean activaEnP2PAhora = cuentaActual != null && Boolean.TRUE.equals(cuentaActual.getActivaParaP2P());
 
             if (!activaEnP2PAhora) {
                 return Optional.of(cuenta);
