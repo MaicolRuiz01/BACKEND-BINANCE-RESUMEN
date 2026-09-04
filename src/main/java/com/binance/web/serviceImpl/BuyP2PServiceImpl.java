@@ -158,7 +158,6 @@ public class BuyP2PServiceImpl implements BuyP2PService {
     // =========================
     // 3) ASIGNACIÓN CUENTAS COP
     // =========================
-    @Override
     /**
      * TODAS las compras P2P pendientes, sin filtro de fecha.
      *
