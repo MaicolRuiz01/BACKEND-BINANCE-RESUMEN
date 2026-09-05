@@ -48,6 +48,7 @@ public class MovimientosHeartbeatServiceImpl implements MovimientosHeartbeatServ
     private final AccountCopRepository accountCopRepository;
     private final ActivacionService activacionService;
     private final DetencionService detencionService;
+    private final MovimientosConectividadMonitor conectividadMonitor;
 
     /** Mismo criterio de normalización que ConciliacionBancariaServiceImpl —
      *  minúsculas, sin tildes, espacios colapsados, para que un espacio de
@@ -63,6 +64,12 @@ public class MovimientosHeartbeatServiceImpl implements MovimientosHeartbeatServ
     public void reconciliar(List<String> cuentasActivasReportadas) {
         try {
             List<String> reportadas = cuentasActivasReportadas != null ? cuentasActivasReportadas : List.of();
+
+            // Registrar el heartbeat ANTES que cualquier otra cosa — esto alimenta
+            // MovimientosConectividadMonitor (caída total / caída puntual de una
+            // cuenta), que es independiente de si la reconciliación de abajo
+            // encuentra algo que hacer o no.
+            conectividadMonitor.registrarHeartbeat(reportadas);
 
             Set<String> reportadasNormalizadas = new HashSet<>();
             for (String nombre : reportadas) {

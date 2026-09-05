@@ -259,6 +259,7 @@ public class P2PActiveOrderService {
         String createTime    = createTimeLong > 0
                 ? Instant.ofEpochMilli(createTimeLong).atZone(ZONE).format(FMT)
                 : "";
+        String counterPartNickName = obj.path("counterPartNickName").asText("");
 
         // Enriquecer con pre-asignación si existe
         Integer copId   = null;
@@ -274,7 +275,7 @@ public class P2PActiveOrderService {
         return new ActiveP2POrderDto(
                 orderNumber, status, statusLabel(status),
                 accountName, dollarsUs, pesosCop, tasa, createTime,
-                copId, copNombre, estadoManual
+                copId, copNombre, estadoManual, counterPartNickName
         );
     }
 
