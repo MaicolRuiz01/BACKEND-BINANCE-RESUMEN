@@ -65,6 +65,12 @@ public class MovimientosConectividadMonitor {
      *  cuándo una cuenta se activa/reactiva (05/09/2026, ver nota en verificarConectividad). */
     private final Set<String> cuentasActivasP2PConocidas = ConcurrentHashMap.newKeySet();
 
+    /** Cuentas que estaban activas justo cuando se declaró una caída TOTAL — mientras
+     *  una cuenta esté acá, se le avisa su propia "conexión recuperada" apenas vuelva a
+     *  reportarse (en vez del aviso genérico de caída puntual, que usaría un timestamp
+     *  de antes de la caída y confundiría con un problema nuevo). Ver nota 05/09/2026. */
+    private final Set<String> cuentasPendientesTrasCaidaGlobal = ConcurrentHashMap.newKeySet();
+
     private static String normalizar(String s) {
         if (s == null) return "";
         String sinTildes = DIACRITICOS.matcher(Normalizer.normalize(s, Normalizer.Form.NFD)).replaceAll("");
@@ -89,6 +95,17 @@ public class MovimientosConectividadMonitor {
             if (key.isEmpty()) continue;
             ultimaVezActivaPorCuenta.put(key, ahora);
             nombreOriginalPorCuenta.put(key, nombre);
+
+            // Esta cuenta era una de las que estaban activas cuando se declaró la
+            // caída TOTAL — avisamos su propia recuperación puntual acá, y con eso
+            // ya queda resuelta: el chequeo de caída puntual de verificarConectividad()
+            // la sigue ignorando mientras siga en este set (ver ahí), así que esto
+            // reemplaza al aviso genérico de "dejó de reportarse" para este caso.
+            if (cuentasPendientesTrasCaidaGlobal.remove(key)) {
+                enviarAlerta("🟢 *" + nombre + "* — conexión recuperada.");
+                log.info("[Conectividad] '{}' recuperó su conexión tras la caída total.", nombre);
+            }
+
             if (alertaCaidaCuentaEnviada.remove(key)) {
                 enviarAlerta("🟢 *" + nombre + "* volvió a reportarse activa — conexión de esa cuenta restablecida.");
                 log.info("[Conectividad] '{}' volvió a reportarse tras una caída puntual.", nombre);
@@ -110,10 +127,16 @@ public class MovimientosConectividadMonitor {
             if (segundosSinHeartbeat >= UMBRAL_SEGUNDOS) {
                 if (!alertaCaidaGlobalEnviada) {
                     alertaCaidaGlobalEnviada = true;
+                    // Snapshot de quién estaba activo justo antes de la caída — son las
+                    // cuentas cuya recuperación se avisa una por una en registrarHeartbeat().
+                    // Los timestamps de estas cuentas van a quedar viejos mientras dure la
+                    // caída — por eso el chequeo puntual de más abajo las ignora mientras
+                    // sigan en este set (si no, dispararía "dejó de reportarse" para cada
+                    // una en cuanto pase el umbral, aunque el problema ya se avisó acá).
+                    cuentasPendientesTrasCaidaGlobal.clear();
+                    cuentasPendientesTrasCaidaGlobal.addAll(ultimaVezActivaPorCuenta.keySet());
                     String detalle = detalleOrdenesEnCursoTodasLasCuentas();
-                    enviarAlerta("🔴 *Se perdió la conexión con Movimientos* — no se reciben heartbeats hace más de "
-                            + UMBRAL_SEGUNDOS + " segundos. Si hay ventas P2P en curso, revisa manualmente."
-                            + detalle);
+                    enviarAlerta("🔴 *Se perdió la conexión con Movimientos*" + detalle);
                     log.warn("[Conectividad] Sin heartbeat hace {}s — alerta de caída total enviada.", segundosSinHeartbeat);
                 }
                 return; // Si ya sabemos que TODO está caído, no tiene sentido evaluar cuenta por cuenta.
@@ -144,9 +167,18 @@ public class MovimientosConectividadMonitor {
                 }
             }
             cuentasActivasP2PConocidas.retainAll(activasAhora);
+            // Si una cuenta pendiente de recuperación se desselecciona de P2P antes de
+            // volver a reportarse, no tiene sentido seguir esperándola — se limpia para
+            // que no quede colgada ahí para siempre.
+            cuentasPendientesTrasCaidaGlobal.retainAll(activasAhora);
 
             for (AccountCop cuenta : activas) {
                 String key = normalizar(cuenta.getName());
+                // Ya sabemos que esta cuenta se cayó (era parte de la caída total) y su
+                // recuperación se avisa puntualmente en registrarHeartbeat() — no evaluar
+                // acá con su timestamp viejo, que dispararía un "dejó de reportarse"
+                // redundante y confuso justo después de ya haber avisado la caída total.
+                if (cuentasPendientesTrasCaidaGlobal.contains(key)) continue;
                 Instant vistaPorUltimaVez = ultimaVezActivaPorCuenta.get(key);
                 if (vistaPorUltimaVez == null) continue; // nunca la hemos visto reportada — puede que recién se esté activando.
                 long segundosSinReportarse = Duration.between(vistaPorUltimaVez, ahora).getSeconds();
