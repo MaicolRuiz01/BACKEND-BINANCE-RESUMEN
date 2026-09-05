@@ -61,6 +61,10 @@ public class MovimientosConectividadMonitor {
     private final ConcurrentHashMap<String, String> nombreOriginalPorCuenta = new ConcurrentHashMap<>();
     private final Set<String> alertaCaidaCuentaEnviada = ConcurrentHashMap.newKeySet();
 
+    /** Cuentas que en el ciclo ANTERIOR ya estaban activaParaP2P=true — para detectar
+     *  cuándo una cuenta se activa/reactiva (05/09/2026, ver nota en verificarConectividad). */
+    private final Set<String> cuentasActivasP2PConocidas = ConcurrentHashMap.newKeySet();
+
     private static String normalizar(String s) {
         if (s == null) return "";
         String sinTildes = DIACRITICOS.matcher(Normalizer.normalize(s, Normalizer.Form.NFD)).replaceAll("");
@@ -118,6 +122,29 @@ public class MovimientosConectividadMonitor {
             // Conexión global sana — evaluar si alguna cuenta puntual dejó de reportarse
             // (posible bloqueo/crash de esa sesión específica, no un problema general).
             List<AccountCop> activas = accountCopRepository.findByActivaParaP2PTrue();
+
+            // Detectar cuentas que RECIÉN se activaron/reactivaron en P2P (05/09/2026):
+            // sin esto, una cuenta que ya había estado activa antes (con un timestamp
+            // viejo guardado en ultimaVezActivaPorCuenta) dispara una falsa alarma de
+            // "dejó de reportarse" apenas se reactiva — el reloj comparaba contra la
+            // última vez que se vio hace rato, no contra el momento de la reactivación,
+            // y Movimientos todavía no ha tenido tiempo de loguearse y reportarla de
+            // nuevo. Al detectar la transición inactiva→activa le borramos el estado
+            // viejo: vuelve a quedar "nunca vista todavía" hasta el próximo heartbeat
+            // real, que es cuando registrarHeartbeat() la deja con un timestamp fresco.
+            Set<String> activasAhora = new java.util.HashSet<>();
+            for (AccountCop cuenta : activas) {
+                String key = normalizar(cuenta.getName());
+                activasAhora.add(key);
+                if (cuentasActivasP2PConocidas.add(key)) {
+                    ultimaVezActivaPorCuenta.remove(key);
+                    alertaCaidaCuentaEnviada.remove(key);
+                    log.info("[Conectividad] '{}' se activó/reactivó en P2P — se le da margen antes de vigilarla.",
+                            cuenta.getName());
+                }
+            }
+            cuentasActivasP2PConocidas.retainAll(activasAhora);
+
             for (AccountCop cuenta : activas) {
                 String key = normalizar(cuenta.getName());
                 Instant vistaPorUltimaVez = ultimaVezActivaPorCuenta.get(key);
