@@ -29,4 +29,9 @@ public class ActiveP2POrderDto {
 
     /** "PENDIENTE" (amarillo) o "RECIBIDO" (verde) — clasificación manual del operario. */
     private String  estadoManual;
+
+    /** Nickname del comprador en Binance — usado para identificar la orden en
+     *  alertas de conectividad (ver MovimientosConectividadMonitor), para que
+     *  quede claro cuál venta específica falta por confirmar. */
+    private String  counterPartNickName;
 }
