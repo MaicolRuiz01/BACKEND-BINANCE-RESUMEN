@@ -2,7 +2,7 @@ package com.binance.web.movimientosbridge;
 
 import com.binance.web.Entity.AccountCop;
 import com.binance.web.Repository.AccountCopRepository;
-import com.binance.web.activacion.ActivacionService;
+import com.binance.web.conciliacion.ConciliacionBancariaService;
 import com.binance.web.detencion.DetencionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -46,7 +46,7 @@ public class MovimientosHeartbeatServiceImpl implements MovimientosHeartbeatServ
     private static final Pattern DIACRITICOS = Pattern.compile("\\p{M}");
 
     private final AccountCopRepository accountCopRepository;
-    private final ActivacionService activacionService;
+    private final ConciliacionBancariaService conciliacionBancariaService;
     private final DetencionService detencionService;
     private final MovimientosConectividadMonitor conectividadMonitor;
 
@@ -86,12 +86,23 @@ public class MovimientosHeartbeatServiceImpl implements MovimientosHeartbeatServ
             }
 
             // 1) Activas en P2P que Movimientos NO reporta corriendo → falta activarlas.
+            //
+            // OJO (05/09/2026): esto usaba activacionService.solicitarActivacion(cuenta),
+            // que encola en ActivacionSolicitud — una cola MUERTA, nada la consume hoy
+            // (ver el comentario de ConciliacionBancariaServiceImpl.obtenerYConsumirPendiente,
+            // que ya documentaba esto). El bot (pochonance_activador.py) solo escucha
+            // GET /conciliacion/pendiente, servido por ConciliacionBancariaService — por
+            // eso una cuenta que YA estaba activa y pierde su sesión (Movimientos se cae
+            // y se reinicia) nunca se reactivaba sola: esta reconciliación "reencolaba"
+            // en la cola equivocada. Una cuenta NUEVA sí funcionaba porque
+            // AccountCopController.toggleActivaParaP2P llama directo a
+            // conciliacionBancariaService.solicitarConciliacion, la cola correcta.
             for (AccountCop cuenta : todas) {
                 if (!Boolean.TRUE.equals(cuenta.getActivaParaP2P())) continue;
                 if (!reportadasNormalizadas.contains(normalizar(cuenta.getName()))) {
                     log.warn("[Heartbeat] '{}' está activa en P2P pero Movimientos no la reporta corriendo — "
                             + "reencolando activación.", cuenta.getName());
-                    activacionService.solicitarActivacion(cuenta);
+                    conciliacionBancariaService.solicitarConciliacion(cuenta);
                 }
             }
 
