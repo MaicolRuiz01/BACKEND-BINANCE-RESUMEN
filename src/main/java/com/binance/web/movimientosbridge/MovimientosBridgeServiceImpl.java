@@ -119,9 +119,21 @@ public class MovimientosBridgeServiceImpl implements MovimientosBridgeService {
                 ? parsearChats(evento.getChatsFull())
                 : null;
 
+        // Botón "✅" (05/09/2026, a pedido de Milton): solo en "movimiento" — el
+        // chat se llena de transferencias y sin esto no hay forma visual de
+        // saber cuáles ventas ya se liberaron. El resto de eventos
+        // (cambio_saldo/conexion_exitosa/error_login) no lo necesitan, son
+        // avisos únicos, no un flujo que haya que ir tachando.
+        boolean esMovimiento = "movimiento".equals(evento.getEvento());
+
         for (String chatId : chats) {
             boolean recibeCompleto = (chatsFull == null) || chatsFull.contains(chatId);
-            cuentasP2PTelegramService.sendMessage(chatId, recibeCompleto ? texto : textoCorto);
+            String textoAEnviar = recibeCompleto ? texto : textoCorto;
+            if (esMovimiento) {
+                cuentasP2PTelegramService.sendMessageConBotonLiberar(chatId, textoAEnviar);
+            } else {
+                cuentasP2PTelegramService.sendMessage(chatId, textoAEnviar);
+            }
         }
         log.info("[CuentasP2P Bridge] Evento '{}' de '{}' enviado a {} chat(s).",
                 evento.getEvento(), evento.getCuenta(), chats.size());
