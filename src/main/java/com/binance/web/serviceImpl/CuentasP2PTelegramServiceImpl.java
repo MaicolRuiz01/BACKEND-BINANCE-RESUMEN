@@ -10,7 +10,9 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -53,6 +55,86 @@ public class CuentasP2PTelegramServiceImpl implements CuentasP2PTelegramService 
             log.error("[CuentasP2P] Error al enviar mensaje a {}: {}", chatId, e.getMessage());
         }
         return null;
+    }
+
+    @Override
+    public Integer sendMessageConBotonLiberar(String chatId, String message) {
+        if (!isConfigured(chatId))
+            return null;
+        try {
+            Map<String, Object> boton = new HashMap<>();
+            boton.put("text", "✅");
+            boton.put("callback_data", "liberar");
+
+            List<List<Map<String, Object>>> inlineKeyboard = new ArrayList<>();
+            inlineKeyboard.add(List.of(boton));
+
+            Map<String, Object> replyMarkup = new HashMap<>();
+            replyMarkup.put("inline_keyboard", inlineKeyboard);
+
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("chat_id", chatId);
+            payload.put("text", message);
+            payload.put("parse_mode", "Markdown");
+            payload.put("reply_markup", replyMarkup);
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> response = (Map<String, Object>) post("/sendMessage", payload);
+            if (response != null && Boolean.TRUE.equals(response.get("ok"))) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> result = (Map<String, Object>) response.get("result");
+                Integer messageId = (Integer) result.get("message_id");
+                log.info("[CuentasP2P] Mensaje con botón 'Liberar' enviado a chat: {}, message_id: {}", chatId, messageId);
+                return messageId;
+            } else {
+                log.warn("[CuentasP2P] Telegram respondió sin 'ok' al mandar (con botón) a {}: {}", chatId, response);
+            }
+        } catch (Exception e) {
+            log.error("[CuentasP2P] Error al enviar mensaje con botón a {}: {}", chatId, e.getMessage());
+        }
+        return null;
+    }
+
+    @Override
+    public void marcarComoLiberado(String chatId, Integer messageId, String textoOriginal, List<Map<String, Object>> entities) {
+        if (messageId == null || !isConfigured(chatId)) return;
+        try {
+            String textoFinal = (textoOriginal == null ? "" : textoOriginal) + "\n\n✅ Liberada";
+
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("chat_id", chatId);
+            payload.put("message_id", messageId);
+            payload.put("text", textoFinal);
+            // Se pasan las entities (bold/code) del mensaje ORIGINAL tal cual —
+            // solo describen el texto de antes, que no se tocó (solo se le
+            // agregó una línea nueva al final) — en vez de parse_mode, para no
+            // arriesgarse a que un caracter especial en la descripción del
+            // banco (ej. un guion bajo) rompa el parseo de Markdown al reenviar.
+            if (entities != null && !entities.isEmpty()) {
+                payload.put("entities", entities);
+            }
+            // reply_markup vacío = Telegram quita el botón (ya cumplió su propósito).
+            Map<String, Object> replyMarkup = new HashMap<>();
+            replyMarkup.put("inline_keyboard", List.of());
+            payload.put("reply_markup", replyMarkup);
+
+            post("/editMessageText", payload);
+            log.info("[CuentasP2P] Mensaje {} marcado como liberado en chat {}", messageId, chatId);
+        } catch (Exception e) {
+            log.error("[CuentasP2P] Error al marcar mensaje {} como liberado: {}", messageId, e.getMessage());
+        }
+    }
+
+    @Override
+    public void answerCallbackQuery(String callbackQueryId) {
+        if (callbackQueryId == null || botToken == null || botToken.isBlank()) return;
+        try {
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("callback_query_id", callbackQueryId);
+            post("/answerCallbackQuery", payload);
+        } catch (Exception e) {
+            log.error("[CuentasP2P] Error al responder callback: {}", e.getMessage());
+        }
     }
 
     private boolean isConfigured(String chatId) {
