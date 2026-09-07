@@ -709,7 +709,17 @@ public class TelegramWebhookService {
             gasto.setDescripcion(descripcion);
             gasto.setMonto(monto);
             gasto.setPagoEfectivo(retirador.getEfectivo());
-            gasto.setIdempotencyKey("telegram-gasto-" + telegramUserId + "-" + System.currentTimeMillis());
+            // Incidente 07/09/2026 (Sebastian, $700 arriendo, duplicado): antes esta
+            // clave usaba System.currentTimeMillis(), que es DISTINTA en cada intento
+            // — así que si Telegram reentrega el mismo update (reintento por timeout),
+            // el candado anti-duplicado de GastoServiceImplement.saveGasto() nunca
+            // detectaba que era el mismo gasto y se creaba (y se descontaba de la
+            // caja) dos veces. pending.messageId() en cambio se mantiene igual durante
+            // todo este intento (se fija al pulsar "Registrar gasto" y solo se borra
+            // de pendingGastos cuando este método termina con éxito), así que una
+            // reentrega del mismo mensaje mientras el intento sigue en curso ahora sí
+            // genera la MISMA clave y el candado la detecta.
+            gasto.setIdempotencyKey("telegram-gasto-" + telegramUserId + "-" + pending.messageId());
             gastoGuardado = gastoService.saveGasto(gasto);
         } catch (Exception e) {
             log.error("[Webhook] Error registrando gasto", e);
