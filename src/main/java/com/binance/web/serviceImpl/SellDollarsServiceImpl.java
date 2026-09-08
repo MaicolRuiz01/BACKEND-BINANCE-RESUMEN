@@ -545,10 +545,18 @@ public class SellDollarsServiceImpl implements SellDollarsService {
 		}
 	}
 
+	/** Ventana hacia atrás (en horas) que usa Bybit en la corrida automática/periódica. Antes el
+	 *  automático llamaba siempre con diasAtras=0 (solo hoy): si el sincronizador se caía o el
+	 *  server se reiniciaba justo el día de una venta, esa venta de Bybit quedaba fuera para
+	 *  siempre. 36h es el mismo margen que ya usa el sync de compras (BuyDollarsServiceImpl). Las
+	 *  demás fuentes (Spot, Binance Pay, TronScan, Solana) siguen mirando solo el día de hoy. */
+	@org.springframework.beans.factory.annotation.Value("${ventas.sync.lookback-horas:36}")
+	private int lookbackHoras;
+
 	@Override
 	@Transactional
 	public void registrarVentasAutomaticamente() {
-	  registrarVentasAutomaticamente(0);
+	  registrarVentasAutomaticamente((int) Math.ceil(Math.max(1, lookbackHoras) / 24.0));
 	}
 
 	/** Igual que el automático, pero permite mirar retiros de Bybit de hasta {diasAtras} días
