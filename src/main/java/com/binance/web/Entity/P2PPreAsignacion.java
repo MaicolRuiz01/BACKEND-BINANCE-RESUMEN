@@ -55,4 +55,14 @@ public class P2PPreAsignacion {
      */
     @Column(name = "estado_manual")
     private String estadoManual;
+
+    /**
+     * Pesos de la venta (en MILES, igual que pesosCop de la orden). Se guarda para poder sumar
+     * en el backend, desde la BD y en una sola consulta, cuánto hay "en curso" por cuenta COP
+     * (verde = RECIBIDO, amarillo = PENDIENTE). Como esta fila se borra en la MISMA transacción
+     * en la que la venta se importa y suma al saldo real, el monto pasa de "en curso" a "saldo"
+     * de un solo golpe: nunca se cuenta dos veces ni desaparece un rato.
+     */
+    @Column(name = "pesos_cop")
+    private Double pesosCop;
 }

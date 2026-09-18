@@ -2,6 +2,7 @@ package com.binance.web.Repository;
 
 import com.binance.web.Entity.P2PPreAsignacion;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -21,4 +22,26 @@ public interface P2PPreAsignacionRepository extends JpaRepository<P2PPreAsignaci
      * así que su fila no se borra nunca por la vía normal.
      */
     List<P2PPreAsignacion> findByCreatedAtBefore(LocalDateTime fecha);
+
+    /** Filas guardadas antes de que existiera la columna pesos_cop (se completan en el poll). */
+    List<P2PPreAsignacion> findByPesosCopIsNull();
+
+    /**
+     * Pesos "en curso" por cuenta COP: ventas pre-asignadas que todavía no se importaron.
+     *
+     * Se excluyen las filas cuya venta ya está registrada: esas ya no están "en curso" (su plata
+     * ya pasó, o debe pasar, por la venta importada), así que sumarlas contaría dos veces.
+     */
+    @Query("""
+        SELECT p.cuentaCop.id AS copId, COALESCE(SUM(p.pesosCop), 0) AS total
+        FROM P2PPreAsignacion p
+        WHERE NOT EXISTS (SELECT 1 FROM SaleP2P s WHERE s.numberOrder = p.orderNumber)
+        GROUP BY p.cuentaCop.id
+    """)
+    List<SumaEnCurso> sumarEnCursoPorCuenta();
+
+    interface SumaEnCurso {
+        Integer getCopId();
+        Double getTotal();
+    }
 }

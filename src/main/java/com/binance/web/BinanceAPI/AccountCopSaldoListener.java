@@ -22,6 +22,16 @@ public class AccountCopSaldoListener {
     @PostPersist
     @PostRemove
     public void onCambio(AccountCop acc) {
+        notificarTrasCommit();
+    }
+
+    /**
+     * Avisa por SSE que cambiaron los saldos, después del commit si hay transacción.
+     * También lo usan las pre-asignaciones: sus montos forman parte del verde/amarillo que se
+     * pinta, así que asignar o marcar "ya cayó" debe refrescar todas las pantallas igual que
+     * un cambio de saldo real.
+     */
+    public static void notificarTrasCommit() {
         final SaldosSseController sse = SaldosSseController.INSTANCE;
         if (sse == null) return;
 

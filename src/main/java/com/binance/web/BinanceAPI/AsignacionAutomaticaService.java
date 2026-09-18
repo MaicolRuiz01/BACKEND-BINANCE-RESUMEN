@@ -86,18 +86,15 @@ public class AsignacionAutomaticaService {
      * transacción (no retiene conexión de BD durante la llamada HTTP lenta); la parte que
      * escribe en BD va en {@link #asignar(List)} (transaccional).
      */
-    public void ejecutar() {
+    /**
+     * @param ordenes las órdenes activas que el poll ACABA de leer. Antes este método volvía a
+     *                pedírselas a Binance en cada tick (el doble de llamadas por cuenta cada 15 s).
+     */
+    public void ejecutar(List<ActiveP2POrderDto> ordenes) {
+        if (ordenes == null || ordenes.isEmpty()) return;
         if (!isActiva()) return;
         if (!enCurso.compareAndSet(false, true)) return; // ya hay un ciclo corriendo
         try {
-            List<ActiveP2POrderDto> ordenes;
-            try {
-                ordenes = activeOrderService.getAllActiveOrders();
-            } catch (Exception e) {
-                log.warn("[AutoAsign] No se pudieron leer las órdenes activas: {}", e.getMessage());
-                return;
-            }
-            if (ordenes == null || ordenes.isEmpty()) return;
             self.asignar(ordenes);
         } catch (Exception e) {
             log.warn("[AutoAsign] Error en el ciclo de asignación automática: {}", e.getMessage());
@@ -141,7 +138,10 @@ public class AsignacionAutomaticaService {
             }
 
             try {
-                activeOrderService.upsertPreAsignacion(o.getOrderNumber(), elegida.getId(), o.getAccountBinance());
+                // El operador pudo asignarla a mano entre el poll y este momento: no pisarla.
+                if (activeOrderService.tienePreAsignacion(o.getOrderNumber())) continue;
+                activeOrderService.upsertPreAsignacion(o.getOrderNumber(), elegida.getId(),
+                        o.getAccountBinance(), o.getPesosCop());
             } catch (Exception e) {
                 log.warn("[AutoAsign] No se pudo asignar la orden {} a {}: {}",
                         o.getOrderNumber(), elegida.getName(), e.getMessage());

@@ -65,7 +65,12 @@ public class PreAsignacionLimpiezaScheduler {
             // Órdenes que siguen vivas en Binance: esas no se tocan aunque lleven días.
             Set<String> activas = new HashSet<>();
             try {
-                for (ActiveP2POrderDto o : activeOrderService.getAllActiveOrders()) {
+                P2PActiveOrderService.ConsultaActivas consulta = activeOrderService.consultarActivas();
+                if (!consulta.cuentasConError().isEmpty()) {
+                    log.warn("[PreAsignLimpieza] Binance falló en {}; se omite el ciclo.", consulta.cuentasConError());
+                    return;
+                }
+                for (ActiveP2POrderDto o : consulta.ordenes()) {
                     activas.add(o.getOrderNumber());
                 }
             } catch (Exception e) {

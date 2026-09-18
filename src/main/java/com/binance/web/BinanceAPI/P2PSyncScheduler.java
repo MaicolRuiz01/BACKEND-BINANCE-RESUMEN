@@ -60,23 +60,39 @@ public class P2PSyncScheduler {
     public void pollActiveOrders() {
         try {
             var changed = activeOrderService.detectStatusChanges();
-            if (!changed.isEmpty()) {
-                sseController.broadcastCambioOrdenesActivas(changed.size());
-                log.info("[ActivePoll] {} orden(es) cambiaron de estado", changed.size());
-            }
-            // Si alguna orden se completó (salió del listado activo), importar YA
-            // para sumar el saldo a la cuenta COP sin esperar el sync de 3 min.
-            if (activeOrderService.huboCompletadasEnUltimoPoll()) {
-                int nuevas = syncService.syncAllAccounts();
-                if (nuevas > 0) {
-                    sseController.broadcastNuevasVentas(nuevas);
-                    log.info("[ActivePoll] Import inmediato tras completar: {} venta(s) nueva(s)", nuevas);
+            var desaparecidas = activeOrderService.getDesaparecidasUltimoPoll();
+
+            // Si alguna orden salió del listado activo (se completó o canceló), importar YA solo
+            // esa cuenta y solo desde un poco antes de que se creó la orden: una página de Binance
+            // en vez de 36 h de todas las cuentas. Si hay otra importación corriendo, el pedido
+            // queda en cola y se ejecuta apenas termine (antes se descartaba).
+            if (!desaparecidas.isEmpty()) {
+                java.util.Map<String, Long> desdePorCuenta = new java.util.HashMap<>();
+                for (var d : desaparecidas) {
+                    desdePorCuenta.merge(d.accountBinance(), d.createTimeMs() - 2 * 60_000L, Math::min);
                 }
+                int nuevas = 0;
+                for (var e : desdePorCuenta.entrySet()) {
+                    nuevas += syncService.importarOrdenesRecientes(e.getKey(), e.getValue());
+                }
+                log.info("[ActivePoll] {} orden(es) salieron del listado → import rápido: {} venta(s) nueva(s)",
+                        desaparecidas.size(), nuevas);
+                if (nuevas > 0) sseController.broadcastNuevasVentas(nuevas);
+            }
+
+            // Avisar a las pantallas. Antes solo se avisaba cuando una orden CAMBIABA de estado;
+            // cuando desaparecía (se completó) no, y la pantalla la seguía mostrando hasta 15 s
+            // mientras el saldo real ya la incluía → la plata se veía contada dos veces.
+            // Se avisa DESPUÉS de importar para que la pantalla traiga órdenes y saldo ya al día.
+            int avisos = changed.size() + desaparecidas.size();
+            if (avisos > 0) {
+                sseController.broadcastCambioOrdenesActivas(avisos);
+                log.info("[ActivePoll] {} cambio(s) de estado, {} orden(es) salieron", changed.size(), desaparecidas.size());
             }
 
             // Asignación automática de cuentas COP a las ventas en curso (solo si el
-            // interruptor está encendido; el propio método no hace nada si está apagado).
-            asignacionService.ejecutar();
+            // interruptor está encendido). Reutiliza las órdenes que el poll ya leyó.
+            asignacionService.ejecutar(activeOrderService.getOrdenesUltimoPoll());
         } catch (Exception e) {
             log.warn("[ActivePoll] Error en polling de órdenes activas: {}", e.getMessage());
         }

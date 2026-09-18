@@ -219,9 +219,10 @@ public class MovimientosConectividadMonitor {
     }
 
     /**
-     * Ventas P2P en curso (aún no confirmadas/"RECIBIDO") pre-asignadas a una
-     * cuenta puntual — se usan para que la alerta de caída diga exactamente
-     * qué se quedó pendiente, en vez de solo avisar que la cuenta se cayó.
+     * Ventas P2P en curso pre-asignadas a una cuenta puntual — se usan para que
+     * la alerta de caída diga exactamente qué se quedó pendiente, en vez de solo
+     * avisar que la cuenta se cayó. (Antes se excluían las marcadas "ya cayó",
+     * pero esos botones se quitaron: toda venta en curso cuenta como pendiente.)
      * Best-effort: si la consulta a Binance falla acá, no debe tumbar la
      * alerta de conectividad en sí (esa es la parte importante).
      */
@@ -231,8 +232,7 @@ public class MovimientosConectividadMonitor {
             List<ActiveP2POrderDto> todas = p2pActiveOrderService.getAllActiveOrders();
             List<ActiveP2POrderDto> resultado = new ArrayList<>();
             for (ActiveP2POrderDto orden : todas) {
-                if (cuentaCopId.equals(orden.getPreAsignadoCopId())
-                        && !"RECIBIDO".equalsIgnoreCase(orden.getEstadoManual())) {
+                if (cuentaCopId.equals(orden.getPreAsignadoCopId())) {
                     resultado.add(orden);
                 }
             }

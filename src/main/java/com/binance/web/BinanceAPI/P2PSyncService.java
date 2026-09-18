@@ -43,6 +43,22 @@ public class P2PSyncService {
     private final java.util.concurrent.atomic.AtomicBoolean syncEnCurso =
             new java.util.concurrent.atomic.AtomicBoolean(false);
 
+    /**
+     * COLA de importaciones pedidas mientras otra estaba corriendo.
+     *
+     * Antes, si el candado estaba tomado, la petición simplemente se descartaba. El caso típico:
+     * la sync completa arranca, consulta Binance (la venta aún está en curso), la venta se completa,
+     * el poll de 15 s pide importarla YA… y como el candado está tomado, se pierde. La venta
+     * esperaba a la siguiente sync completa y el saldo COP tardaba minutos en subir.
+     *
+     * Ahora la petición queda anotada y quien tiene el candado la ejecuta apenas termina.
+     */
+    private final java.util.concurrent.atomic.AtomicBoolean completaPendiente =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+    /** Importaciones rápidas pendientes: cuenta Binance → desde qué momento (ms) pedir. */
+    private final java.util.concurrent.ConcurrentHashMap<String, Long> rapidasPendientes =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
     @Autowired private BinanceService binanceService;
     @Autowired private SaleP2PRepository saleP2PRepository;
     @Autowired private AccountBinanceRepository accountBinanceRepository;
@@ -70,13 +86,65 @@ public class P2PSyncService {
      * @return número total de ventas P2P nuevas encontradas y guardadas
      */
     public int syncAllAccounts() {
-        // Si ya hay una sincronización en curso, no arrancamos otra (evita la carrera
-        // que producía "Duplicate entry" al insertar la misma orden dos veces).
-        if (!syncEnCurso.compareAndSet(false, true)) {
-            log.debug("[Sync] Ya hay una sincronización en curso; se omite esta ejecución.");
-            return 0;
+        completaPendiente.set(true);
+        return procesarPendientes();
+    }
+
+    /**
+     * Importación RÁPIDA de una sola cuenta, pidiendo a Binance solo desde {@code desdeMs}.
+     *
+     * La usa el poll de 15 s cuando una orden en curso desaparece (se completó o se canceló):
+     * como ya sabemos de qué cuenta es y a qué hora se creó, no hace falta la sync completa
+     * (36 h de todas las cuentas, varias páginas cada una) — basta una página con unas pocas
+     * órdenes. Pasa de segundos a una fracción de segundo.
+     *
+     * @return ventas nuevas guardadas (0 si quedó en cola detrás de otra importación)
+     */
+    public int importarOrdenesRecientes(String cuentaBinance, long desdeMs) {
+        if (cuentaBinance == null || cuentaBinance.isBlank()) return 0;
+        rapidasPendientes.merge(cuentaBinance, desdeMs, Math::min);
+        return procesarPendientes();
+    }
+
+    private boolean hayPendientes() {
+        return completaPendiente.get() || !rapidasPendientes.isEmpty();
+    }
+
+    /**
+     * Ejecuta todo lo que haya en cola. Si otra importación ya tiene el candado, no espera:
+     * deja su pedido anotado y vuelve — el que tiene el candado lo procesa al terminar.
+     */
+    private int procesarPendientes() {
+        int total = 0;
+        while (hayPendientes()) {
+            if (!syncEnCurso.compareAndSet(false, true)) {
+                log.debug("[Sync] Importación en curso; el pedido quedó en cola.");
+                return total;
+            }
+            try {
+                while (hayPendientes()) {
+                    if (completaPendiente.getAndSet(false)) {
+                        // La completa cubre todas las cuentas → las rápidas pedidas ANTES de
+                        // arrancarla quedan incluidas. Las que lleguen durante, se hacen después.
+                        rapidasPendientes.clear();
+                        total += ejecutarCompleta();
+                        continue;
+                    }
+                    for (String cuenta : new ArrayList<>(rapidasPendientes.keySet())) {
+                        Long desde = rapidasPendientes.remove(cuenta);
+                        if (desde != null) total += ejecutarRapida(cuenta, desde);
+                    }
+                }
+            } finally {
+                syncEnCurso.set(false);
+            }
+            // Si alguien anotó un pedido justo entre la última revisión y soltar el candado,
+            // el while de afuera lo detecta y lo procesa (o lo procesa quien tome el candado).
         }
-        try {
+        return total;
+    }
+
+    private int ejecutarCompleta() {
         List<AccountBinance> accounts = accountBinanceRepository.findByTipoAndActivaTrue("BINANCE");
         int totalNew = 0;
 
@@ -92,10 +160,25 @@ public class P2PSyncService {
                 log.warn("[Sync] Error en cuenta {}: {}", account.getName(), e.getMessage());
             }
         }
-
         return totalNew;
-        } finally {
-            syncEnCurso.set(false);
+    }
+
+    private int ejecutarRapida(String cuentaBinance, long desdeMs) {
+        AccountBinance account = accountBinanceRepository.findByName(cuentaBinance);
+        if (account == null || account.getApiKey() == null || account.getApiSecret() == null) {
+            log.warn("[Sync] Importación rápida: cuenta Binance '{}' no encontrada o sin llaves", cuentaBinance);
+            return 0;
+        }
+        long t0 = System.currentTimeMillis();
+        try {
+            int nuevas = procesarRango(account, desdeMs, Instant.now().toEpochMilli());
+            log.info("[Sync] Importación rápida {} → {} venta(s) nueva(s) en {} ms",
+                    cuentaBinance, nuevas, System.currentTimeMillis() - t0);
+            return nuevas;
+        } catch (Exception e) {
+            log.warn("[Sync] Importación rápida falló en {}: {}", cuentaBinance, e.getMessage());
+            // No se pierde: la próxima sync completa la vuelve a buscar.
+            return 0;
         }
     }
 
@@ -126,6 +209,15 @@ public class P2PSyncService {
         long endMs   = Instant.now().toEpochMilli();
         long startMs = resolveStartMs(account);
 
+        int newCount = procesarRango(account, startMs, endMs);
+
+        // Siempre actualiza el timestamp aunque no haya habido órdenes nuevas
+        self.actualizarEstadoSync(account, endMs);
+        return newCount;
+    }
+
+    /** Lee de Binance las ventas de la cuenta creadas en [startMs, endMs] y guarda las completadas. */
+    private int procesarRango(AccountBinance account, long startMs, long endMs) throws Exception {
         // ── 1) LECTURA a Binance, sin transacción abierta ──
         String json = binanceService.getP2POrdersInRange(account.getName(), startMs, endMs, "SELL");
         JsonNode root = mapper.readTree(json);
@@ -142,6 +234,15 @@ public class P2PSyncService {
         // Si una orden falla, las demás igual se guardan (antes se perdía el lote completo).
         if (data.isArray()) {
             for (JsonNode obj : data) {
+                if (isCanceledSell(obj)) {
+                    try {
+                        self.limpiarPreAsignacionCancelada(obj.path("orderNumber").asText());
+                    } catch (Exception e) {
+                        log.warn("[Sync] No se pudo limpiar la pre-asignación de la orden cancelada {}: {}",
+                                obj.path("orderNumber").asText(), e.getMessage());
+                    }
+                    continue;
+                }
                 if (!isValidSell(obj)) continue;
                 try {
                     if (self.persistirVenta(obj, account)) newCount++;
@@ -151,10 +252,42 @@ public class P2PSyncService {
                 }
             }
         }
-
-        // Siempre actualiza el timestamp aunque no haya habido órdenes nuevas
-        self.actualizarEstadoSync(account, endMs);
         return newCount;
+    }
+
+    /**
+     * Una orden CANCELADA nunca va a importarse, así que su pre-asignación ya no tiene razón de
+     * ser. Se borra en cuanto se ve la cancelación: si no, su monto seguiría sumando en el
+     * verde/amarillo de la cuenta COP hasta que la limpieza de 48 h la encontrara.
+     */
+    @Transactional
+    public void limpiarPreAsignacionCancelada(String orderNumber) {
+        if (orderNumber == null || orderNumber.isBlank()) return;
+        preAsignacionRepository.findByOrderNumber(orderNumber).ifPresent(pre -> {
+            if (saleP2PRepository.existsByNumberOrder(orderNumber)) return;
+            preAsignacionRepository.delete(pre);
+            log.info("[PreAsign] Orden {} cancelada → pre-asignación eliminada", orderNumber);
+            com.binance.web.BinanceAPI.AccountCopSaldoListener.notificarTrasCommit();
+        });
+    }
+
+    /**
+     * Carrera: el operador pre-asigna JUSTO después de que la venta ya se importó sin asignar.
+     * Antes la pre-asignación quedaba huérfana y la venta sin cuenta (plata en el banco pero no en
+     * el saldo). Ahora, si la venta ya existe sin asignar, se le aplica la pre-asignación en el acto.
+     * Debe llamarse DENTRO de la transacción que guardó la pre-asignación.
+     */
+    @Transactional
+    public void aplicarPreAsignacionSiYaSeImporto(String orderNumber) {
+        saleP2PRepository.findFirstByNumberOrder(orderNumber).ifPresent(sale -> {
+            if (Boolean.TRUE.equals(sale.getAsignado())) {
+                // Ya se asignó por otro lado: la pre-asignación sobra.
+                preAsignacionRepository.deleteByOrderNumber(orderNumber);
+                log.info("[PreAsign] Orden {} ya estaba importada y asignada → pre-asignación descartada", orderNumber);
+                return;
+            }
+            autoAssign(sale);
+        });
     }
 
     /**
@@ -217,6 +350,13 @@ public class P2PSyncService {
     /** Filtra: solo ventas USDT completadas. */
     private boolean isValidSell(JsonNode obj) {
         return "COMPLETED".equalsIgnoreCase(obj.path("orderStatus").asText(""))
+                && "SELL".equalsIgnoreCase(obj.path("tradeType").asText(""))
+                && "USDT".equalsIgnoreCase(obj.path("asset").asText(""));
+    }
+
+    /** Venta USDT cancelada (Binance usa CANCELLED y CANCELLED_BY_SYSTEM). */
+    private boolean isCanceledSell(JsonNode obj) {
+        return obj.path("orderStatus").asText("").toUpperCase().startsWith("CANCEL")
                 && "SELL".equalsIgnoreCase(obj.path("tradeType").asText(""))
                 && "USDT".equalsIgnoreCase(obj.path("asset").asText(""));
     }

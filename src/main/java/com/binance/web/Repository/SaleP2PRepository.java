@@ -25,6 +25,8 @@ public interface SaleP2PRepository extends JpaRepository<SaleP2P, Integer> {
 	
 	boolean existsByNumberOrder(String numberOrder);
 
+	Optional<SaleP2P> findFirstByNumberOrder(String numberOrder);
+
     @Query("SELECT s.numberOrder FROM SaleP2P s WHERE s.numberOrder IS NOT NULL")
     Set<String> findAllOrderNumbers();
 

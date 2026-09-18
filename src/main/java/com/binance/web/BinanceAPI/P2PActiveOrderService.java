@@ -45,6 +45,9 @@ public class P2PActiveOrderService {
     @Autowired private AccountBinanceRepository accountBinanceRepository;
     @Autowired private P2PPreAsignacionRepository preAsignacionRepository;
     @Autowired private AccountCopRepository accountCopRepository;
+    /** @Lazy: evita una referencia circular al arrancar (el sync no depende de este servicio,
+     *  pero la cadena de servicios que usa sí podría). */
+    @Autowired @org.springframework.context.annotation.Lazy private P2PSyncService syncService;
 
     /**
      * Cache en memoria del último estado conocido por orderNumber.
@@ -64,6 +67,24 @@ public class P2PActiveOrderService {
     private volatile boolean completadasUltimoPoll = false;
     public boolean huboCompletadasEnUltimoPoll() { return completadasUltimoPoll; }
 
+    /** Cuenta Binance y hora de creación de cada orden activa conocida (key = orderNumber).
+     *  Cuando una orden desaparece, con esto se sabe qué cuenta y qué ventana importar. */
+    private final Map<String, OrdenDesaparecida> infoConocida = new ConcurrentHashMap<>();
+
+    /** Órdenes que salieron del listado activo en el último poll (se completaron o cancelaron). */
+    private volatile List<OrdenDesaparecida> desaparecidasUltimoPoll = List.of();
+    public List<OrdenDesaparecida> getDesaparecidasUltimoPoll() { return desaparecidasUltimoPoll; }
+
+    /** Órdenes activas leídas en el último poll (vacío si ese tick no consultó Binance).
+     *  La asignación automática las reutiliza en vez de volver a pedírselas a Binance. */
+    private volatile List<ActiveP2POrderDto> ordenesUltimoPoll = List.of();
+    public List<ActiveP2POrderDto> getOrdenesUltimoPoll() { return ordenesUltimoPoll; }
+
+    public record OrdenDesaparecida(String orderNumber, String accountBinance, long createTimeMs) {}
+
+    /** Resultado de consultar todas las cuentas: las órdenes y qué cuentas fallaron. */
+    public record ConsultaActivas(List<ActiveP2POrderDto> ordenes, Set<String> cuentasConError) {}
+
     // ─────────────────────────────────────────────────────────────
     // Consulta principal
     // ─────────────────────────────────────────────────────────────
@@ -73,17 +94,28 @@ public class P2PActiveOrderService {
      * enriquecidas con la pre-asignación si existe.
      */
     public List<ActiveP2POrderDto> getAllActiveOrders() {
+        return consultarActivas().ordenes();
+    }
+
+    /**
+     * Igual que {@link #getAllActiveOrders()} pero además informa qué cuentas fallaron.
+     * Importa para el poll: si una cuenta falla, sus órdenes NO desaparecieron — simplemente
+     * no se pudieron leer. Tratarlas como completadas disparaba importaciones y avisos falsos.
+     */
+    public ConsultaActivas consultarActivas() {
         List<AccountBinance> accounts = accountBinanceRepository.findByTipoAndActivaTrue("BINANCE");
+        Set<String> conError = ConcurrentHashMap.newKeySet();
 
         // Antes se consultaba Binance cuenta por cuenta EN SECUENCIA (se sumaban todas las esperas).
         // Ahora en PARALELO: el tiempo total pasa a ser ~el de la cuenta más lenta, no la suma.
-        return accounts.parallelStream()
+        List<ActiveP2POrderDto> ordenes = accounts.parallelStream()
                 .filter(a -> a.getApiKey() != null && a.getApiSecret() != null)
                 .flatMap(a -> {
                     try {
                         return getActiveOrdersForAccount(a.getName()).stream();
                     } catch (Exception e) {
                         log.warn("[ActiveOrders] Error en cuenta {}: {}", a.getName(), e.getMessage());
+                        conError.add(a.getName());
                         return java.util.stream.Stream.empty();
                     }
                 })
@@ -108,6 +140,7 @@ public class P2PActiveOrderService {
                         .thenComparing(o -> o.getOrderNumber() == null ? "" : o.getOrderNumber())
                         .reversed())
                 .collect(java.util.stream.Collectors.toList());
+        return new ConsultaActivas(ordenes, conError);
     }
 
     /**
@@ -122,8 +155,9 @@ public class P2PActiveOrderService {
         JsonNode root = mapper.readTree(json);
 
         if (root.has("error")) {
-            log.warn("[ActiveOrders] Binance error {}: {}", accountName, root.get("error").asText());
-            return List.of();
+            // Se lanza en vez de devolver una lista vacía: "Binance falló" y "no hay órdenes" son
+            // cosas distintas, y confundirlas hacía creer que las órdenes se habían completado.
+            throw new IllegalStateException("Binance error en " + accountName + ": " + root.get("error").asText());
         }
 
         List<ActiveP2POrderDto> orders = new ArrayList<>();
@@ -147,8 +181,12 @@ public class P2PActiveOrderService {
     // Pre-asignación
     // ─────────────────────────────────────────────────────────────
 
+    /**
+     * @param pesosCop monto de la orden en MILES (puede ser null: se conserva el que ya tenía,
+     *                 o lo completa el poll). Se guarda para sumar el verde/amarillo desde la BD.
+     */
     @Transactional
-    public void upsertPreAsignacion(String orderNumber, Integer copId, String accountBinance) {
+    public void upsertPreAsignacion(String orderNumber, Integer copId, String accountBinance, Double pesosCop) {
         AccountCop cop = accountCopRepository.findById(copId)
                 .orElseThrow(() -> new IllegalArgumentException("Cuenta COP no encontrada: " + copId));
 
@@ -158,17 +196,47 @@ public class P2PActiveOrderService {
         pre.setOrderNumber(orderNumber);
         pre.setCuentaCop(cop);
         pre.setAccountBinance(accountBinance);
+        if (pesosCop != null) pre.setPesosCop(pesosCop);
         pre.setUpdatedAt(LocalDateTime.now(ZONE));
         if (pre.getCreatedAt() == null) pre.setCreatedAt(LocalDateTime.now(ZONE));
 
-        preAsignacionRepository.save(pre);
+        preAsignacionRepository.saveAndFlush(pre);
         log.info("[PreAsign] {} → cuenta COP {} ({})", orderNumber, cop.getName(), copId);
+
+        // Si la venta ya se importó (se completó justo antes de asignar), aplicarla ya.
+        syncService.aplicarPreAsignacionSiYaSeImporto(orderNumber);
+        AccountCopSaldoListener.notificarTrasCommit();
+    }
+
+    /** true si la orden ya tiene pre-asignación guardada (la asignación automática no la pisa). */
+    public boolean tienePreAsignacion(String orderNumber) {
+        return preAsignacionRepository.existsByOrderNumber(orderNumber);
     }
 
     @Transactional
     public void deletePreAsignacion(String orderNumber) {
         preAsignacionRepository.deleteByOrderNumber(orderNumber);
         log.info("[PreAsign] Removida pre-asignación de {}", orderNumber);
+        AccountCopSaldoListener.notificarTrasCommit();
+    }
+
+    /** Completa pesos_cop en filas viejas (guardadas antes de existir la columna). */
+    private void completarMontosFaltantes(List<ActiveP2POrderDto> activas) {
+        try {
+            List<P2PPreAsignacion> sinMonto = preAsignacionRepository.findByPesosCopIsNull();
+            if (sinMonto.isEmpty()) return;
+            Map<String, Double> montos = new HashMap<>();
+            for (ActiveP2POrderDto o : activas) montos.put(o.getOrderNumber(), o.getPesosCop());
+            for (P2PPreAsignacion pre : sinMonto) {
+                Double m = montos.get(pre.getOrderNumber());
+                if (m != null) {
+                    pre.setPesosCop(m);
+                    preAsignacionRepository.save(pre);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[PreAsign] No se pudieron completar montos faltantes: {}", e.getMessage());
+        }
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -190,22 +258,38 @@ public class P2PActiveOrderService {
             pollSkipCount++;
             if (pollSkipCount < MAX_SKIP) {
                 log.debug("[ActiveOrders] Sin órdenes activas — omitiendo poll {}/{}", pollSkipCount, MAX_SKIP);
+                this.desaparecidasUltimoPoll = List.of();
+                this.ordenesUltimoPoll = List.of();
+                this.completadasUltimoPoll = false;
                 return List.of();
             }
             pollSkipCount = 0; // llegamos al tick real, hacemos la llamada
         }
 
-        List<ActiveP2POrderDto> allActive = getAllActiveOrders();
+        ConsultaActivas consulta = consultarActivas();
+        List<ActiveP2POrderDto> allActive = consulta.ordenes();
+        Set<String> cuentasConError = consulta.cuentasConError();
         List<ActiveP2POrderDto> changed   = new ArrayList<>();
 
         Set<String> currentOrderNumbers = new HashSet<>();
 
         for (ActiveP2POrderDto dto : allActive) {
             currentOrderNumbers.add(dto.getOrderNumber());
+            infoConocida.put(dto.getOrderNumber(), new OrdenDesaparecida(
+                    dto.getOrderNumber(), dto.getAccountBinance(), parseCreateTime(dto.getCreateTime())));
             String prev = lastKnownStatus.get(dto.getOrderNumber());
             if (!dto.getStatus().equals(prev)) {
                 changed.add(dto);
                 lastKnownStatus.put(dto.getOrderNumber(), dto.getStatus());
+            }
+        }
+
+        // Las órdenes de una cuenta que FALLÓ no desaparecieron: no se pudieron leer.
+        // Se conservan tal cual hasta que la cuenta vuelva a responder.
+        for (String on : lastKnownStatus.keySet()) {
+            OrdenDesaparecida info = infoConocida.get(on);
+            if (info != null && cuentasConError.contains(info.accountBinance())) {
+                currentOrderNumbers.add(on);
             }
         }
 
@@ -214,8 +298,19 @@ public class P2PActiveOrderService {
         desaparecidas.removeAll(currentOrderNumbers);
         this.completadasUltimoPoll = !desaparecidas.isEmpty();
 
+        List<OrdenDesaparecida> detalle = new ArrayList<>();
+        for (String on : desaparecidas) {
+            OrdenDesaparecida info = infoConocida.get(on);
+            if (info != null) detalle.add(info);
+        }
+        this.desaparecidasUltimoPoll = detalle;
+        this.ordenesUltimoPoll = allActive;
+
         // Limpiar órdenes que ya no están activas del cache
         lastKnownStatus.keySet().retainAll(currentOrderNumbers);
+        infoConocida.keySet().retainAll(currentOrderNumbers);
+
+        completarMontosFaltantes(allActive);
 
         firstPollDone = true;
         // Si volvieron a aparecer órdenes, salimos del modo slow
@@ -247,6 +342,16 @@ public class P2PActiveOrderService {
     // ─────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────
+
+    /** "yyyy-MM-dd HH:mm:ss" (hora Bogotá) → epoch ms. Si no se puede leer, 4 h atrás (la ventana activa). */
+    private long parseCreateTime(String createTime) {
+        try {
+            if (createTime != null && !createTime.isBlank()) {
+                return LocalDateTime.parse(createTime, FMT).atZone(ZONE).toInstant().toEpochMilli();
+            }
+        } catch (Exception ignored) { }
+        return Instant.now().toEpochMilli() - (4L * 60 * 60 * 1000);
+    }
 
     private ActiveP2POrderDto buildDto(JsonNode obj, String accountName) {
         String orderNumber   = obj.path("orderNumber").asText();
@@ -289,6 +394,7 @@ public class P2PActiveOrderService {
         pre.setEstadoManual(norm);
         pre.setUpdatedAt(LocalDateTime.now(ZONE));
         preAsignacionRepository.save(pre);
+        AccountCopSaldoListener.notificarTrasCommit();
     }
 
     private String statusLabel(String status) {

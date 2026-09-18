@@ -20,6 +20,7 @@ public class P2PActiveOrderController {
 
     @Autowired private P2PActiveOrderService activeOrderService;
     @Autowired private AsignacionAutomaticaService asignacionService;
+    @Autowired private SaldosEnCursoService saldosEnCursoService;
 
     // ─────────────────────────────────────────────────────────────
     // Órdenes activas
@@ -46,6 +47,16 @@ public class P2PActiveOrderController {
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
+    }
+
+    /**
+     * GET /api/p2p/saldos-en-curso
+     * Por cuenta COP: saldo real + lo "ya cayó" (verde) + lo pendiente (amarillo) de las ventas en
+     * curso, calculado en una sola lectura de la BD para que nunca se cuente doble ni desaparezca.
+     */
+    @GetMapping("/saldos-en-curso")
+    public ResponseEntity<List<SaldosEnCursoService.SaldoEnCurso>> getSaldosEnCurso() {
+        return ResponseEntity.ok(saldosEnCursoService.calcular());
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -80,6 +91,8 @@ public class P2PActiveOrderController {
         String orderNumber    = (String) body.get("orderNumber");
         Integer copId         = (Integer) body.get("copId");
         String accountBinance = (String) body.get("accountBinance");
+        // Monto de la orden (miles). Opcional: si no viene, se conserva el guardado o lo completa el poll.
+        Double pesosCop       = body.get("pesosCop") instanceof Number n ? n.doubleValue() : null;
 
         if (orderNumber == null || copId == null || accountBinance == null) {
             // Se detalla QUÉ falta: antes solo decía "faltan campos" y no había forma de saber
@@ -93,14 +106,14 @@ public class P2PActiveOrderController {
         }
 
         try {
-            activeOrderService.upsertPreAsignacion(orderNumber, copId, accountBinance);
+            activeOrderService.upsertPreAsignacion(orderNumber, copId, accountBinance, pesosCop);
             return ResponseEntity.ok(Map.of("mensaje", "Pre-asignación guardada"));
         } catch (org.springframework.dao.DataIntegrityViolationException dup) {
             // CARRERA: otro hilo (o el auto-sync) insertó la misma orden a la vez → chocó el unique.
             // Reintentamos: ahora la fila YA existe, así el upsert entra por la rama de UPDATE
             // y no vuelve a insertar. Esto evita el error "Duplicate entry" al asignar órdenes.
             try {
-                activeOrderService.upsertPreAsignacion(orderNumber, copId, accountBinance);
+                activeOrderService.upsertPreAsignacion(orderNumber, copId, accountBinance, pesosCop);
                 return ResponseEntity.ok(Map.of("mensaje", "Pre-asignación guardada"));
             } catch (Exception e2) {
                 log.warn("[PreAsign] Reintento tras duplicado: {}", e2.getMessage());
@@ -117,7 +130,7 @@ public class P2PActiveOrderController {
             for (int intento = 1; intento <= 2; intento++) {
                 try {
                     Thread.sleep(300L * intento);
-                    activeOrderService.upsertPreAsignacion(orderNumber, copId, accountBinance);
+                    activeOrderService.upsertPreAsignacion(orderNumber, copId, accountBinance, pesosCop);
                     log.info("[PreAsign] Orden {} guardada en el reintento {} tras bloqueo", orderNumber, intento);
                     return ResponseEntity.ok(Map.of("mensaje", "Pre-asignación guardada"));
                 } catch (InterruptedException ie) {
