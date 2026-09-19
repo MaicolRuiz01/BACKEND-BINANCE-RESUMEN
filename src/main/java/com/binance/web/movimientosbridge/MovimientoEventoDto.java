@@ -62,11 +62,11 @@ public class MovimientoEventoDto {
      * (emoji rojo/verde, fecha, descripcion, monto — uno por linea) con el
      * mismo formato exacto del primer mensaje que manda iniciar.py al chat
      * de Movimientos (ver _esperar_y_notificar en iniciar.py). Desde el
-     * 18/09/2026 trae TODOS los movimientos del dia (ya no los ultimos 8),
-     * truncado por caracteres (no por cantidad) en pochonance_bridge.py →
-     * _formatear_movimientos_texto para no superar el limite de 4096 de
-     * Telegram al concatenarse con el encabezado que arma Java (ver
-     * formatearConexionExitosa) — el excedente se indica con "... y N mas".
+     * 18/09/2026 trae TODOS los movimientos del dia sin truncar (antes se
+     * cortaba a 2500 caracteres con "... y N mas" y se perdian movimientos
+     * reales — corregido a pedido de Milton). Si el mensaje final no cabe en
+     * un solo mensaje de Telegram, Java lo parte en varios envios (ver
+     * MovimientosBridgeServiceImpl.partirEnBloques) — nunca se descarta nada.
      * Se arma en Python, no en Java, para no duplicar la logica de formato
      * de fecha/monto en dos lenguajes distintos — Python sigue siendo la
      * unica fuente de verdad de como se ve un movimiento.
