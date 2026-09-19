@@ -27,21 +27,26 @@ public interface P2PPreAsignacionRepository extends JpaRepository<P2PPreAsignaci
     List<P2PPreAsignacion> findByPesosCopIsNull();
 
     /**
-     * Pesos "en curso" por cuenta COP: ventas pre-asignadas que todavía no se importaron.
+     * Pre-asignaciones cuya venta todavía no se importó (candidatas a "en curso").
      *
      * Se excluyen las filas cuya venta ya está registrada: esas ya no están "en curso" (su plata
      * ya pasó, o debe pasar, por la venta importada), así que sumarlas contaría dos veces.
+     * OJO: no todas las que devuelve siguen en curso — puede haber huérfanas (órdenes canceladas o
+     * vencidas). El filtro final contra las órdenes activas lo hace SaldosEnCursoService.
      */
     @Query("""
-        SELECT p.cuentaCop.id AS copId, COALESCE(SUM(p.pesosCop), 0) AS total
+        SELECT p.cuentaCop.id AS copId, p.cuentaCop.name AS copNombre, p.orderNumber AS orderNumber,
+               p.pesosCop AS pesosCop, p.createdAt AS createdAt
         FROM P2PPreAsignacion p
         WHERE NOT EXISTS (SELECT 1 FROM SaleP2P s WHERE s.numberOrder = p.orderNumber)
-        GROUP BY p.cuentaCop.id
     """)
-    List<SumaEnCurso> sumarEnCursoPorCuenta();
+    List<PreSinImportar> findSinImportar();
 
-    interface SumaEnCurso {
+    interface PreSinImportar {
         Integer getCopId();
-        Double getTotal();
+        String getCopNombre();
+        String getOrderNumber();
+        Double getPesosCop();
+        LocalDateTime getCreatedAt();
     }
 }

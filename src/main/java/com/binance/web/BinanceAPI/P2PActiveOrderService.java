@@ -82,6 +82,37 @@ public class P2PActiveOrderService {
 
     public record OrdenDesaparecida(String orderNumber, String accountBinance, long createTimeMs) {}
 
+    /**
+     * Última vez (ms) que cada orden se vio ACTIVA en Binance, por cualquier consulta (poll de 15 s,
+     * pantalla, asignación automática…). Sirve para que el saldo amarillo cuente SOLO pre-asignaciones
+     * de órdenes que de verdad están en curso, y no filas huérfanas (órdenes canceladas o vencidas
+     * que nunca se importaron) que inflaban el amarillo de una cuenta sin ninguna venta a la vista.
+     */
+    private final Map<String, Long> vistaActivaEn = new ConcurrentHashMap<>();
+    /** Órdenes que salieron del listado activo y esperan su importación (ms en que salieron). */
+    private final Map<String, Long> esperandoImportacion = new ConcurrentHashMap<>();
+    /** Una orden cuenta como "en curso" si se vio activa hace menos de esto… */
+    private static final long VIGENCIA_VISTA_MS = 2 * 60_000L;
+    /** …o si salió del listado hace menos de esto y todavía no se importó. */
+    private static final long VIGENCIA_ESPERA_IMPORT_MS = 30 * 60_000L;
+
+    /**
+     * Órdenes cuya pre-asignación debe sumar en el amarillo: activas ahora mismo, o recién
+     * completadas esperando importarse (su monto pasa al saldo real al importarse).
+     */
+    public Set<String> ordenesQueCuentanEnCurso() {
+        long ahora = Instant.now().toEpochMilli();
+        vistaActivaEn.values().removeIf(t -> ahora - t > VIGENCIA_ESPERA_IMPORT_MS);
+        esperandoImportacion.values().removeIf(t -> ahora - t > VIGENCIA_ESPERA_IMPORT_MS);
+
+        Set<String> out = new HashSet<>();
+        vistaActivaEn.forEach((on, t) -> { if (ahora - t <= VIGENCIA_VISTA_MS) out.add(on); });
+        out.addAll(esperandoImportacion.keySet());
+        // Órdenes de cuentas que fallaron: siguen en el cache del poll aunque no se hayan podido leer.
+        out.addAll(lastKnownStatus.keySet());
+        return out;
+    }
+
     /** Resultado de consultar todas las cuentas: las órdenes y qué cuentas fallaron. */
     public record ConsultaActivas(List<ActiveP2POrderDto> ordenes, Set<String> cuentasConError) {}
 
@@ -140,6 +171,11 @@ public class P2PActiveOrderService {
                         .thenComparing(o -> o.getOrderNumber() == null ? "" : o.getOrderNumber())
                         .reversed())
                 .collect(java.util.stream.Collectors.toList());
+        long ahora = Instant.now().toEpochMilli();
+        for (ActiveP2POrderDto o : ordenes) {
+            vistaActivaEn.put(o.getOrderNumber(), ahora);
+            esperandoImportacion.remove(o.getOrderNumber());
+        }
         return new ConsultaActivas(ordenes, conError);
     }
 
@@ -299,9 +335,12 @@ public class P2PActiveOrderService {
         this.completadasUltimoPoll = !desaparecidas.isEmpty();
 
         List<OrdenDesaparecida> detalle = new ArrayList<>();
+        long ahoraMs = Instant.now().toEpochMilli();
         for (String on : desaparecidas) {
             OrdenDesaparecida info = infoConocida.get(on);
             if (info != null) detalle.add(info);
+            esperandoImportacion.put(on, ahoraMs);
+            vistaActivaEn.remove(on);
         }
         this.desaparecidasUltimoPoll = detalle;
         this.ordenesUltimoPoll = allActive;

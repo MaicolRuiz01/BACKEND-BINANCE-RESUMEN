@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -11,6 +13,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.binance.web.Repository.AccountCopRepository;
 import com.binance.web.Repository.P2PPreAsignacionRepository;
+
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Saldos de la vista "Ventas en curso", calculados en el BACKEND y en UNA sola lectura.
@@ -27,12 +31,23 @@ import com.binance.web.Repository.P2PPreAsignacionRepository;
  * Acá el monto en curso sale de p2p_pre_asignacion, y esa fila se borra en la MISMA transacción en
  * la que la venta importada suma al saldo real. Leyendo ambas cosas dentro de una transacción
  * (misma foto de la BD) el monto está en un lado o en el otro, nunca en los dos ni en ninguno.
+ *
+ * FILTRO DE HUÉRFANAS: solo suman las filas de órdenes que están activas en Binance o que acaban de
+ * salir del listado esperando su importación ({@link P2PActiveOrderService#ordenesQueCuentanEnCurso}).
+ * Sin este filtro, una pre-asignación de una orden cancelada/vencida que nunca se importó se quedaba
+ * sumando en el amarillo de la cuenta (hasta la limpieza de 48 h) aunque no hubiera ninguna venta
+ * en curso a la vista.
  */
+@Slf4j
 @Service
 public class SaldosEnCursoService {
 
     @Autowired private AccountCopRepository accountCopRepository;
     @Autowired private P2PPreAsignacionRepository preAsignacionRepository;
+    @Autowired private P2PActiveOrderService activeOrderService;
+
+    /** Huérfanas ya reportadas en el log (para no repetir el aviso en cada refresco). */
+    private final Set<String> huerfanasReportadas = ConcurrentHashMap.newKeySet();
 
     public record SaldoEnCurso(Integer id, Double balance,
                                Double cupoCajeroDisponibleHoy, Double cupoCorresponsalDisponibleHoy,
@@ -40,10 +55,24 @@ public class SaldosEnCursoService {
 
     @Transactional(readOnly = true)
     public List<SaldoEnCurso> calcular() {
+        // Antes del primer poll (recién arrancado el backend) aún no se sabe qué está activo:
+        // en ese caso se cuentan todas, como antes, en vez de mostrar el amarillo vacío.
+        Set<String> vigentes = activeOrderService.yaHizoPrimerPoll()
+                ? activeOrderService.ordenesQueCuentanEnCurso()
+                : null;
+
         Map<Integer, Double> enCurso = new HashMap<>();
-        for (P2PPreAsignacionRepository.SumaEnCurso s : preAsignacionRepository.sumarEnCursoPorCuenta()) {
-            if (s.getCopId() == null) continue;
-            enCurso.merge(s.getCopId(), s.getTotal() != null ? s.getTotal() : 0.0, Double::sum);
+        for (P2PPreAsignacionRepository.PreSinImportar p : preAsignacionRepository.findSinImportar()) {
+            if (p.getCopId() == null) continue;
+            if (vigentes != null && !vigentes.contains(p.getOrderNumber())) {
+                if (huerfanasReportadas.add(p.getOrderNumber())) {
+                    log.warn("[SaldosEnCurso] Pre-asignación HUÉRFANA ignorada en el amarillo: orden {} → {} ({} miles), creada {}. "
+                            + "No está activa en Binance ni se importó como venta.",
+                            p.getOrderNumber(), p.getCopNombre(), p.getPesosCop(), p.getCreatedAt());
+                }
+                continue;
+            }
+            enCurso.merge(p.getCopId(), p.getPesosCop() != null ? p.getPesosCop() : 0.0, Double::sum);
         }
 
         List<SaldoEnCurso> out = new ArrayList<>();
