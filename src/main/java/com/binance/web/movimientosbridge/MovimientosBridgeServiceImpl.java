@@ -130,9 +130,18 @@ public class MovimientosBridgeServiceImpl implements MovimientosBridgeService {
             boolean recibeCompleto = (chatsFull == null) || chatsFull.contains(chatId);
             String textoAEnviar = recibeCompleto ? texto : textoCorto;
             if (esMovimiento) {
+                // "movimiento" nunca es tan largo como para necesitar partirse —
+                // el botón "✅" debe quedar pegado al mensaje, así que este
+                // camino sigue mandando un solo mensaje.
                 cuentasP2PTelegramService.sendMessageConBotonLiberar(chatId, textoAEnviar);
             } else {
-                cuentasP2PTelegramService.sendMessage(chatId, textoAEnviar);
+                // "conexion_exitosa" (18/09/2026, incidente reportado por Milton:
+                // el mensaje llegaba cortado con "y N más" cuando el día tenía
+                // muchos movimientos) puede superar el límite de 4096 de
+                // Telegram — se parte en varios mensajes, nunca se descarta nada.
+                for (String bloque : partirEnBloques(textoAEnviar)) {
+                    cuentasP2PTelegramService.sendMessage(chatId, bloque);
+                }
             }
         }
         log.info("[CuentasP2P Bridge] Evento '{}' de '{}' enviado a {} chat(s).",
@@ -231,6 +240,48 @@ public class MovimientosBridgeServiceImpl implements MovimientosBridgeService {
 
     private String nvl(String s) {
         return (s == null || s.isBlank()) ? "—" : s;
+    }
+
+    // Margen bajo el límite real de 4096 caracteres de un mensaje de Telegram
+    // — mismo valor que ya usa iniciar.py → _esperar_y_notificar en Python
+    // para el bot de Saldo, para que ambos caminos se comporten igual.
+    private static final int LIMITE_MENSAJE_TELEGRAM = 4000;
+
+    /**
+     * Parte "texto" en bloques que quepan cada uno en un mensaje de Telegram,
+     * cortando por líneas completas (nunca a mitad de una línea) — mismo
+     * criterio que ya usa iniciar.py → _esperar_y_notificar en Python.
+     * Si "texto" ya cabe en un solo mensaje, devuelve una lista de un solo
+     * elemento (comportamiento idéntico al de antes de este cambio).
+     * 18/09/2026: agregado porque el mensaje de "conexion_exitosa" venía
+     * llegando cortado con "... y N más" cuando el día tenía muchos
+     * movimientos — Milton pidió que SIEMPRE lleguen todos, partidos en
+     * varios mensajes si hace falta.
+     */
+    private List<String> partirEnBloques(String texto) {
+        List<String> bloques = new ArrayList<>();
+        if (texto == null || texto.isEmpty()) {
+            bloques.add(texto == null ? "" : texto);
+            return bloques;
+        }
+        String[] lineas = texto.split("\n", -1);
+        StringBuilder bloqueActual = new StringBuilder();
+        for (String linea : lineas) {
+            int largoConLinea = bloqueActual.length() == 0
+                    ? linea.length()
+                    : bloqueActual.length() + 1 + linea.length();
+            if (largoConLinea > LIMITE_MENSAJE_TELEGRAM && bloqueActual.length() > 0) {
+                bloques.add(bloqueActual.toString());
+                bloqueActual = new StringBuilder(linea);
+            } else {
+                if (bloqueActual.length() > 0) bloqueActual.append("\n");
+                bloqueActual.append(linea);
+            }
+        }
+        if (bloqueActual.length() > 0) {
+            bloques.add(bloqueActual.toString());
+        }
+        return bloques;
     }
 
     private List<String> chatsConfiables() {
