@@ -5,7 +5,9 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import com.binance.web.Entity.*;
@@ -55,9 +57,18 @@ public class P2PSyncService {
      */
     private final java.util.concurrent.atomic.AtomicBoolean completaPendiente =
             new java.util.concurrent.atomic.AtomicBoolean(false);
-    /** Importaciones rápidas pendientes: cuenta Binance → desde qué momento (ms) pedir. */
-    private final java.util.concurrent.ConcurrentHashMap<String, Long> rapidasPendientes =
+    /** Importaciones rápidas pendientes por cuenta Binance: desde cuándo pedir y qué órdenes resolver. */
+    private final java.util.concurrent.ConcurrentHashMap<String, Rapida> rapidasPendientes =
             new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Pedido de importación rápida: ventana a pedirle a Binance y órdenes que hay que resolver. */
+    private record Rapida(long desdeMs, java.util.Set<String> ordenes) {
+        Rapida unir(Rapida otra) {
+            java.util.Set<String> todas = new java.util.HashSet<>(this.ordenes);
+            todas.addAll(otra.ordenes);
+            return new Rapida(Math.min(this.desdeMs, otra.desdeMs), todas);
+        }
+    }
 
     @Autowired private BinanceService binanceService;
     @Autowired private SaleP2PRepository saleP2PRepository;
@@ -100,9 +111,10 @@ public class P2PSyncService {
      *
      * @return ventas nuevas guardadas (0 si quedó en cola detrás de otra importación)
      */
-    public int importarOrdenesRecientes(String cuentaBinance, long desdeMs) {
+    public int importarOrdenesRecientes(String cuentaBinance, long desdeMs, java.util.Set<String> ordenes) {
         if (cuentaBinance == null || cuentaBinance.isBlank()) return 0;
-        rapidasPendientes.merge(cuentaBinance, desdeMs, Math::min);
+        java.util.Set<String> pedidas = ordenes != null ? new java.util.HashSet<>(ordenes) : java.util.Set.of();
+        rapidasPendientes.merge(cuentaBinance, new Rapida(desdeMs, pedidas), Rapida::unir);
         return procesarPendientes();
     }
 
@@ -131,8 +143,8 @@ public class P2PSyncService {
                         continue;
                     }
                     for (String cuenta : new ArrayList<>(rapidasPendientes.keySet())) {
-                        Long desde = rapidasPendientes.remove(cuenta);
-                        if (desde != null) total += ejecutarRapida(cuenta, desde);
+                        Rapida pedido = rapidasPendientes.remove(cuenta);
+                        if (pedido != null) total += ejecutarRapida(cuenta, pedido);
                     }
                 }
             } finally {
@@ -163,7 +175,7 @@ public class P2PSyncService {
         return totalNew;
     }
 
-    private int ejecutarRapida(String cuentaBinance, long desdeMs) {
+    private int ejecutarRapida(String cuentaBinance, Rapida pedido) {
         AccountBinance account = accountBinanceRepository.findByName(cuentaBinance);
         if (account == null || account.getApiKey() == null || account.getApiSecret() == null) {
             log.warn("[Sync] Importación rápida: cuenta Binance '{}' no encontrada o sin llaves", cuentaBinance);
@@ -171,14 +183,44 @@ public class P2PSyncService {
         }
         long t0 = System.currentTimeMillis();
         try {
-            int nuevas = procesarRango(account, desdeMs, Instant.now().toEpochMilli());
+            Map<String, String> estados = new HashMap<>();
+            int nuevas = procesarRango(account, pedido.desdeMs(), Instant.now().toEpochMilli(), estados);
             log.info("[Sync] Importación rápida {} → {} venta(s) nueva(s) en {} ms",
                     cuentaBinance, nuevas, System.currentTimeMillis() - t0);
+            resolverDesaparecidas(cuentaBinance, pedido.ordenes(), estados);
             return nuevas;
         } catch (Exception e) {
             log.warn("[Sync] Importación rápida falló en {}: {}", cuentaBinance, e.getMessage());
             // No se pierde: la próxima sync completa la vuelve a buscar.
             return 0;
+        }
+    }
+
+    /**
+     * Cierra el ciclo de cada orden que salió del listado activo: o su venta quedó registrada, o su
+     * pre-asignación tiene que dejar de contar. Si no se hace, la fila se queda en la tabla y su
+     * monto sigue sumando en el saldo amarillo de una cuenta que ya no tiene nada asignado a la vista.
+     *
+     * @param estados estado que Binance reportó para cada orden en la consulta que se acaba de hacer
+     */
+    private void resolverDesaparecidas(String cuentaBinance, java.util.Set<String> ordenes,
+                                       Map<String, String> estados) {
+        for (String orden : ordenes) {
+            if (saleP2PRepository.existsByNumberOrder(orden)) continue;   // se importó: la pre ya se borró
+            String estado = estados.get(orden);
+            if (estado == null) {
+                // Binance no la devolvió en su propia ventana de creación. No se borra por si acaso
+                // (la limpieza conservadora de 48 h la barrerá), pero queda el aviso para revisarla.
+                log.warn("[Sync] La orden {} ({}) salió del listado activo y Binance no la devolvió; "
+                        + "su pre-asignación queda pendiente de revisión.", orden, cuentaBinance);
+            } else if (estado.startsWith("CANCEL")) {
+                self.limpiarPreAsignacionCancelada(orden);                // borra la pre: no habrá venta
+            } else {
+                // COMPLETED sin venta guardada (falló al persistir) o estado intermedio: se reintenta
+                // en la próxima sync completa, así que la pre-asignación se conserva.
+                log.info("[Sync] La orden {} ({}) salió del listado con estado {}; se reintentará en la próxima sync.",
+                        orden, cuentaBinance, estado);
+            }
         }
     }
 
@@ -209,15 +251,19 @@ public class P2PSyncService {
         long endMs   = Instant.now().toEpochMilli();
         long startMs = resolveStartMs(account);
 
-        int newCount = procesarRango(account, startMs, endMs);
+        int newCount = procesarRango(account, startMs, endMs, null);
 
         // Siempre actualiza el timestamp aunque no haya habido órdenes nuevas
         self.actualizarEstadoSync(account, endMs);
         return newCount;
     }
 
-    /** Lee de Binance las ventas de la cuenta creadas en [startMs, endMs] y guarda las completadas. */
-    private int procesarRango(AccountBinance account, long startMs, long endMs) throws Exception {
+    /**
+     * Lee de Binance las ventas de la cuenta creadas en [startMs, endMs] y guarda las completadas.
+     * @param estadosVistos si no es null, se llena con el estado que Binance reportó para cada orden.
+     */
+    private int procesarRango(AccountBinance account, long startMs, long endMs,
+                              Map<String, String> estadosVistos) throws Exception {
         // ── 1) LECTURA a Binance, sin transacción abierta ──
         String json = binanceService.getP2POrdersInRange(account.getName(), startMs, endMs, "SELL");
         JsonNode root = mapper.readTree(json);
@@ -234,6 +280,10 @@ public class P2PSyncService {
         // Si una orden falla, las demás igual se guardan (antes se perdía el lote completo).
         if (data.isArray()) {
             for (JsonNode obj : data) {
+                if (estadosVistos != null) {
+                    estadosVistos.put(obj.path("orderNumber").asText(),
+                            obj.path("orderStatus").asText("").toUpperCase());
+                }
                 if (isCanceledSell(obj)) {
                     try {
                         self.limpiarPreAsignacionCancelada(obj.path("orderNumber").asText());

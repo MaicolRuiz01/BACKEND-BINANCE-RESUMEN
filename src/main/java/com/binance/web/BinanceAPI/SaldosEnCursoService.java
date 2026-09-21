@@ -51,7 +51,10 @@ public class SaldosEnCursoService {
 
     public record SaldoEnCurso(Integer id, Double balance,
                                Double cupoCajeroDisponibleHoy, Double cupoCorresponsalDisponibleHoy,
-                               double enCurso) {}
+                               double enCurso, List<DetalleEnCurso> detalle) {}
+
+    /** Cada venta que compone el monto en curso — para poder ver de dónde sale el amarillo. */
+    public record DetalleEnCurso(String orderNumber, double pesos) {}
 
     @Transactional(readOnly = true)
     public List<SaldoEnCurso> calcular() {
@@ -62,6 +65,7 @@ public class SaldosEnCursoService {
                 : null;
 
         Map<Integer, Double> enCurso = new HashMap<>();
+        Map<Integer, List<DetalleEnCurso>> detalle = new HashMap<>();
         for (P2PPreAsignacionRepository.PreSinImportar p : preAsignacionRepository.findSinImportar()) {
             if (p.getCopId() == null) continue;
             if (vigentes != null && !vigentes.contains(p.getOrderNumber())) {
@@ -72,14 +76,18 @@ public class SaldosEnCursoService {
                 }
                 continue;
             }
-            enCurso.merge(p.getCopId(), p.getPesosCop() != null ? p.getPesosCop() : 0.0, Double::sum);
+            double pesos = p.getPesosCop() != null ? p.getPesosCop() : 0.0;
+            enCurso.merge(p.getCopId(), pesos, Double::sum);
+            detalle.computeIfAbsent(p.getCopId(), k -> new ArrayList<>())
+                    .add(new DetalleEnCurso(p.getOrderNumber(), pesos));
         }
 
         List<SaldoEnCurso> out = new ArrayList<>();
         for (AccountCopRepository.SaldoView a : accountCopRepository.findAllSaldos()) {
             out.add(new SaldoEnCurso(a.getId(), a.getBalance(),
                     a.getCupoCajeroDisponibleHoy(), a.getCupoCorresponsalDisponibleHoy(),
-                    enCurso.getOrDefault(a.getId(), 0.0)));
+                    enCurso.getOrDefault(a.getId(), 0.0),
+                    detalle.getOrDefault(a.getId(), List.of())));
         }
         return out;
     }

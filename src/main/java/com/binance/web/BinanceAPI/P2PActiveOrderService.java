@@ -56,11 +56,12 @@ public class P2PActiveOrderService {
      */
     private final Map<String, String> lastKnownStatus = new ConcurrentHashMap<>();
 
-    /** Slow-poll: tras el primer ciclo, si no hay órdenes activas, solo llamamos
-     *  Binance cada MAX_SKIP+1 ticks (efectivamente cada ~60 s con tick=15 s). */
+    /** Slow-poll: tras el primer ciclo, si no hay NINGUNA orden activa, no se consulta a Binance
+     *  en cada tick sino una vez por minuto. Va por tiempo y no por número de ticks para que
+     *  siga valiendo lo mismo si se cambia el intervalo del poll (p2p.active-poll-ms). */
     private volatile boolean firstPollDone = false;
-    private int pollSkipCount = 0;
-    private static final int MAX_SKIP = 3; // 3 skips → 1 call real cada 4 ticks
+    private volatile long ultimoPollRealMs = 0;
+    private static final long PAUSA_SIN_ORDENES_MS = 60_000L;
 
     /** true si en el último poll alguna orden salió del listado activo (se completó/canceló).
      *  Lo usa el scheduler para importar de inmediato y sumar el saldo sin esperar 3 min. */
@@ -83,6 +84,31 @@ public class P2PActiveOrderService {
     public record OrdenDesaparecida(String orderNumber, String accountBinance, long createTimeMs) {}
 
     /**
+     * SEGUIMIENTO de órdenes que salieron del listado de las últimas 4 h sin resolverse.
+     *
+     * La consulta general solo pide las últimas 4 h (ver getActiveOrdersForAccount): pedirle a
+     * Binance ventanas más largas cada 15 s, por cuenta, sería insostenible. Pero una orden APELADA
+     * (o trabada en "pago recibido") puede durar días: pasadas las 4 h se caía del listado, y
+     * entonces desaparecía de la pantalla del operador AUNQUE SIGUIERA VIVA, mientras su
+     * pre-asignación seguía sumando en el saldo amarillo. De ahí venían cuentas con amarillo y
+     * ninguna orden a la vista, sin que hubiera ninguna venta cancelada de por medio.
+     *
+     * Ahora cada orden que se cae del listado queda en seguimiento: se le pregunta a Binance por
+     * ella sola (ventana corta alrededor de su fecha) cada minuto. Si sigue viva, se vuelve a
+     * meter en la lista — el operador la ve y su monto cuenta con razón. Si se completó o se
+     * canceló, sale del seguimiento y la maneja el sync.
+     */
+    private record Seguimiento(String accountBinance, long createTimeMs, long ultimaRevisionMs, int vecesSinVerla) {}
+
+    private final Map<String, Seguimiento> enSeguimiento = new ConcurrentHashMap<>();
+    /** Órdenes confirmadas vivas fuera de la ventana de 4 h — se mezclan en el listado activo. */
+    private final Map<String, ActiveP2POrderDto> vivasFueraDeVentana = new ConcurrentHashMap<>();
+    /** Cada cuánto se le vuelve a preguntar a Binance por una orden en seguimiento. */
+    private static final long REVISION_SEGUIMIENTO_MS = 60_000L;
+    /** Si Binance no la devuelve esta cantidad de veces seguidas, se deja de seguir (y de contar). */
+    private static final int MAX_VECES_SIN_VERLA = 3;
+
+    /**
      * Última vez (ms) que cada orden se vio ACTIVA en Binance, por cualquier consulta (poll de 15 s,
      * pantalla, asignación automática…). Sirve para que el saldo amarillo cuente SOLO pre-asignaciones
      * de órdenes que de verdad están en curso, y no filas huérfanas (órdenes canceladas o vencidas
@@ -93,8 +119,12 @@ public class P2PActiveOrderService {
     private final Map<String, Long> esperandoImportacion = new ConcurrentHashMap<>();
     /** Una orden cuenta como "en curso" si se vio activa hace menos de esto… */
     private static final long VIGENCIA_VISTA_MS = 2 * 60_000L;
-    /** …o si salió del listado hace menos de esto y todavía no se importó. */
-    private static final long VIGENCIA_ESPERA_IMPORT_MS = 30 * 60_000L;
+    /** …o si salió del listado hace menos de esto y todavía no se importó.
+     *  Corto a propósito: una venta que se completa se detecta en ~5 s y se importa enseguida, así
+     *  que su monto pasa al VERDE casi al instante. Este tope solo aplica si la importación está
+     *  fallando; pasado ese punto el monto deja de contarse, porque una cuenta sin nada asignado a
+     *  la vista no puede quedarse con saldo amarillo. */
+    private static final long VIGENCIA_ESPERA_IMPORT_MS = 2 * 60_000L;
 
     /**
      * Órdenes cuya pre-asignación debe sumar en el amarillo: activas ahora mismo, o recién
@@ -139,7 +169,7 @@ public class P2PActiveOrderService {
 
         // Antes se consultaba Binance cuenta por cuenta EN SECUENCIA (se sumaban todas las esperas).
         // Ahora en PARALELO: el tiempo total pasa a ser ~el de la cuenta más lenta, no la suma.
-        List<ActiveP2POrderDto> ordenes = accounts.parallelStream()
+        List<ActiveP2POrderDto> ordenes = new ArrayList<>(accounts.parallelStream()
                 .filter(a -> a.getApiKey() != null && a.getApiSecret() != null)
                 .flatMap(a -> {
                     try {
@@ -165,12 +195,31 @@ public class P2PActiveOrderService {
                 // El desempate por orderNumber no es cosmético: si dos órdenes caen en el mismo
                 // segundo y el orden entre ellas quedara al azar, se intercambiarían de lugar en
                 // cada refresco y la fila que el operador está mirando le saltaría sola.
-                .sorted(Comparator
-                        .comparing((ActiveP2POrderDto o) ->
-                                o.getCreateTime() == null ? "" : o.getCreateTime())
-                        .thenComparing(o -> o.getOrderNumber() == null ? "" : o.getOrderNumber())
-                        .reversed())
-                .collect(java.util.stream.Collectors.toList());
+                .collect(java.util.stream.Collectors.toList()));
+
+        // Órdenes vivas que quedaron fuera de la ventana de 4 h (apeladas, trabadas): se mezclan
+        // para que el operador las siga viendo y su monto siga contando con razón.
+        Set<String> presentes = new HashSet<>();
+        for (ActiveP2POrderDto o : ordenes) presentes.add(o.getOrderNumber());
+        for (ActiveP2POrderDto vieja : vivasFueraDeVentana.values()) {
+            if (presentes.contains(vieja.getOrderNumber())) continue;
+            if (conError.contains(vieja.getAccountBinance())) continue;
+            // Copia: el DTO guardado lo comparten todas las consultas (pantallas + poll), así que
+            // no se muta el original — cada respuesta se arma con su propia copia al día.
+            ActiveP2POrderDto copia = new ActiveP2POrderDto(
+                    vieja.getOrderNumber(), vieja.getStatus(), vieja.getStatusLabel(),
+                    vieja.getAccountBinance(), vieja.getDollarsUs(), vieja.getPesosCop(),
+                    vieja.getTasa(), vieja.getCreateTime(), null, null, "PENDIENTE",
+                    vieja.getCounterPartNickName());
+            aplicarPreAsignacion(copia);   // su cuenta COP pudo cambiar desde la última revisión
+            ordenes.add(copia);
+        }
+
+        ordenes.sort(Comparator
+                .comparing((ActiveP2POrderDto o) -> o.getCreateTime() == null ? "" : o.getCreateTime())
+                .thenComparing(o -> o.getOrderNumber() == null ? "" : o.getOrderNumber())
+                .reversed());
+
         long ahora = Instant.now().toEpochMilli();
         for (ActiveP2POrderDto o : ordenes) {
             vistaActivaEn.put(o.getOrderNumber(), ahora);
@@ -290,17 +339,15 @@ public class P2PActiveOrderService {
      */
     public List<ActiveP2POrderDto> detectStatusChanges() {
         // Slow-poll: omitir llamada a Binance cuando no hay órdenes activas
-        if (firstPollDone && lastKnownStatus.isEmpty()) {
-            pollSkipCount++;
-            if (pollSkipCount < MAX_SKIP) {
-                log.debug("[ActiveOrders] Sin órdenes activas — omitiendo poll {}/{}", pollSkipCount, MAX_SKIP);
-                this.desaparecidasUltimoPoll = List.of();
-                this.ordenesUltimoPoll = List.of();
-                this.completadasUltimoPoll = false;
-                return List.of();
-            }
-            pollSkipCount = 0; // llegamos al tick real, hacemos la llamada
+        if (firstPollDone && lastKnownStatus.isEmpty() && enSeguimiento.isEmpty()
+                && Instant.now().toEpochMilli() - ultimoPollRealMs < PAUSA_SIN_ORDENES_MS) {
+            log.debug("[ActiveOrders] Sin órdenes activas — se consulta una vez por minuto");
+            this.desaparecidasUltimoPoll = List.of();
+            this.ordenesUltimoPoll = List.of();
+            this.completadasUltimoPoll = false;
+            return List.of();
         }
+        ultimoPollRealMs = Instant.now().toEpochMilli();
 
         ConsultaActivas consulta = consultarActivas();
         List<ActiveP2POrderDto> allActive = consulta.ordenes();
@@ -341,6 +388,11 @@ public class P2PActiveOrderService {
             if (info != null) detalle.add(info);
             esperandoImportacion.put(on, ahoraMs);
             vistaActivaEn.remove(on);
+            if (info != null && !enSeguimiento.containsKey(on)) {
+                // Se le va a preguntar a Binance por ella sola: puede haberse completado, cancelado
+                // o simplemente haber salido de la ventana de 4 h estando todavía viva.
+                enSeguimiento.put(on, new Seguimiento(info.accountBinance(), info.createTimeMs(), 0L, 0));
+            }
         }
         this.desaparecidasUltimoPoll = detalle;
         this.ordenesUltimoPoll = allActive;
@@ -352,11 +404,6 @@ public class P2PActiveOrderService {
         completarMontosFaltantes(allActive);
 
         firstPollDone = true;
-        // Si volvieron a aparecer órdenes, salimos del modo slow
-        if (!allActive.isEmpty()) {
-            pollSkipCount = 0;
-        }
-
         return changed;
     }
 
@@ -382,6 +429,89 @@ public class P2PActiveOrderService {
     // Helpers
     // ─────────────────────────────────────────────────────────────
 
+    /**
+     * Revisa una por una las órdenes en seguimiento (las que se cayeron del listado de 4 h).
+     * Lo llama el poll cada 15 s, pero a cada orden se le pregunta como mucho una vez por minuto.
+     */
+    public void revisarSeguimiento() {
+        if (enSeguimiento.isEmpty()) return;
+        long ahora = Instant.now().toEpochMilli();
+
+        // Se agrupan por cuenta para hacer UNA consulta por cuenta, no una por orden.
+        Map<String, List<String>> porCuenta = new HashMap<>();
+        long inicioVentana = ahora;
+        for (Map.Entry<String, Seguimiento> e : enSeguimiento.entrySet()) {
+            Seguimiento s = e.getValue();
+            if (ahora - s.ultimaRevisionMs() < REVISION_SEGUIMIENTO_MS) continue;
+            porCuenta.computeIfAbsent(s.accountBinance(), k -> new ArrayList<>()).add(e.getKey());
+            inicioVentana = Math.min(inicioVentana, s.createTimeMs() - 2 * 60_000L);
+        }
+        if (porCuenta.isEmpty()) return;
+
+        for (Map.Entry<String, List<String>> e : porCuenta.entrySet()) {
+            String cuenta = e.getKey();
+            try {
+                String json = binanceService.getP2POrdersInRange(cuenta, inicioVentana, ahora, "SELL");
+                JsonNode root = mapper.readTree(json);
+                if (root.has("error")) {
+                    log.warn("[Seguimiento] Binance error en {}: {}", cuenta, root.get("error").asText());
+                    continue; // se reintenta en la próxima vuelta; no se descarta nada
+                }
+
+                Map<String, JsonNode> porOrden = new HashMap<>();
+                JsonNode data = root.path("data");
+                if (data.isArray()) {
+                    for (JsonNode obj : data) porOrden.put(obj.path("orderNumber").asText(), obj);
+                }
+
+                for (String orderNumber : e.getValue()) {
+                    Seguimiento s = enSeguimiento.get(orderNumber);
+                    if (s == null) continue;
+                    JsonNode obj = porOrden.get(orderNumber);
+
+                    if (obj == null) {
+                        int veces = s.vecesSinVerla() + 1;
+                        if (veces >= MAX_VECES_SIN_VERLA) {
+                            enSeguimiento.remove(orderNumber);
+                            vivasFueraDeVentana.remove(orderNumber);
+                            log.warn("[Seguimiento] Binance no devuelve la orden {} ({}) tras {} intentos; "
+                                    + "deja de contarse como en curso.", orderNumber, cuenta, veces);
+                        } else {
+                            enSeguimiento.put(orderNumber,
+                                    new Seguimiento(s.accountBinance(), s.createTimeMs(), ahora, veces));
+                        }
+                        continue;
+                    }
+
+                    String status = obj.path("orderStatus").asText("").toUpperCase();
+                    if (ACTIVE_STATUSES.contains(status)) {
+                        // Sigue viva (típicamente apelada): vuelve al listado que ve el operador.
+                        vivasFueraDeVentana.put(orderNumber, buildDto(obj, cuenta));
+                        enSeguimiento.put(orderNumber,
+                                new Seguimiento(s.accountBinance(), s.createTimeMs(), ahora, 0));
+                        log.info("[Seguimiento] La orden {} ({}) sigue viva con estado {} fuera de la ventana de 4 h.",
+                                orderNumber, cuenta, status);
+                    } else {
+                        // COMPLETED o CANCELLED. Se pide la importación puntual de esa orden YA
+                        // (si se completó, su plata pasa al verde en el acto; si se canceló, se
+                        // borra su pre-asignación) y se deja de seguir.
+                        enSeguimiento.remove(orderNumber);
+                        vivasFueraDeVentana.remove(orderNumber);
+                        try {
+                            syncService.importarOrdenesRecientes(cuenta, s.createTimeMs() - 2 * 60_000L,
+                                    Set.of(orderNumber));
+                        } catch (Exception ex) {
+                            log.warn("[Seguimiento] No se pudo importar la orden {} ({}): {}",
+                                    orderNumber, cuenta, ex.getMessage());
+                        }
+                    }
+                }
+            } catch (Exception ex) {
+                log.warn("[Seguimiento] No se pudo revisar las órdenes de {}: {}", cuenta, ex.getMessage());
+            }
+        }
+    }
+
     /** "yyyy-MM-dd HH:mm:ss" (hora Bogotá) → epoch ms. Si no se puede leer, 4 h atrás (la ventana activa). */
     private long parseCreateTime(String createTime) {
         try {
@@ -405,22 +535,26 @@ public class P2PActiveOrderService {
                 : "";
         String counterPartNickName = obj.path("counterPartNickName").asText("");
 
-        // Enriquecer con pre-asignación si existe
-        Integer copId   = null;
-        String  copNombre = null;
-        String  estadoManual = "PENDIENTE";
-        Optional<P2PPreAsignacion> pre = preAsignacionRepository.findByOrderNumber(orderNumber);
-        if (pre.isPresent()) {
-            copId     = pre.get().getCuentaCop().getId();
-            copNombre = pre.get().getCuentaCop().getName();
-            if (pre.get().getEstadoManual() != null) estadoManual = pre.get().getEstadoManual();
-        }
-
-        return new ActiveP2POrderDto(
+        ActiveP2POrderDto dto = new ActiveP2POrderDto(
                 orderNumber, status, statusLabel(status),
                 accountName, dollarsUs, pesosCop, tasa, createTime,
-                copId, copNombre, estadoManual, counterPartNickName
+                null, null, "PENDIENTE", counterPartNickName
         );
+        aplicarPreAsignacion(dto);
+        return dto;
+    }
+
+    /** Copia al DTO la cuenta COP pre-asignada (si existe) — dato que vive en la BD, no en Binance. */
+    private void aplicarPreAsignacion(ActiveP2POrderDto dto) {
+        Optional<P2PPreAsignacion> pre = preAsignacionRepository.findByOrderNumber(dto.getOrderNumber());
+        if (pre.isPresent()) {
+            dto.setPreAsignadoCopId(pre.get().getCuentaCop().getId());
+            dto.setPreAsignadoCopNombre(pre.get().getCuentaCop().getName());
+            dto.setEstadoManual(pre.get().getEstadoManual() != null ? pre.get().getEstadoManual() : "PENDIENTE");
+        } else {
+            dto.setPreAsignadoCopId(null);
+            dto.setPreAsignadoCopNombre(null);
+        }
     }
 
     /** Cambia el estado manual (PENDIENTE / RECIBIDO) de una orden pre-asignada. */

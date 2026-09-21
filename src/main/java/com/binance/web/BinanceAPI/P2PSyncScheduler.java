@@ -51,14 +51,25 @@ public class P2PSyncScheduler {
     }
 
     /**
-     * Polling de órdenes activas cada 15 segundos.
+     * Polling de órdenes activas cada 5 segundos (configurable con p2p.active-poll-ms).
+     *
+     * Este intervalo es lo que determina cuánto tarda una venta completada en pasar al saldo verde:
+     * apenas se detecta que la orden salió del listado, se importa de inmediato (consulta puntual de
+     * esa cuenta) y el saldo real sube. Estaba en 15 s; a 5 s el operador ve el saldo casi al
+     * instante. Cuando no hay órdenes activas, igual se consulta solo una vez por minuto para no
+     * gastar llamadas a Binance de gusto.
      * Detecta cambios de estado (TRADING → BUYER_PAYED → COMPLETED)
      * y notifica al frontend via SSE si hay cambios.
      * Solo corre si hay clientes SSE conectados para no gastar requests.
      */
-    @Scheduled(fixedDelay = 15_000)
+    @Scheduled(fixedDelayString = "${p2p.active-poll-ms:5000}")
     public void pollActiveOrders() {
         try {
+            // Órdenes que se cayeron de la ventana de 4 h sin resolverse (apeladas, trabadas):
+            // se revisan una por una antes de armar el listado, para que vuelvan a aparecer si
+            // siguen vivas. Va primero para que detectStatusChanges ya las vea incluidas.
+            activeOrderService.revisarSeguimiento();
+
             var changed = activeOrderService.detectStatusChanges();
             var desaparecidas = activeOrderService.getDesaparecidasUltimoPoll();
 
@@ -68,12 +79,16 @@ public class P2PSyncScheduler {
             // queda en cola y se ejecuta apenas termine (antes se descartaba).
             if (!desaparecidas.isEmpty()) {
                 java.util.Map<String, Long> desdePorCuenta = new java.util.HashMap<>();
+                java.util.Map<String, java.util.Set<String>> ordenesPorCuenta = new java.util.HashMap<>();
                 for (var d : desaparecidas) {
                     desdePorCuenta.merge(d.accountBinance(), d.createTimeMs() - 2 * 60_000L, Math::min);
+                    ordenesPorCuenta.computeIfAbsent(d.accountBinance(), k -> new java.util.HashSet<>())
+                            .add(d.orderNumber());
                 }
                 int nuevas = 0;
                 for (var e : desdePorCuenta.entrySet()) {
-                    nuevas += syncService.importarOrdenesRecientes(e.getKey(), e.getValue());
+                    nuevas += syncService.importarOrdenesRecientes(e.getKey(), e.getValue(),
+                            ordenesPorCuenta.getOrDefault(e.getKey(), java.util.Set.of()));
                 }
                 log.info("[ActivePoll] {} orden(es) salieron del listado → import rápido: {} venta(s) nueva(s)",
                         desaparecidas.size(), nuevas);
