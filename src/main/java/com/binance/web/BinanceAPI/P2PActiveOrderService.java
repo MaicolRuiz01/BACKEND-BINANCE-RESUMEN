@@ -34,10 +34,32 @@ public class P2PActiveOrderService {
     private static final ZoneId ZONE = ZoneId.of("America/Bogota");
     private static final DateTimeFormatter FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-    /** Estados de Binance que consideramos "activos" (no terminales).
-     *  IN_APPEAL = venta en disputa/apelada: sigue "viva" (aún no se libera/cancela el cripto),
-     *  el cliente quiere verla en la vista P2P para gestionarla, así que la tratamos como activa. */
-    private static final Set<String> ACTIVE_STATUSES = Set.of("TRADING", "BUYER_PAYED", "PENDING", "IN_APPEAL");
+    /**
+     * Una orden está "en curso" mientras NO termine, y solo termina de dos formas: completada o
+     * cancelada. Cualquier otro estado cuenta como activa.
+     *
+     * Antes había una lista blanca (TRADING, BUYER_PAYED, PENDING, IN_APPEAL) y eso dejaba fuera
+     * DISTRIBUTING, que es el estado justo DESPUÉS de que el operador libera, mientras Binance
+     * entrega el cripto. Esa orden desaparecía de la pantalla (no estaba en la lista blanca) y
+     * tampoco se importaba (la importación solo acepta COMPLETED), así que su pre-asignación se
+     * quedaba sumando en el saldo amarillo sin ninguna orden a la vista y sin pasar nunca al verde.
+     * Justo lo que reportaba el cliente al minuto de liberar.
+     *
+     * Con la regla al revés (todo lo que no sea final está en curso), un estado nuevo o no
+     * documentado de Binance se muestra en pantalla en vez de volverse invisible.
+     */
+    private static boolean esEstadoFinal(String status) {
+        if (status == null) return false;
+        String s = status.toUpperCase();
+        // DISTRIBUTING cuenta como terminada igual que COMPLETED: al liberar, la venta ya se
+        // registra (ver isValidSell en P2PSyncService), su plata pasa al saldo real y su
+        // pre-asignación se borra. Si siguiera figurando como "en curso", el operador vería una
+        // orden sin cuenta asignada cuyo dinero ya está en el verde.
+        return s.equals("COMPLETED") || s.equals("DISTRIBUTING") || s.startsWith("CANCEL");
+    }
+
+    /** Estados ya vistos que no teníamos contemplados — se avisa una vez para poder etiquetarlos. */
+    private final Set<String> estadosDesconocidosAvisados = ConcurrentHashMap.newKeySet();
 
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -125,6 +147,11 @@ public class P2PActiveOrderService {
      *  fallando; pasado ese punto el monto deja de contarse, porque una cuenta sin nada asignado a
      *  la vista no puede quedarse con saldo amarillo. */
     private static final long VIGENCIA_ESPERA_IMPORT_MS = 2 * 60_000L;
+
+    /** Desde cuándo viene fallando cada cuenta Binance (se limpia al primer éxito). */
+    private final Map<String, Long> erroresCuentaDesde = new ConcurrentHashMap<>();
+    /** Cuánto se les da a las órdenes de una cuenta que falla antes de dejar de darlas por activas. */
+    private static final long MARGEN_CUENTA_CON_ERROR_MS = 10 * 60_000L;
 
     /**
      * Órdenes cuya pre-asignación debe sumar en el amarillo: activas ahora mismo, o recién
@@ -251,7 +278,7 @@ public class P2PActiveOrderService {
         if (data.isArray()) {
             for (JsonNode obj : data) {
                 String status = obj.path("orderStatus").asText("");
-                if (!ACTIVE_STATUSES.contains(status.toUpperCase())) continue;
+                if (status.isBlank() || esEstadoFinal(status)) continue;
                 if (!"SELL".equalsIgnoreCase(obj.path("tradeType").asText())) continue;
                 if (!"USDT".equalsIgnoreCase(obj.path("asset").asText())) continue;
 
@@ -367,12 +394,27 @@ public class P2PActiveOrderService {
             }
         }
 
-        // Las órdenes de una cuenta que FALLÓ no desaparecieron: no se pudieron leer.
-        // Se conservan tal cual hasta que la cuenta vuelva a responder.
+        // Las órdenes de una cuenta que FALLÓ no desaparecieron: no se pudieron leer, así que se
+        // conservan mientras la cuenta se recupera. PERO SOLO UN RATO: si una cuenta queda fallando
+        // (llave revocada, Binance bloqueando la IP…), conservarlas para siempre dejaba su monto
+        // sumando eternamente en el saldo amarillo, sin ninguna orden a la vista y sin forma de
+        // que se resolviera. Pasado el margen, se sueltan y cada una entra al seguimiento uno a uno.
+        long ahoraErr = Instant.now().toEpochMilli();
+        for (String cuenta : cuentasConError) {
+            erroresCuentaDesde.putIfAbsent(cuenta, ahoraErr);
+        }
+        erroresCuentaDesde.keySet().removeIf(cuenta -> !cuentasConError.contains(cuenta));
+
         for (String on : lastKnownStatus.keySet()) {
             OrdenDesaparecida info = infoConocida.get(on);
-            if (info != null && cuentasConError.contains(info.accountBinance())) {
+            if (info == null || !cuentasConError.contains(info.accountBinance())) continue;
+            long desde = erroresCuentaDesde.getOrDefault(info.accountBinance(), ahoraErr);
+            if (ahoraErr - desde <= MARGEN_CUENTA_CON_ERROR_MS) {
                 currentOrderNumbers.add(on);
+            } else {
+                log.warn("[ActiveOrders] La cuenta {} lleva {} min fallando: la orden {} deja de darse por activa "
+                        + "y pasa a revisión individual.", info.accountBinance(),
+                        (ahoraErr - desde) / 60_000, on);
             }
         }
 
@@ -484,7 +526,7 @@ public class P2PActiveOrderService {
                     }
 
                     String status = obj.path("orderStatus").asText("").toUpperCase();
-                    if (ACTIVE_STATUSES.contains(status)) {
+                    if (!esEstadoFinal(status)) {
                         // Sigue viva (típicamente apelada): vuelve al listado que ve el operador.
                         vivasFueraDeVentana.put(orderNumber, buildDto(obj, cuenta));
                         enSeguimiento.put(orderNumber,
@@ -572,11 +614,21 @@ public class P2PActiveOrderService {
 
     private String statusLabel(String status) {
         return switch (status) {
-            case "TRADING"     -> "En curso";
-            case "BUYER_PAYED" -> "Pago recibido";
-            case "PENDING"     -> "Pendiente";
-            case "IN_APPEAL"   -> "Apelada";
-            default            -> status;
+            case "TRADING"      -> "En curso";
+            case "BUYER_PAYED"  -> "Pago recibido";
+            case "PENDING"      -> "Pendiente";
+            case "IN_APPEAL"    -> "Apelada";
+            // Ya liberaste y Binance está entregando el cripto: la venta se completa en seguida.
+            case "DISTRIBUTING" -> "Liberando";
+            default -> {
+                // Estado no contemplado: se muestra tal cual (la orden SÍ se ve, que es lo
+                // importante) y queda avisado una vez para poder ponerle etiqueta en español.
+                if (estadosDesconocidosAvisados.add(status)) {
+                    log.warn("[ActiveOrders] Estado de Binance no contemplado: '{}'. La orden se "
+                            + "muestra igual como en curso.", status);
+                }
+                yield status;
+            }
         };
     }
 }

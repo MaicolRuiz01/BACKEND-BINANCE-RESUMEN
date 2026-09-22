@@ -70,6 +70,10 @@ public class P2PSyncService {
         }
     }
 
+    /** Órdenes ya avisadas como "registrada pero cancelada" — para no repetir el log cada minuto. */
+    private final java.util.Set<String> canceladasYaAvisadas =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
+
     @Autowired private BinanceService binanceService;
     @Autowired private SaleP2PRepository saleP2PRepository;
     @Autowired private AccountBinanceRepository accountBinanceRepository;
@@ -313,8 +317,19 @@ public class P2PSyncService {
     @Transactional
     public void limpiarPreAsignacionCancelada(String orderNumber) {
         if (orderNumber == null || orderNumber.isBlank()) return;
+        // Caso raro pero importante: la venta se registró al liberarse (DISTRIBUTING) y después
+        // Binance terminó cancelándola. La plata ya se sumó a la cuenta COP, así que hay que
+        // revisarla a mano — no se deshace sola porque, si el comprador sí pagó, el saldo está bien.
+        if (saleP2PRepository.existsByNumberOrder(orderNumber)) {
+            // Una sola vez por orden: el sync repasa la misma ventana cada minuto.
+            if (canceladasYaAvisadas.add(orderNumber)) {
+                log.warn("[Sync] REVISAR: la orden {} se registró como venta y Binance la reporta CANCELADA. "
+                        + "Verificar si la plata entró de verdad a la cuenta COP.", orderNumber);
+            }
+            return;
+        }
+
         preAsignacionRepository.findByOrderNumber(orderNumber).ifPresent(pre -> {
-            if (saleP2PRepository.existsByNumberOrder(orderNumber)) return;
             preAsignacionRepository.delete(pre);
             log.info("[PreAsign] Orden {} cancelada → pre-asignación eliminada", orderNumber);
             com.binance.web.BinanceAPI.AccountCopSaldoListener.notificarTrasCommit();
@@ -348,7 +363,14 @@ public class P2PSyncService {
     public boolean persistirVenta(JsonNode obj, AccountBinance account) {
         String orderNumber = obj.path("orderNumber").asText();
         if (orderNumber.isBlank()) return false;
-        if (saleP2PRepository.existsByNumberOrder(orderNumber)) return false;
+        if (saleP2PRepository.existsByNumberOrder(orderNumber)) {
+            // Ya estaba registrada. Si se guardó al liberar (DISTRIBUTING) y Binance ya la cerró,
+            // puede haber quedado una comisión definitiva distinta: se corrige acá.
+            if ("COMPLETED".equalsIgnoreCase(obj.path("orderStatus").asText(""))) {
+                ajustarComisionSiCambio(orderNumber, obj);
+            }
+            return false;
+        }
 
         SaleP2P sale = buildSale(obj, account);
         saleP2PRepository.save(sale);
@@ -359,6 +381,24 @@ public class P2PSyncService {
                     orderNumber, account.getName(), e.getMessage());
         }
         return true;
+    }
+
+    /**
+     * Corrige la comisión de una venta que se guardó al liberarse (DISTRIBUTING) si, al completarse,
+     * Binance reporta otra. La comisión entra en el cálculo de la utilidad, así que se recalcula.
+     * No toca el saldo COP: los pesos de la venta no cambian entre liberar y completar.
+     */
+    private void ajustarComisionSiCambio(String orderNumber, JsonNode obj) {
+        saleP2PRepository.findFirstByNumberOrder(orderNumber).ifPresent(sale -> {
+            double comisionFinal = comisionDe(obj);
+            double comisionGuardada = sale.getCommission() != null ? sale.getCommission() : 0.0;
+            if (Math.abs(comisionFinal - comisionGuardada) < 0.000001) return;
+            sale.setCommission(comisionFinal);
+            utilidadCalculator.calcularYAsignar(sale);
+            saleP2PRepository.save(sale);
+            log.info("[Sync] Comisión de la venta {} corregida al completarse: {} → {}",
+                    orderNumber, comisionGuardada, comisionFinal);
+        });
     }
 
     /** Marca de tiempo de la última sync, en su propia transacción. */
@@ -397,11 +437,27 @@ public class P2PSyncService {
         return Math.min(desdeVentana, inicioDeHoy);
     }
 
-    /** Filtra: solo ventas USDT completadas. */
+    /**
+     * Filtra las ventas USDT que ya se pueden registrar.
+     *
+     * COMPLETED y DISTRIBUTING cuentan por igual, por decisión del cliente. DISTRIBUTING es el
+     * instante después de liberar, mientras Binance entrega el cripto: en ese punto el comprador YA
+     * pagó (por eso se liberó) y la plata YA está en la cuenta COP, así que registrarla ahí es más
+     * fiel a la realidad que esperar. Además evita el hueco donde la orden no estaba ni en curso ni
+     * completada, que dejaba el monto pegado en el saldo amarillo.
+     */
     private boolean isValidSell(JsonNode obj) {
-        return "COMPLETED".equalsIgnoreCase(obj.path("orderStatus").asText(""))
+        String estado = obj.path("orderStatus").asText("");
+        return ("COMPLETED".equalsIgnoreCase(estado) || "DISTRIBUTING".equalsIgnoreCase(estado))
                 && "SELL".equalsIgnoreCase(obj.path("tradeType").asText(""))
                 && "USDT".equalsIgnoreCase(obj.path("asset").asText(""));
+    }
+
+    /** Comisión de la orden, en MILES (la misma escala que dollarsUs). */
+    private double comisionDe(JsonNode obj) {
+        return (!obj.path("takerCommission").isNull()
+                ? obj.path("takerCommission").asDouble(0.0)
+                : obj.path("commission").asDouble(0.0)) / 1_000.0;
     }
 
     /** Venta USDT cancelada (Binance usa CANCELLED y CANCELLED_BY_SYSTEM). */
@@ -421,9 +477,7 @@ public class P2PSyncService {
         // comisión cruda pesaba mil veces de más dentro del costo. No se había notado porque
         // todas las ventas revisadas traen comisión 0 — pero en cuanto Binance cobre una, la
         // utilidad de esa venta se iría al piso sin motivo.
-        double commission  = (!obj.path("takerCommission").isNull()
-                ? obj.path("takerCommission").asDouble(0.0)
-                : obj.path("commission").asDouble(0.0)) / 1_000.0;
+        double commission  = comisionDe(obj);
 
         SaleP2P sale = new SaleP2P();
         sale.setNumberOrder(obj.path("orderNumber").asText());
