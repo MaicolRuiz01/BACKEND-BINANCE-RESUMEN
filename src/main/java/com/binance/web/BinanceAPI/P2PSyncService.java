@@ -122,6 +122,12 @@ public class P2PSyncService {
         return procesarPendientes();
     }
 
+    /** ¿La venta de esa orden ya quedó registrada? Lo usa el seguimiento para saber si puede soltarla. */
+    public boolean ventaRegistrada(String orderNumber) {
+        return orderNumber != null && !orderNumber.isBlank()
+                && saleP2PRepository.existsByNumberOrder(orderNumber);
+    }
+
     private boolean hayPendientes() {
         return completaPendiente.get() || !rapidasPendientes.isEmpty();
     }
@@ -489,6 +495,7 @@ public class P2PSyncService {
         sale.setBinanceAccount(account);
         sale.setAsignado(false);
         sale.setUtilidad(0.0);
+        sale.setImportadoEn(LocalDateTime.now(ZONE));   // para medir el retraso de la importación
         return sale;
     }
 

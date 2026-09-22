@@ -39,7 +39,19 @@ public class SaleP2P {
     @Column(name = "number_order", nullable = false, unique = true, length = 64)
     private String numberOrder;
 
+    /** Hora en que Binance CREÓ la orden (no cuándo se registró acá). */
     private LocalDateTime date;
+
+    /**
+     * Hora en que ESTE sistema registró la venta y sumó su plata a la cuenta COP.
+     *
+     * Sin este dato no había forma de medir el retraso de la importación: date es la hora de
+     * creación en Binance, así que para saber cuándo se acreditó una venta tocaba deducirlo del
+     * orden de los id. Con esta columna se ve directo cuánto tardó cada venta en caer al saldo.
+     */
+    @Column(name = "importado_en")
+    private LocalDateTime importadoEn;
+
     private Double commission;
     private Double pesosCop;
     private Double dollarsUs;

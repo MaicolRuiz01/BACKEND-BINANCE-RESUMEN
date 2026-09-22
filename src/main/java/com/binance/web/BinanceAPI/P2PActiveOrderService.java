@@ -120,15 +120,25 @@ public class P2PActiveOrderService {
      * meter en la lista — el operador la ve y su monto cuenta con razón. Si se completó o se
      * canceló, sale del seguimiento y la maneja el sync.
      */
-    private record Seguimiento(String accountBinance, long createTimeMs, long ultimaRevisionMs, int vecesSinVerla) {}
+    private record Seguimiento(String accountBinance, long createTimeMs, long desaparecioEnMs,
+                               long ultimaRevisionMs) {}
 
     private final Map<String, Seguimiento> enSeguimiento = new ConcurrentHashMap<>();
     /** Órdenes confirmadas vivas fuera de la ventana de 4 h — se mezclan en el listado activo. */
     private final Map<String, ActiveP2POrderDto> vivasFueraDeVentana = new ConcurrentHashMap<>();
-    /** Cada cuánto se le vuelve a preguntar a Binance por una orden en seguimiento. */
-    private static final long REVISION_SEGUIMIENTO_MS = 60_000L;
-    /** Si Binance no la devuelve esta cantidad de veces seguidas, se deja de seguir (y de contar). */
-    private static final int MAX_VECES_SIN_VERLA = 3;
+    /**
+     * Cada cuánto se le vuelve a preguntar a Binance por una orden en seguimiento.
+     *
+     * Los primeros minutos se pregunta en CADA vuelta del poll (5 s) porque ese es el caso del
+     * operador que acaba de liberar: Binance tarda un rato en reflejar la orden en su historial, y
+     * hay que estar encima para registrarla apenas aparezca. Pasado ese ratito, la orden ya no es
+     * una venta recién liberada sino algo trabado (apelada, por ejemplo), y basta revisarla
+     * cada minuto.
+     */
+    private static final long SEGUIMIENTO_INTENSIVO_MS = 2 * 60_000L;
+    private static final long REVISION_LENTA_MS = 60_000L;
+    /** Si Binance no la devuelve en todo este tiempo, se deja de seguir (y de contar en amarillo). */
+    private static final long MAX_SIN_RESOLVER_MS = 15 * 60_000L;
 
     /**
      * Última vez (ms) que cada orden se vio ACTIVA en Binance, por cualquier consulta (poll de 15 s,
@@ -137,16 +147,8 @@ public class P2PActiveOrderService {
      * que nunca se importaron) que inflaban el amarillo de una cuenta sin ninguna venta a la vista.
      */
     private final Map<String, Long> vistaActivaEn = new ConcurrentHashMap<>();
-    /** Órdenes que salieron del listado activo y esperan su importación (ms en que salieron). */
-    private final Map<String, Long> esperandoImportacion = new ConcurrentHashMap<>();
-    /** Una orden cuenta como "en curso" si se vio activa hace menos de esto… */
+    /** Una orden cuenta como "en curso" si se vio activa hace menos de esto (o si sigue en seguimiento). */
     private static final long VIGENCIA_VISTA_MS = 2 * 60_000L;
-    /** …o si salió del listado hace menos de esto y todavía no se importó.
-     *  Corto a propósito: una venta que se completa se detecta en ~5 s y se importa enseguida, así
-     *  que su monto pasa al VERDE casi al instante. Este tope solo aplica si la importación está
-     *  fallando; pasado ese punto el monto deja de contarse, porque una cuenta sin nada asignado a
-     *  la vista no puede quedarse con saldo amarillo. */
-    private static final long VIGENCIA_ESPERA_IMPORT_MS = 2 * 60_000L;
 
     /** Desde cuándo viene fallando cada cuenta Binance (se limpia al primer éxito). */
     private final Map<String, Long> erroresCuentaDesde = new ConcurrentHashMap<>();
@@ -159,14 +161,19 @@ public class P2PActiveOrderService {
      */
     public Set<String> ordenesQueCuentanEnCurso() {
         long ahora = Instant.now().toEpochMilli();
-        vistaActivaEn.values().removeIf(t -> ahora - t > VIGENCIA_ESPERA_IMPORT_MS);
-        esperandoImportacion.values().removeIf(t -> ahora - t > VIGENCIA_ESPERA_IMPORT_MS);
+        vistaActivaEn.values().removeIf(t -> ahora - t > MAX_SIN_RESOLVER_MS);
 
         Set<String> out = new HashSet<>();
         vistaActivaEn.forEach((on, t) -> { if (ahora - t <= VIGENCIA_VISTA_MS) out.add(on); });
-        out.addAll(esperandoImportacion.keySet());
         // Órdenes de cuentas que fallaron: siguen en el cache del poll aunque no se hayan podido leer.
         out.addAll(lastKnownStatus.keySet());
+        // Órdenes que salieron del listado y todavía NO se resolvieron: su plata no está en el
+        // saldo real todavía, así que sigue siendo amarillo. Se dejan de contar solo cuando se
+        // resuelven (se registró la venta o se canceló) o cuando Binance no las devuelve en
+        // MAX_SIN_RESOLVER_MS. Antes se dejaban de contar a los pocos minutos pasara lo que
+        // pasara, y por eso el monto de una venta recién liberada desaparecía de la pantalla sin
+        // haber llegado al verde: ni en un lado ni en el otro.
+        out.addAll(enSeguimiento.keySet());
         return out;
     }
 
@@ -250,7 +257,6 @@ public class P2PActiveOrderService {
         long ahora = Instant.now().toEpochMilli();
         for (ActiveP2POrderDto o : ordenes) {
             vistaActivaEn.put(o.getOrderNumber(), ahora);
-            esperandoImportacion.remove(o.getOrderNumber());
         }
         return new ConsultaActivas(ordenes, conError);
     }
@@ -428,12 +434,11 @@ public class P2PActiveOrderService {
         for (String on : desaparecidas) {
             OrdenDesaparecida info = infoConocida.get(on);
             if (info != null) detalle.add(info);
-            esperandoImportacion.put(on, ahoraMs);
             vistaActivaEn.remove(on);
             if (info != null && !enSeguimiento.containsKey(on)) {
                 // Se le va a preguntar a Binance por ella sola: puede haberse completado, cancelado
                 // o simplemente haber salido de la ventana de 4 h estando todavía viva.
-                enSeguimiento.put(on, new Seguimiento(info.accountBinance(), info.createTimeMs(), 0L, 0));
+                enSeguimiento.put(on, new Seguimiento(info.accountBinance(), info.createTimeMs(), ahoraMs, 0L));
             }
         }
         this.desaparecidasUltimoPoll = detalle;
@@ -484,7 +489,9 @@ public class P2PActiveOrderService {
         long inicioVentana = ahora;
         for (Map.Entry<String, Seguimiento> e : enSeguimiento.entrySet()) {
             Seguimiento s = e.getValue();
-            if (ahora - s.ultimaRevisionMs() < REVISION_SEGUIMIENTO_MS) continue;
+            boolean recienDesaparecida = ahora - s.desaparecioEnMs() <= SEGUIMIENTO_INTENSIVO_MS;
+            long cada = recienDesaparecida ? 0L : REVISION_LENTA_MS;
+            if (ahora - s.ultimaRevisionMs() < cada) continue;
             porCuenta.computeIfAbsent(s.accountBinance(), k -> new ArrayList<>()).add(e.getKey());
             inicioVentana = Math.min(inicioVentana, s.createTimeMs() - 2 * 60_000L);
         }
@@ -512,15 +519,17 @@ public class P2PActiveOrderService {
                     JsonNode obj = porOrden.get(orderNumber);
 
                     if (obj == null) {
-                        int veces = s.vecesSinVerla() + 1;
-                        if (veces >= MAX_VECES_SIN_VERLA) {
+                        // Binance todavía no la refleja en su historial: al liberar, tarda un rato.
+                        // Se sigue preguntando (y su monto sigue en amarillo) hasta el tope.
+                        if (ahora - s.desaparecioEnMs() >= MAX_SIN_RESOLVER_MS) {
                             enSeguimiento.remove(orderNumber);
                             vivasFueraDeVentana.remove(orderNumber);
-                            log.warn("[Seguimiento] Binance no devuelve la orden {} ({}) tras {} intentos; "
-                                    + "deja de contarse como en curso.", orderNumber, cuenta, veces);
+                            log.warn("[Seguimiento] Binance no devuelve la orden {} ({}) desde hace {} min; "
+                                    + "deja de contarse como en curso.", orderNumber, cuenta,
+                                    (ahora - s.desaparecioEnMs()) / 60_000);
                         } else {
-                            enSeguimiento.put(orderNumber,
-                                    new Seguimiento(s.accountBinance(), s.createTimeMs(), ahora, veces));
+                            enSeguimiento.put(orderNumber, new Seguimiento(
+                                    s.accountBinance(), s.createTimeMs(), s.desaparecioEnMs(), ahora));
                         }
                         continue;
                     }
@@ -529,15 +538,14 @@ public class P2PActiveOrderService {
                     if (!esEstadoFinal(status)) {
                         // Sigue viva (típicamente apelada): vuelve al listado que ve el operador.
                         vivasFueraDeVentana.put(orderNumber, buildDto(obj, cuenta));
-                        enSeguimiento.put(orderNumber,
-                                new Seguimiento(s.accountBinance(), s.createTimeMs(), ahora, 0));
+                        enSeguimiento.put(orderNumber, new Seguimiento(
+                                s.accountBinance(), s.createTimeMs(), s.desaparecioEnMs(), ahora));
                         log.info("[Seguimiento] La orden {} ({}) sigue viva con estado {} fuera de la ventana de 4 h.",
                                 orderNumber, cuenta, status);
                     } else {
-                        // COMPLETED o CANCELLED. Se pide la importación puntual de esa orden YA
-                        // (si se completó, su plata pasa al verde en el acto; si se canceló, se
-                        // borra su pre-asignación) y se deja de seguir.
-                        enSeguimiento.remove(orderNumber);
+                        // Terminada (liberada, completada o cancelada). Se pide su importación
+                        // puntual YA: si hay venta, su plata pasa al verde en el acto; si se
+                        // canceló, se borra su pre-asignación.
                         vivasFueraDeVentana.remove(orderNumber);
                         try {
                             syncService.importarOrdenesRecientes(cuenta, s.createTimeMs() - 2 * 60_000L,
@@ -545,6 +553,17 @@ public class P2PActiveOrderService {
                         } catch (Exception ex) {
                             log.warn("[Seguimiento] No se pudo importar la orden {} ({}): {}",
                                     orderNumber, cuenta, ex.getMessage());
+                        }
+                        // Solo se deja de seguir cuando de verdad se resolvió: o quedó la venta
+                        // registrada, o se canceló. Si la importación falló, se sigue intentando y
+                        // su monto sigue en amarillo, que es donde está la plata mientras tanto.
+                        if (status.startsWith("CANCEL") || syncService.ventaRegistrada(orderNumber)) {
+                            enSeguimiento.remove(orderNumber);
+                        } else {
+                            enSeguimiento.put(orderNumber, new Seguimiento(
+                                    s.accountBinance(), s.createTimeMs(), s.desaparecioEnMs(), ahora));
+                            log.warn("[Seguimiento] La orden {} ({}) está {} pero su venta no quedó "
+                                    + "registrada; se reintenta.", orderNumber, cuenta, status);
                         }
                     }
                 }
