@@ -73,6 +73,13 @@ public class BinanceService {
 	 * Llamada GET autenticada a Binance (o pública si apiKey == null).
 	 * Reemplaza el antiguo HttpURLConnection manual.
 	 */
+	/** Hasta cuándo no se le pide nada a Binance por haber recibido un 429/418. */
+	private volatile long pausaPorLimiteHasta = 0L;
+	private static final long PAUSA_LIMITE_MS = 60_000L;
+
+	/** true si Binance nos tiene limitados en este momento (lo consulta el monitoreo). */
+	public boolean estaLimitado() { return System.currentTimeMillis() < pausaPorLimiteHasta; }
+
 	private String binanceGet(String url, String apiKey) {
 		HttpHeaders headers = new HttpHeaders();
 		if (apiKey != null) headers.set("X-MBX-APIKEY", apiKey);
@@ -80,6 +87,16 @@ public class BinanceService {
 		try {
 			return restTemplate.exchange(url, HttpMethod.GET, entity, String.class).getBody();
 		} catch (HttpClientErrorException ex) {
+			// 429 = demasiadas peticiones; 418 = Binance bloqueó la IP por insistir tras un 429.
+			// Si seguimos pegándole, el bloqueo se alarga y NADA se importa (los saldos se congelan).
+			// Se registra la pausa para que el resto del sistema deje de llamar por un rato.
+			int codigo = ex.getStatusCode().value();
+			if (codigo == 429 || codigo == 418) {
+				pausaPorLimiteHasta = System.currentTimeMillis() + PAUSA_LIMITE_MS;
+				log.error("[Binance] LÍMITE DE PETICIONES ({}). Se pausan las consultas {} s. "
+						+ "Si se repite, hay que bajar la frecuencia del poll (p2p.active-poll-ms).",
+						codigo, PAUSA_LIMITE_MS / 1000);
+			}
 			boolean isFutures = url.contains("fapi.binance.com");
 			if (isFutures && (ex.getStatusCode() == HttpStatus.UNAUTHORIZED || ex.getStatusCode() == HttpStatus.FORBIDDEN)) {
 				log.warn("Futures sin permiso ({}) para URL: {}", ex.getStatusCode(), url);
@@ -179,9 +196,14 @@ public class BinanceService {
 			String[] creds = getApiCredentials(account);
 			if (creds == null) return "{\"error\": \"Cuenta no válida.\"}";
 
+			if (System.currentTimeMillis() < pausaPorLimiteHasta) {
+				return "{\"error\": \"Binance limitó las peticiones; esperando para reintentar.\"}";
+			}
+
 			ArrayNode allOrders = mapper.createArrayNode();
 			int page = 1;
-			int rows = 50;
+			// 100 por página (el máximo) en vez de 50: la mitad de llamadas para el mismo resultado.
+			int rows = 100;
 
 			while (true) {
 				long ts = getServerTime();
