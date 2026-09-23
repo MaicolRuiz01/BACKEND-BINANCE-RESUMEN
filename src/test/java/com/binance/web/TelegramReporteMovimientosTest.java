@@ -3,6 +3,7 @@ package com.binance.web;
 import com.binance.web.Entity.Efectivo;
 import com.binance.web.Entity.Movimiento;
 import com.binance.web.Entity.Retirador;
+import com.binance.web.Repository.AccountCopRepository;
 import com.binance.web.Repository.ClienteRepository;
 import com.binance.web.Repository.EfectivoRepository;
 import com.binance.web.Repository.RetiradorRepository;
@@ -57,6 +58,7 @@ public class TelegramReporteMovimientosTest {
     @Mock private GastoService gastoService;
     @Mock private ClienteRepository clienteRepository;
     @Mock private EfectivoRepository efectivoRepository;
+    @Mock private AccountCopRepository accountCopRepository;
 
     private TelegramWebhookService webhookService;
     private Retirador retirador;
@@ -66,7 +68,7 @@ public class TelegramReporteMovimientosTest {
     void setUp() throws Exception {
         webhookService = new TelegramWebhookService(retiradorRepository, solicitudRepository,
                 telegramService, retiradorService, supplierRepository, movimientoService, gastoService,
-                clienteRepository, efectivoRepository);
+                clienteRepository, efectivoRepository, accountCopRepository);
 
         Efectivo caja = new Efectivo();
         caja.setId(1);

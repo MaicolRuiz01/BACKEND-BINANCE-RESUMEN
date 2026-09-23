@@ -23,6 +23,26 @@ public class TelegramServiceImpl implements TelegramService {
     @Value("${app.telegram.bot-token:}")
     private String botToken;
 
+    // Convención propia (no de Telegram): si el valor de un botón dinámico
+    // empieza con este prefijo, se arma como botón "web_app" (abre una Mini
+    // App embebida, ej. /miniapp/retiro.html) en vez de un botón normal con
+    // callback_data. Evita tener que cambiar la firma Map<String,String> de
+    // sendMessageWithButtons/editMessageWithDynamicButtons en todos los
+    // llamadores que solo necesitan callback_data de toda la vida.
+    private static final String PREFIJO_WEB_APP = "webapp:";
+
+    private Map<String, Object> construirBoton(String texto, String valor) {
+        Map<String, Object> button = new HashMap<>();
+        button.put("text", texto);
+        if (valor.startsWith(PREFIJO_WEB_APP)) {
+            String url = valor.substring(PREFIJO_WEB_APP.length());
+            button.put("web_app", Map.of("url", url));
+        } else {
+            button.put("callback_data", valor);
+        }
+        return button;
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // sendMessage — texto simple
     // ─────────────────────────────────────────────────────────────────────────
@@ -144,10 +164,7 @@ public class TelegramServiceImpl implements TelegramService {
         try {
             List<List<Map<String, Object>>> inlineKeyboard = new java.util.ArrayList<>();
             for (Map.Entry<String, String> entry : buttonsData.entrySet()) {
-                Map<String, Object> button = new HashMap<>();
-                button.put("text", entry.getKey());
-                button.put("callback_data", entry.getValue());
-                inlineKeyboard.add(List.of(button));
+                inlineKeyboard.add(List.of(construirBoton(entry.getKey(), entry.getValue())));
             }
 
             Map<String, Object> replyMarkup = new HashMap<>();
@@ -207,10 +224,7 @@ public class TelegramServiceImpl implements TelegramService {
             // Construir el teclado (1 botón por fila para que se lean bien los nombres largos)
             List<List<Map<String, Object>>> inlineKeyboard = new java.util.ArrayList<>();
             for (Map.Entry<String, String> entry : buttonsData.entrySet()) {
-                Map<String, Object> button = new HashMap<>();
-                button.put("text", entry.getKey());
-                button.put("callback_data", entry.getValue());
-                inlineKeyboard.add(List.of(button));
+                inlineKeyboard.add(List.of(construirBoton(entry.getKey(), entry.getValue())));
             }
 
             Map<String, Object> replyMarkup = new HashMap<>();

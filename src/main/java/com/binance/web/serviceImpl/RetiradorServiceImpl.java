@@ -69,6 +69,9 @@ public class RetiradorServiceImpl implements RetiradorService {
     @Value("${app.telegram.group-chat-id:}")
     private String telegramGroupChatId;
 
+    @Value("${app.telegram.miniapp-base-url:}")
+    private String miniAppBaseUrl;
+
     @Override
     public List<Retirador> findAll() {
         return retiradorRepository.findAll();
@@ -1182,6 +1185,7 @@ public class RetiradorServiceImpl implements RetiradorService {
         buttonsData.put("🧾 Registrar gasto", "gasto_start");
         buttonsData.put("📊 Movimientos", "movimientos_start");
         buttonsData.put("💵 Cliente pagó", "cliente_pago_start");
+        buttonsData.put("📤 Solicitar retiro", "webapp:" + miniAppBaseUrl + "/miniapp/retiro.html");
         Integer newMessageId = telegramService.sendMessageWithButtons(
                 String.valueOf(retirador.getTelegramChatId()), msj, buttonsData);
 

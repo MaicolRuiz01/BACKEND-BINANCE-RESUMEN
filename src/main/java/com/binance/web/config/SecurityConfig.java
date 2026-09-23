@@ -46,6 +46,13 @@ public class SecurityConfig {
                         .requestMatchers("/auth/login").permitAll()
                         .requestMatchers("/actuator/**").permitAll()
                         .requestMatchers("/telegram/webhook").permitAll()
+                        // Mini App "Solicitar retiro" (se abre embebida DENTRO de Telegram, sin JWT
+                        // — el retirador no hace login ahí). La identidad se valida aparte con el
+                        // initData firmado por Telegram (hash HMAC con el bot-token), no con JWT.
+                        // /miniapp/** es la página estática (HTML/JS); /telegram/miniapp/** es la API
+                        // que esa página consume.
+                        .requestMatchers("/miniapp/**").permitAll()
+                        .requestMatchers("/telegram/miniapp/**").permitAll()
                         // Endpoint de diagnóstico (solo lectura, no guarda nada) — abierto para pruebas.
                         .requestMatchers("/api/spot-orders/diagnostico-ayer").permitAll()
                         // Bot de conciliación bancaria (script local, no un usuario logueado) —
@@ -100,6 +107,24 @@ public class SecurityConfig {
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
+
+        // La Mini App de Telegram se sirve desde un dominio distinto cada vez en
+        // dev (ngrok/cloudflare) y desde el dominio de Railway en prod — no tiene
+        // sentido mantener una lista fija de orígenes para esto como con el
+        // frontend Angular. Estos endpoints no usan cookies/sesión (la identidad
+        // se valida con el initData firmado de Telegram, ver
+        // TelegramInitDataValidator), así que abrir el origen acá no expone nada
+        // sensible por CSRF/CORS. Además, algunos WebViews embebidos (Telegram
+        // Desktop/móvil) mandan Origin: null para contenido embebido, que la
+        // config de arriba rechaza con "Invalid CORS request".
+        CorsConfiguration miniAppConfig = new CorsConfiguration();
+        miniAppConfig.setAllowedOriginPatterns(List.of("*"));
+        miniAppConfig.setAllowedMethods(List.of("GET", "POST", "OPTIONS"));
+        miniAppConfig.setAllowedHeaders(List.of("*"));
+        miniAppConfig.setAllowCredentials(false);
+        source.registerCorsConfiguration("/telegram/miniapp/**", miniAppConfig);
+        source.registerCorsConfiguration("/miniapp/**", miniAppConfig);
+
         return source;
     }
 }

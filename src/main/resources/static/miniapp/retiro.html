@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Solicitar retiro</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: #ffffff;
+    --text: #111111;
+    --hint: #9ca3af;
+    --border: #e9ecef;
+    --card-bg: #f9fafb;
+    --indigo: #4f46e5;
+    --indigo-light: #6366f1;
+    --indigo-bg: #f5f3ff;
+    --cyan: #0891b2;
+    --green: #10b981;
+    --red: #b91c1c;
+    --amber-bg: #fef3c7;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 14px 14px 110px 14px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 15px;
+  }
+  h1 {
+    font-size: 19px;
+    margin: 4px 0 2px 0;
+    font-weight: 700;
+  }
+  p.subtitle {
+    color: var(--hint);
+    margin: 0 0 12px 0;
+    font-size: 13px;
+  }
+  .toolbar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .toolbar button {
+    flex: 1;
+    padding: 9px 8px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    border: 1px solid var(--indigo-light);
+    background: var(--bg);
+    color: var(--indigo);
+  }
+  .toolbar button.cancelar {
+    border-color: var(--border);
+    color: var(--hint);
+  }
+  .cuenta {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 8px;
+    transition: border-color .15s, background .15s;
+  }
+  .cuenta.checked {
+    border-color: var(--indigo-light);
+    background: var(--indigo-bg);
+  }
+  .cuenta-header {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+  }
+  .cuenta-header input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    margin-right: 10px;
+    accent-color: var(--indigo);
+    flex-shrink: 0;
+  }
+  .cuenta-info {
+    flex: 1;
+    min-width: 0;
+  }
+  .cuenta-info .nombre {
+    font-weight: 600;
+    font-size: 14.5px;
+  }
+  .cuenta-info .id-badge {
+    color: var(--hint);
+    font-size: 12px;
+    font-weight: 600;
+    margin-left: 4px;
+  }
+  .cuenta-info .saldo {
+    color: var(--hint);
+    font-size: 12.5px;
+    margin-top: 1px;
+  }
+  .comprometido-warning {
+    color: var(--red);
+    background: var(--amber-bg);
+    border-radius: 6px;
+    padding: 5px 8px;
+    font-size: 11.5px;
+    margin: 8px 0;
+  }
+  .config {
+    display: none;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(99,102,241,0.2);
+  }
+  .config.show { display: block; }
+  .config select {
+    width: 100%;
+    padding: 9px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    font-size: 14px;
+    background: var(--bg);
+    color: var(--text);
+    margin-bottom: 8px;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  .monto-row {
+    margin-bottom: 8px;
+  }
+  .monto-row label {
+    display: block;
+    font-size: 11.5px;
+    text-transform: uppercase;
+    color: var(--hint);
+    font-weight: 700;
+    margin-bottom: 3px;
+    letter-spacing: 0.02em;
+  }
+  .monto-row input {
+    width: 100%;
+    padding: 9px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    font-size: 15px;
+    background: var(--bg);
+    color: var(--text);
+  }
+  .monto-row .cupo-hint {
+    font-size: 11.5px;
+    color: var(--hint);
+    margin-top: 3px;
+  }
+  .monto-row .cupo-hint.exceeded {
+    color: var(--red);
+    font-weight: 600;
+  }
+  #resumen {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    padding: 10px 16px;
+    font-size: 13px;
+    display: none;
+  }
+  #resumen.show { display: block; }
+  #resumen .stats {
+    display: flex;
+    justify-content: space-around;
+    background: var(--card-bg);
+    border-radius: 10px;
+    padding: 8px 6px;
+  }
+  #resumen .stat { text-align: center; }
+  #resumen .stat .label {
+    text-transform: uppercase;
+    color: var(--hint);
+    font-size: 10px;
+    font-weight: 700;
+  }
+  #resumen .stat .value {
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--green);
+  }
+  #resumen .stat .value.indigo { color: var(--indigo); }
+  #estado {
+    text-align: center;
+    padding: 30px 10px;
+    color: var(--hint);
+  }
+  #error-box {
+    background: #fee2e2;
+    color: var(--red);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    font-size: 13px;
+    display: none;
+    white-space: pre-wrap;
+  }
+  #error-box.show { display: block; }
+  #ok-box {
+    text-align: center;
+    padding: 40px 16px;
+    display: none;
+  }
+  #ok-box.show { display: block; }
+  #ok-box .check { font-size: 48px; }
+</style>
+</head>
+<body>
+
+<h1>📤 Solicitar retiro</h1>
+<p class="subtitle">Marca las cuentas que quieres pedir, elige el tipo y el monto de cada una.</p>
+
+<div id="error-box"></div>
+
+<div class="toolbar">
+  <button id="btn-todo">⚡ Todo</button>
+  <button class="cancelar" id="btn-cancelar">✕ Cancelar</button>
+</div>
+
+<div id="estado">Cargando cuentas…</div>
+<div id="lista"></div>
+
+<div id="ok-box">
+  <div class="check">✅</div>
+  <div id="ok-msg"></div>
+</div>
+
+<div id="resumen">
+  <div class="stats">
+    <div class="stat">
+      <div class="label">Cuentas</div>
+      <div class="value indigo" id="resumen-cuentas">0</div>
+    </div>
+    <div class="stat">
+      <div class="label">Total</div>
+      <div class="value" id="resumen-total">$0</div>
+    </div>
+  </div>
+</div>
+
+<script>
+  var tg = window.Telegram && window.Telegram.WebApp;
+  if (tg) {
+    tg.ready();
+    tg.expand();
+    // A propósito NO se toman los colores del tema de Telegram (tg.themeParams):
+    // si el retirador tiene Telegram en modo oscuro, esta pantalla debe seguir
+    // viéndose IGUAL que el modal "Solicitar retiro" de la web de Pochonance
+    // (siempre claro), no mezclarse con un tema oscuro a medias. Los colores
+    // fijos de la hoja de estilos de abajo son los únicos que se usan.
+    if (tg.setBackgroundColor) tg.setBackgroundColor('#ffffff');
+    if (tg.setHeaderColor) tg.setHeaderColor('#ffffff');
+  }
+
+  // cuentas[id] = { id, nombre, saldo, cupoCajeroDisponibleHoy, cupoCorresponsalDisponibleHoy,
+  //                 montoComprometido, montoCajeroComprometido, montoCorresponsalComprometido }
+  var cuentas = {};
+  // estado[cuentaId] = { seleccionada, tipo, montoCajero, montoCorresponsal }
+  var estadoCuentas = {};
+
+  function fmtMoney(n) {
+    return '$' + Math.round(n || 0).toLocaleString('es-CO');
+  }
+
+  function truncarACentenas(v) {
+    return Math.floor(Math.max(v, 0) / 100) * 100;
+  }
+
+  function disponibleReal(c) {
+    return (c.saldo || 0) - (c.montoComprometido || 0);
+  }
+  function cupoCajeroDisponibleReal(c) {
+    return Math.max((c.cupoCajeroDisponibleHoy || 0) - (c.montoCajeroComprometido || 0), 0);
+  }
+  function cupoCorresponsalDisponibleReal(c) {
+    return Math.max((c.cupoCorresponsalDisponibleHoy || 0) - (c.montoCorresponsalComprometido || 0), 0);
+  }
+
+  function mostrarError(msg) {
+    var box = document.getElementById('error-box');
+    box.textContent = msg;
+    box.classList.add('show');
+  }
+  function ocultarError() {
+    document.getElementById('error-box').classList.remove('show');
+  }
+
+  function cargarCuentas() {
+    fetch('/telegram/miniapp/cuentas')
+      .then(function (r) { if (!r.ok) throw new Error('No se pudo cargar la lista de cuentas.'); return r.json(); })
+      .then(function (lista) {
+        document.getElementById('estado').style.display = 'none';
+        if (!lista.length) {
+          document.getElementById('estado').style.display = 'block';
+          document.getElementById('estado').textContent = 'No hay cuentas con saldo disponible.';
+          return;
+        }
+        var listaDiv = document.getElementById('lista');
+        lista.forEach(function (c) {
+          cuentas[c.id] = c;
+          estadoCuentas[c.id] = { seleccionada: false, tipo: null, montoCajero: null, montoCorresponsal: null };
+          listaDiv.appendChild(renderCuenta(c));
+        });
+      })
+      .catch(function (e) {
+        document.getElementById('estado').textContent = 'Error cargando cuentas. Cierra y vuelve a abrir.';
+        mostrarError(e.message);
+      });
+  }
+
+  function renderCuenta(c) {
+    var div = document.createElement('div');
+    div.className = 'cuenta';
+    div.id = 'cuenta-' + c.id;
+
+    var comprometidoHtml = '';
+    if ((c.montoComprometido || 0) > 0) {
+      comprometidoHtml = '<div class="comprometido-warning">🕐 Ya hay ' + fmtMoney(c.montoComprometido) +
+        ' en retiros sin confirmar — disponible: ' + fmtMoney(disponibleReal(c)) + '</div>';
+    }
+
+    div.innerHTML =
+      '<div class="cuenta-header" data-id="' + c.id + '">' +
+        '<input type="checkbox" id="chk-' + c.id + '">' +
+        '<div class="cuenta-info">' +
+          '<span class="nombre">' + c.nombre + '</span><span class="id-badge">#' + c.id + '</span>' +
+          '<div class="saldo">' + fmtMoney(c.saldo) + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="config" id="config-' + c.id + '">' +
+        comprometidoHtml +
+        '<select id="tipo-' + c.id + '">' +
+          '<option value="">Selecciona el tipo…</option>' +
+          '<option value="CAJERO">Cajero ($ 2)</option>' +
+          '<option value="CORRESPONSAL">Corresponsal ($ 3)</option>' +
+          '<option value="COMPLETO">Completo ($ 4)</option>' +
+        '</select>' +
+        '<div class="monto-row" id="row-cajero-' + c.id + '" style="display:none;">' +
+          '<label>Monto Cajero</label>' +
+          '<input type="number" inputmode="numeric" placeholder="0" id="monto-cajero-' + c.id + '">' +
+          '<div class="cupo-hint" id="hint-cajero-' + c.id + '"></div>' +
+        '</div>' +
+        '<div class="monto-row" id="row-corresponsal-' + c.id + '" style="display:none;">' +
+          '<label>Monto Corresponsal</label>' +
+          '<input type="number" inputmode="numeric" placeholder="0" id="monto-corresponsal-' + c.id + '">' +
+          '<div class="cupo-hint" id="hint-corresponsal-' + c.id + '"></div>' +
+        '</div>' +
+      '</div>';
+
+    var checkbox = div.querySelector('#chk-' + c.id);
+    var header = div.querySelector('.cuenta-header');
+    var config = div.querySelector('#config-' + c.id);
+    var selectTipo = div.querySelector('#tipo-' + c.id);
+
+    function setChecked(val) {
+      checkbox.checked = val;
+      estadoCuentas[c.id].seleccionada = val;
+      div.classList.toggle('checked', val);
+      config.classList.toggle('show', val);
+      actualizarResumen();
+    }
+
+    header.addEventListener('click', function (ev) {
+      if (ev.target === checkbox || ev.target === selectTipo) return;
+      setChecked(!checkbox.checked);
+    });
+    checkbox.addEventListener('change', function () { setChecked(checkbox.checked); });
+
+    selectTipo.addEventListener('change', function () {
+      var tipo = selectTipo.value || null;
+      estadoCuentas[c.id].tipo = tipo;
+      div.querySelector('#row-cajero-' + c.id).style.display = (tipo === 'CAJERO' || tipo === 'COMPLETO') ? 'block' : 'none';
+      div.querySelector('#row-corresponsal-' + c.id).style.display = (tipo === 'CORRESPONSAL' || tipo === 'COMPLETO') ? 'block' : 'none';
+      actualizarHints(c.id);
+      actualizarResumen();
+    });
+
+    div.querySelector('#monto-cajero-' + c.id).addEventListener('input', function (e) {
+      estadoCuentas[c.id].montoCajero = parseFloat(e.target.value) || 0;
+      actualizarHints(c.id);
+      actualizarResumen();
+    });
+    div.querySelector('#monto-corresponsal-' + c.id).addEventListener('input', function (e) {
+      estadoCuentas[c.id].montoCorresponsal = parseFloat(e.target.value) || 0;
+      actualizarHints(c.id);
+      actualizarResumen();
+    });
+
+    return div;
+  }
+
+  function actualizarHints(cuentaId) {
+    var c = cuentas[cuentaId];
+    var e = estadoCuentas[cuentaId];
+    var hintCajero = document.getElementById('hint-cajero-' + cuentaId);
+    var hintCorresponsal = document.getElementById('hint-corresponsal-' + cuentaId);
+    if (hintCajero) {
+      var cupoCajero = cupoCajeroDisponibleReal(c);
+      hintCajero.textContent = 'Cupo cajero hoy: ' + fmtMoney(cupoCajero) + ' disponible';
+      hintCajero.classList.toggle('exceeded', (e.montoCajero || 0) > cupoCajero);
+    }
+    if (hintCorresponsal) {
+      var cupoCorresponsal = cupoCorresponsalDisponibleReal(c);
+      hintCorresponsal.textContent = 'Cupo corresponsal hoy: ' + fmtMoney(cupoCorresponsal) + ' disponible';
+      hintCorresponsal.classList.toggle('exceeded', (e.montoCorresponsal || 0) > cupoCorresponsal);
+    }
+  }
+
+  function detallesValidos() {
+    var detalles = [];
+    Object.keys(estadoCuentas).forEach(function (id) {
+      var e = estadoCuentas[id];
+      if (!e.seleccionada || !e.tipo) return;
+      var total = (e.montoCajero || 0) + (e.montoCorresponsal || 0);
+      if (total <= 0) return;
+      detalles.push({
+        cuentaCopId: parseInt(id, 10),
+        tipoRetiro: e.tipo,
+        montoCajero: e.montoCajero || null,
+        montoCorresponsal: e.montoCorresponsal || null
+      });
+    });
+    return detalles;
+  }
+
+  function actualizarResumen() {
+    var detalles = detallesValidos();
+    var resumen = document.getElementById('resumen');
+    var total = 0;
+    detalles.forEach(function (d) { total += (d.montoCajero || 0) + (d.montoCorresponsal || 0); });
+
+    if (detalles.length === 0) {
+      resumen.classList.remove('show');
+      if (tg && tg.MainButton) tg.MainButton.hide();
+      return;
+    }
+
+    document.getElementById('resumen-cuentas').textContent = detalles.length;
+    document.getElementById('resumen-total').textContent = fmtMoney(total);
+    resumen.classList.add('show');
+
+    if (tg && tg.MainButton) {
+      tg.MainButton.setText('✅ Enviar solicitud — ' + fmtMoney(total));
+      tg.MainButton.show();
+      tg.MainButton.enable();
+    }
+  }
+
+  /**
+   * Botón "Todo": misma regla que en Pochonance (calcularSeleccionAutomatica
+   * en retiradores.component.ts) — disponible < $1.500 se deja sin tocar;
+   * $1.500-$3.999 → Cajero (tope $2.700); >=$4.000 → Corresponsal (tope
+   * $10.000) y si sobran $1.500+ ese resto también se pide, por Cajero. A
+   * diferencia de la web (que arma DOS solicitudes separadas cuando a una
+   * cuenta le toca cajero y corresponsal), acá se marca como "Completo" en
+   * una sola fila — mismo resultado práctico, un paso menos para enviar.
+   */
+  function aplicarTodo() {
+    Object.keys(cuentas).forEach(function (id) {
+      var c = cuentas[id];
+      var disponible = truncarACentenas(disponibleReal(c));
+      var cupoCajero = truncarACentenas(cupoCajeroDisponibleReal(c));
+      var cupoCorresponsal = truncarACentenas(cupoCorresponsalDisponibleReal(c));
+
+      var montoCajero = 0, montoCorresponsal = 0;
+      if (disponible >= 4000) {
+        montoCorresponsal = Math.min(disponible, 10000, cupoCorresponsal);
+        var restante = disponible - montoCorresponsal;
+        if (restante >= 1500) {
+          montoCajero = Math.min(restante, 2700, cupoCajero);
+        }
+      } else if (disponible >= 1500) {
+        montoCajero = Math.min(disponible, 2700, cupoCajero);
+      }
+
+      var tipo = null;
+      if (montoCajero > 0 && montoCorresponsal > 0) tipo = 'COMPLETO';
+      else if (montoCorresponsal > 0) tipo = 'CORRESPONSAL';
+      else if (montoCajero > 0) tipo = 'CAJERO';
+
+      var checkbox = document.getElementById('chk-' + id);
+      var div = document.getElementById('cuenta-' + id);
+      var config = document.getElementById('config-' + id);
+      var selectTipo = document.getElementById('tipo-' + id);
+
+      if (!tipo) {
+        checkbox.checked = false;
+        estadoCuentas[id] = { seleccionada: false, tipo: null, montoCajero: null, montoCorresponsal: null };
+        div.classList.remove('checked');
+        config.classList.remove('show');
+        return;
+      }
+
+      checkbox.checked = true;
+      div.classList.add('checked');
+      config.classList.add('show');
+      selectTipo.value = tipo;
+      estadoCuentas[id] = { seleccionada: true, tipo: tipo, montoCajero: montoCajero || null, montoCorresponsal: montoCorresponsal || null };
+
+      document.getElementById('row-cajero-' + id).style.display = (tipo === 'CAJERO' || tipo === 'COMPLETO') ? 'block' : 'none';
+      document.getElementById('row-corresponsal-' + id).style.display = (tipo === 'CORRESPONSAL' || tipo === 'COMPLETO') ? 'block' : 'none';
+      if (montoCajero > 0) document.getElementById('monto-cajero-' + id).value = montoCajero;
+      if (montoCorresponsal > 0) document.getElementById('monto-corresponsal-' + id).value = montoCorresponsal;
+      actualizarHints(id);
+    });
+    actualizarResumen();
+  }
+
+  function cancelarTodo() {
+    Object.keys(estadoCuentas).forEach(function (id) {
+      estadoCuentas[id] = { seleccionada: false, tipo: null, montoCajero: null, montoCorresponsal: null };
+      var checkbox = document.getElementById('chk-' + id);
+      var div = document.getElementById('cuenta-' + id);
+      var config = document.getElementById('config-' + id);
+      if (checkbox) checkbox.checked = false;
+      if (div) div.classList.remove('checked');
+      if (config) config.classList.remove('show');
+    });
+    actualizarResumen();
+  }
+
+  function enviarSolicitud() {
+    ocultarError();
+    var detalles = detallesValidos();
+    if (detalles.length === 0) {
+      mostrarError('Selecciona al menos una cuenta con tipo y monto.');
+      return;
+    }
+    if (tg && tg.MainButton) {
+      tg.MainButton.showProgress(true);
+      tg.MainButton.disable();
+    }
+
+    fetch('/telegram/miniapp/solicitar-retiro', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        initData: tg ? tg.initData : '',
+        detalles: detalles
+      })
+    })
+      .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+      .then(function (res) {
+        if (!res.ok) {
+          throw new Error(res.data && res.data.error ? res.data.error : 'No se pudo enviar la solicitud.');
+        }
+        document.getElementById('lista').style.display = 'none';
+        document.querySelector('.toolbar').style.display = 'none';
+        document.getElementById('resumen').classList.remove('show');
+        if (tg && tg.MainButton) tg.MainButton.hide();
+        document.getElementById('ok-msg').textContent = 'Solicitud #' + res.data.solicitudId + ' enviada. Revisa el mensaje en tu chat con el bot para confirmarla.';
+        document.getElementById('ok-box').classList.add('show');
+        setTimeout(function () { if (tg) tg.close(); }, 2500);
+      })
+      .catch(function (e) {
+        mostrarError(e.message);
+        if (tg && tg.MainButton) {
+          tg.MainButton.hideProgress();
+          tg.MainButton.enable();
+        }
+      });
+  }
+
+  document.getElementById('btn-todo').addEventListener('click', aplicarTodo);
+  document.getElementById('btn-cancelar').addEventListener('click', function () {
+    if (tg) { tg.close(); } else { cancelarTodo(); }
+  });
+
+  if (tg && tg.MainButton) {
+    tg.MainButton.onClick(enviarSolicitud);
+  }
+
+  cargarCuentas();
+</script>
+</body>
+</html>
