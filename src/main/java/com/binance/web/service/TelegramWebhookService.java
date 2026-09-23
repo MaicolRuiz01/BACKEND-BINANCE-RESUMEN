@@ -1,11 +1,13 @@
 package com.binance.web.service;
 
 import com.binance.web.Entity.*;
+import com.binance.web.Repository.AccountCopRepository;
 import com.binance.web.Repository.ClienteRepository;
 import com.binance.web.Repository.EfectivoRepository;
 import com.binance.web.Repository.RetiradorRepository;
 import com.binance.web.Repository.SolicitudRetiroRepository;
 import com.binance.web.Repository.SupplierRepository;
+import com.binance.web.dto.SolicitudRetiroRequestDto;
 import com.binance.web.movimientos.MovimientoService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -38,12 +40,16 @@ public class TelegramWebhookService {
     private final GastoService gastoService;
     private final ClienteRepository clienteRepository;
     private final EfectivoRepository efectivoRepository;
+    private final AccountCopRepository accountCopRepository;
 
     @Value("${app.telegram.group-chat-id:}")
     private String groupChatId;
 
     @Value("${app.telegram.group-invite-link:}")
     private String groupInviteLink;
+
+    @Value("${app.telegram.miniapp-base-url:}")
+    private String miniAppBaseUrl;
 
     private static final ZoneId ZONE_BOGOTA = ZoneId.of("America/Bogota");
 
@@ -78,6 +84,46 @@ public class TelegramWebhookService {
     private final Map<Long, PendingClientePago> pendingClientePagos = new ConcurrentHashMap<>();
 
     private record PendingClientePago(Integer clienteId, String clienteNombre, Integer messageId) {
+    }
+
+    // Estado en memoria: retiradores armando su propia "Solicitud de retiro"
+    // desde el bot (a pedido de Milton, 21/09/2026) — marcan varias cuentas del
+    // pool general, luego configuran tipo+monto de cada una, y al final se
+    // manda todo junto reusando RetiradorService.crearSolicitud (misma
+    // validación de saldo/cupo diario que ya usa la web). Key = telegramUserId.
+    private final Map<Long, PendingSolicitudRetiro> pendingSolicitudes = new ConcurrentHashMap<>();
+
+    /** Detalle ya configurado (tipo + monto(s)) de una cuenta, mientras se arma la solicitud. */
+    private static class DetalleEnProgreso {
+        TipoRetiro tipo;
+        Double montoCajero;
+        Double montoCorresponsal;
+
+        double total() {
+            double t = 0;
+            if (montoCajero != null) t += montoCajero;
+            if (montoCorresponsal != null) t += montoCorresponsal;
+            return t;
+        }
+    }
+
+    /** Estado completo del flujo "Solicitar retiro" para un retirador. Mutable
+     *  a propósito (a diferencia de los otros Pending*, que son records) porque
+     *  este flujo tiene varias fases (selección → configuración → resumen) que
+     *  van cambiando el mismo objeto en vez de reemplazarlo. */
+    private static class PendingSolicitudRetiro {
+        Integer messageId;
+        // Cuentas marcadas en la fase de checklist, en el orden en que se tocaron.
+        final java.util.LinkedHashSet<Integer> seleccionadas = new java.util.LinkedHashSet<>();
+        // Detalles ya configurados por cuenta, en el orden en que se completan.
+        final java.util.LinkedHashMap<Integer, DetalleEnProgreso> detalles = new java.util.LinkedHashMap<>();
+        // Cuentas seleccionadas que todavía faltan por configurar.
+        java.util.Deque<Integer> pendientesPorConfigurar;
+        // Cuenta que se está configurando AHORA MISMO (mientras se espera el/los monto(s)).
+        Integer cuentaEnCurso;
+        TipoRetiro tipoEnCurso;
+        // Para COMPLETO: primero se pide el monto de cajero, luego el de corresponsal.
+        Double montoCajeroEnCurso;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -153,6 +199,18 @@ public class TelegramWebhookService {
             handleClientePagoSel(callbackQueryId, data, telegramUserId, messageId);
         } else if (data.equals("cliente_pago_cancel")) {
             handleClientePagoCancel(callbackQueryId, telegramUserId, messageId);
+        } else if (data.equals("solreq_start")) {
+            handleSolicitarRetiroStart(callbackQueryId, telegramUserId, messageId);
+        } else if (data.startsWith("solreq_toggle:")) {
+            handleSolreqToggle(callbackQueryId, data, telegramUserId, messageId);
+        } else if (data.equals("solreq_continuar")) {
+            handleSolreqContinuar(callbackQueryId, telegramUserId, messageId);
+        } else if (data.startsWith("solreq_tipo:")) {
+            handleSolreqTipo(callbackQueryId, data, telegramUserId, messageId);
+        } else if (data.equals("solreq_enviar")) {
+            handleSolreqEnviar(callbackQueryId, telegramUserId, messageId);
+        } else if (data.equals("solreq_cancel")) {
+            handleSolreqCancel(callbackQueryId, telegramUserId, messageId);
         }
     }
 
@@ -176,11 +234,12 @@ public class TelegramWebhookService {
             return;
         }
 
-        // Descartar cualquier flujo de entrega/gasto/monto-real/cliente-pago que hubiera quedado a medias
+        // Descartar cualquier flujo de entrega/gasto/monto-real/cliente-pago/solicitud que hubiera quedado a medias
         pendingEntregas.remove(telegramUserId);
         pendingGastos.remove(telegramUserId);
         pendingMontosReales.remove(telegramUserId);
         pendingClientePagos.remove(telegramUserId);
+        pendingSolicitudes.remove(telegramUserId);
 
         // Construir mapa de botones (Nombre -> callback_data)
         java.util.LinkedHashMap<String, String> buttonsData = new java.util.LinkedHashMap<>();
@@ -264,10 +323,11 @@ public class TelegramWebhookService {
             return;
         }
 
-        // Descartar cualquier flujo de entrega/monto-real/cliente-pago que hubiera quedado a medias
+        // Descartar cualquier flujo de entrega/monto-real/cliente-pago/solicitud que hubiera quedado a medias
         pendingEntregas.remove(telegramUserId);
         pendingMontosReales.remove(telegramUserId);
         pendingClientePagos.remove(telegramUserId);
+        pendingSolicitudes.remove(telegramUserId);
         pendingGastos.put(telegramUserId, new PendingGasto(messageId));
 
         String texto = String.format(
@@ -319,11 +379,12 @@ public class TelegramWebhookService {
             return;
         }
 
-        // Descartar cualquier flujo de entrega/gasto/monto-real/cliente-pago que hubiera quedado a medias
+        // Descartar cualquier flujo de entrega/gasto/monto-real/cliente-pago/solicitud que hubiera quedado a medias
         pendingEntregas.remove(telegramUserId);
         pendingGastos.remove(telegramUserId);
         pendingMontosReales.remove(telegramUserId);
         pendingClientePagos.remove(telegramUserId);
+        pendingSolicitudes.remove(telegramUserId);
 
         java.util.LinkedHashMap<String, String> buttonsData = new java.util.LinkedHashMap<>();
         for (Cliente cliente : clientes) {
@@ -378,6 +439,304 @@ public class TelegramWebhookService {
         Retirador retirador = retiradorRepository.findByTelegramChatId(telegramUserId).orElse(null);
         if (retirador == null || retirador.getEfectivo() == null || retirador.getEfectivo().getSaldo() <= 0) {
             telegramService.editMessageTextOnly(String.valueOf(telegramUserId), messageId, "Registro cancelado.");
+            telegramService.answerCallbackQuery(callbackQueryId, "");
+            return;
+        }
+
+        restaurarRecordatorio(telegramUserId, messageId, retirador);
+        telegramService.answerCallbackQuery(callbackQueryId, "");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Flujo "📤 Solicitar retiro": el retirador arma su propia solicitud desde
+    // el bot, para varias cuentas a la vez. Fase 1: marca (toggle) las cuentas
+    // que quiere pedir. Fase 2: por cada una elegida, tipo + monto(s). Fase 3:
+    // resumen y envío — reusa RetiradorService.crearSolicitud, la MISMA
+    // validación de saldo/cupo diario que ya usa la web, para no duplicar
+    // lógica de negocio.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private void handleSolicitarRetiroStart(String callbackQueryId, Long telegramUserId, Integer messageId) {
+        Retirador retirador = retiradorRepository.findByTelegramChatId(telegramUserId).orElse(null);
+        if (retirador == null) {
+            telegramService.answerCallbackQuery(callbackQueryId, "⚠️ No estás registrado como retirador.");
+            return;
+        }
+
+        java.util.List<AccountCop> cuentas = cuentasConSaldoDisponibles();
+        if (cuentas.isEmpty()) {
+            telegramService.answerCallbackQuery(callbackQueryId, "⚠️ No hay cuentas con saldo disponible.");
+            return;
+        }
+
+        // Descartar cualquier otro flujo que hubiera quedado a medias
+        pendingEntregas.remove(telegramUserId);
+        pendingGastos.remove(telegramUserId);
+        pendingMontosReales.remove(telegramUserId);
+        pendingClientePagos.remove(telegramUserId);
+
+        PendingSolicitudRetiro pending = new PendingSolicitudRetiro();
+        pending.messageId = messageId;
+        pendingSolicitudes.put(telegramUserId, pending);
+
+        renderListaSeleccionCuentas(telegramUserId, messageId, pending);
+        telegramService.answerCallbackQuery(callbackQueryId, "");
+    }
+
+    /** Solo cuentas con saldo > 0, de mayor a menor saldo. */
+    private java.util.List<AccountCop> cuentasConSaldoDisponibles() {
+        return accountCopRepository.findAll().stream()
+                .filter(c -> c.getBalance() != null && c.getBalance() > 0)
+                .sorted((a, b) -> Double.compare(b.getBalance(), a.getBalance()))
+                .collect(java.util.stream.Collectors.toList());
+    }
+
+    /** Redibuja el checklist de cuentas con el estado actual de selección. */
+    private void renderListaSeleccionCuentas(Long telegramUserId, Integer messageId, PendingSolicitudRetiro pending) {
+        java.util.List<AccountCop> cuentas = cuentasConSaldoDisponibles();
+
+        java.util.LinkedHashMap<String, String> buttonsData = new java.util.LinkedHashMap<>();
+        for (AccountCop cuenta : cuentas) {
+            String marca = pending.seleccionadas.contains(cuenta.getId()) ? "☑️ " : "☐ ";
+            buttonsData.put(marca + etiquetaCuenta(cuenta) + " — $" + String.format("%,.0f", cuenta.getBalance()),
+                    "solreq_toggle:" + cuenta.getId());
+        }
+        buttonsData.put("▶️ Continuar (" + pending.seleccionadas.size() + " seleccionada(s))", "solreq_continuar");
+        buttonsData.put("❌ Cancelar", "solreq_cancel");
+
+        telegramService.editMessageWithDynamicButtons(
+                String.valueOf(telegramUserId),
+                messageId,
+                "📤 *Solicitar retiro*\n\nMarca las cuentas que quieres pedir (puedes elegir varias) y luego pulsa Continuar.",
+                buttonsData);
+    }
+
+    private void handleSolreqToggle(String callbackQueryId, String data, Long telegramUserId, Integer messageId) {
+        Integer cuentaId;
+        try {
+            cuentaId = Integer.parseInt(data.substring("solreq_toggle:".length()));
+        } catch (NumberFormatException e) {
+            telegramService.answerCallbackQuery(callbackQueryId, "⚠️ Error en los datos de la cuenta.");
+            return;
+        }
+
+        PendingSolicitudRetiro pending = pendingSolicitudes.get(telegramUserId);
+        if (pending == null) {
+            pending = new PendingSolicitudRetiro();
+            pending.messageId = messageId;
+            pendingSolicitudes.put(telegramUserId, pending);
+        }
+
+        if (!pending.seleccionadas.remove(cuentaId)) {
+            pending.seleccionadas.add(cuentaId);
+        }
+
+        renderListaSeleccionCuentas(telegramUserId, messageId, pending);
+        telegramService.answerCallbackQuery(callbackQueryId, "");
+    }
+
+    private void handleSolreqContinuar(String callbackQueryId, Long telegramUserId, Integer messageId) {
+        PendingSolicitudRetiro pending = pendingSolicitudes.get(telegramUserId);
+        if (pending == null || pending.seleccionadas.isEmpty()) {
+            telegramService.answerCallbackQuery(callbackQueryId, "⚠️ Selecciona al menos una cuenta primero.");
+            return;
+        }
+
+        pending.pendientesPorConfigurar = new java.util.ArrayDeque<>(pending.seleccionadas);
+        telegramService.answerCallbackQuery(callbackQueryId, "");
+        avanzarAConfigurarSiguiente(telegramUserId, messageId, pending);
+    }
+
+    /** Pide tipo+monto de la siguiente cuenta pendiente, o muestra el resumen final si ya no queda ninguna. */
+    private void avanzarAConfigurarSiguiente(Long telegramUserId, Integer messageId, PendingSolicitudRetiro pending) {
+        if (pending.pendientesPorConfigurar == null || pending.pendientesPorConfigurar.isEmpty()) {
+            mostrarResumenFinalSolicitud(telegramUserId, messageId, pending);
+            return;
+        }
+
+        Integer cuentaId = pending.pendientesPorConfigurar.poll();
+        AccountCop cuenta = accountCopRepository.findById(cuentaId).orElse(null);
+        if (cuenta == null) {
+            // Cuenta borrada entre que se seleccionó y ahora — se salta sin bloquear el resto.
+            avanzarAConfigurarSiguiente(telegramUserId, messageId, pending);
+            return;
+        }
+
+        pending.cuentaEnCurso = cuentaId;
+        pending.tipoEnCurso = null;
+        pending.montoCajeroEnCurso = null;
+
+        String texto = String.format("💰 *%s* (saldo: $%,.0f)\n\n¿Qué tipo de retiro?",
+                etiquetaCuenta(cuenta), cuenta.getBalance());
+
+        java.util.LinkedHashMap<String, String> buttonsData = new java.util.LinkedHashMap<>();
+        buttonsData.put("🏧 Cajero", "solreq_tipo:CAJERO");
+        buttonsData.put("🏦 Corresponsal", "solreq_tipo:CORRESPONSAL");
+        buttonsData.put("🏧🏦 Completo", "solreq_tipo:COMPLETO");
+        buttonsData.put("❌ Cancelar", "solreq_cancel");
+        telegramService.editMessageWithDynamicButtons(String.valueOf(telegramUserId), messageId, texto, buttonsData);
+    }
+
+    private void handleSolreqTipo(String callbackQueryId, String data, Long telegramUserId, Integer messageId) {
+        PendingSolicitudRetiro pending = pendingSolicitudes.get(telegramUserId);
+        if (pending == null || pending.cuentaEnCurso == null) {
+            telegramService.answerCallbackQuery(callbackQueryId, "⚠️ Esta solicitud ya no está activa. Empieza de nuevo.");
+            return;
+        }
+
+        TipoRetiro tipo;
+        try {
+            tipo = TipoRetiro.valueOf(data.substring("solreq_tipo:".length()));
+        } catch (IllegalArgumentException e) {
+            telegramService.answerCallbackQuery(callbackQueryId, "⚠️ Tipo de retiro inválido.");
+            return;
+        }
+
+        pending.tipoEnCurso = tipo;
+        AccountCop cuenta = accountCopRepository.findById(pending.cuentaEnCurso).orElse(null);
+        String etiqueta = cuenta != null ? etiquetaCuenta(cuenta) : ("Cuenta " + pending.cuentaEnCurso);
+
+        String texto = switch (tipo) {
+            case CAJERO -> "✍️ Escribe el monto de *CAJERO* para " + etiqueta + ":";
+            case CORRESPONSAL -> "✍️ Escribe el monto de *CORRESPONSAL* para " + etiqueta + ":";
+            case COMPLETO -> "✍️ Escribe el monto de *CAJERO* para " + etiqueta + " (luego te pido el de corresponsal):";
+        };
+
+        java.util.LinkedHashMap<String, String> buttonsData = new java.util.LinkedHashMap<>();
+        buttonsData.put("❌ Cancelar", "solreq_cancel");
+        telegramService.editMessageWithDynamicButtons(String.valueOf(telegramUserId), messageId, texto, buttonsData);
+        telegramService.answerCallbackQuery(callbackQueryId, "");
+    }
+
+    /**
+     * Procesa el texto que el retirador escribió como respuesta al flujo
+     * "Solicitar retiro" — el monto (o el primero de dos, si es COMPLETO) para
+     * la cuenta que se está configurando.
+     */
+    private void handleSolreqMonto(PendingSolicitudRetiro pending, Long telegramUserId, String textoRecibido) {
+        if (pending.cuentaEnCurso == null || pending.tipoEnCurso == null) {
+            return;
+        }
+
+        String soloNumeros = textoRecibido.trim().replace("$", "").replace(".", "").replace(",", "").replace(" ", "");
+        Double monto;
+        try {
+            monto = Double.parseDouble(soloNumeros);
+        } catch (NumberFormatException e) {
+            telegramService.sendMessage(String.valueOf(telegramUserId),
+                    "⚠️ No entendí ese monto. Escribe solo el número, ej: `50000`.");
+            return;
+        }
+
+        if (monto <= 0) {
+            telegramService.sendMessage(String.valueOf(telegramUserId), "⚠️ El monto debe ser mayor a $0.");
+            return;
+        }
+
+        Integer cuentaId = pending.cuentaEnCurso;
+
+        if (pending.tipoEnCurso == TipoRetiro.COMPLETO && pending.montoCajeroEnCurso == null) {
+            // Primer monto de un COMPLETO (cajero) — pedimos el segundo (corresponsal) antes de cerrar.
+            pending.montoCajeroEnCurso = monto;
+            AccountCop cuenta = accountCopRepository.findById(cuentaId).orElse(null);
+            String etiqueta = cuenta != null ? etiquetaCuenta(cuenta) : ("Cuenta " + cuentaId);
+            telegramService.sendMessage(String.valueOf(telegramUserId),
+                    "✍️ Ahora escribe el monto de *CORRESPONSAL* para " + etiqueta + ":");
+            return;
+        }
+
+        DetalleEnProgreso detalle = new DetalleEnProgreso();
+        detalle.tipo = pending.tipoEnCurso;
+        if (pending.tipoEnCurso == TipoRetiro.CAJERO) {
+            detalle.montoCajero = monto;
+        } else if (pending.tipoEnCurso == TipoRetiro.CORRESPONSAL) {
+            detalle.montoCorresponsal = monto;
+        } else { // COMPLETO, este es el segundo monto (corresponsal)
+            detalle.montoCajero = pending.montoCajeroEnCurso;
+            detalle.montoCorresponsal = monto;
+        }
+        pending.detalles.put(cuentaId, detalle);
+
+        pending.cuentaEnCurso = null;
+        pending.tipoEnCurso = null;
+        pending.montoCajeroEnCurso = null;
+
+        avanzarAConfigurarSiguiente(telegramUserId, pending.messageId, pending);
+    }
+
+    private void mostrarResumenFinalSolicitud(Long telegramUserId, Integer messageId, PendingSolicitudRetiro pending) {
+        StringBuilder sb = new StringBuilder("📋 *Resumen de tu solicitud:*\n\n");
+        double totalGeneral = 0;
+        for (var entry : pending.detalles.entrySet()) {
+            AccountCop cuenta = accountCopRepository.findById(entry.getKey()).orElse(null);
+            String etiqueta = cuenta != null ? etiquetaCuenta(cuenta) : ("Cuenta " + entry.getKey());
+            DetalleEnProgreso d = entry.getValue();
+            sb.append("🏦 *").append(etiqueta).append("* — ").append(d.tipo.name()).append("\n");
+            sb.append("   $").append(String.format("%,.0f", d.total())).append("\n");
+            totalGeneral += d.total();
+        }
+        sb.append("\n💰 *Total:* $").append(String.format("%,.0f", totalGeneral));
+
+        java.util.LinkedHashMap<String, String> buttonsData = new java.util.LinkedHashMap<>();
+        buttonsData.put("✅ Enviar solicitud", "solreq_enviar");
+        buttonsData.put("❌ Cancelar", "solreq_cancel");
+        telegramService.editMessageWithDynamicButtons(String.valueOf(telegramUserId), messageId, sb.toString(), buttonsData);
+    }
+
+    private void handleSolreqEnviar(String callbackQueryId, Long telegramUserId, Integer messageId) {
+        PendingSolicitudRetiro pending = pendingSolicitudes.get(telegramUserId);
+        if (pending == null || pending.detalles.isEmpty()) {
+            telegramService.answerCallbackQuery(callbackQueryId, "⚠️ Esta solicitud ya no está activa. Empieza de nuevo.");
+            return;
+        }
+
+        Retirador retirador = retiradorRepository.findByTelegramChatId(telegramUserId).orElse(null);
+        if (retirador == null) {
+            telegramService.answerCallbackQuery(callbackQueryId, "⚠️ No estás registrado como retirador.");
+            return;
+        }
+
+        SolicitudRetiroRequestDto dto = new SolicitudRetiroRequestDto();
+        dto.setRetiradorId(retirador.getId());
+        java.util.List<SolicitudRetiroRequestDto.DetalleDto> detallesDto = new java.util.ArrayList<>();
+        for (var entry : pending.detalles.entrySet()) {
+            SolicitudRetiroRequestDto.DetalleDto d = new SolicitudRetiroRequestDto.DetalleDto();
+            d.setCuentaCopId(entry.getKey());
+            d.setTipoRetiro(entry.getValue().tipo);
+            d.setMontoCajero(entry.getValue().montoCajero);
+            d.setMontoCorresponsal(entry.getValue().montoCorresponsal);
+            detallesDto.add(d);
+        }
+        dto.setDetalles(detallesDto);
+
+        SolicitudRetiro creada;
+        try {
+            creada = retiradorService.crearSolicitud(dto);
+        } catch (IllegalArgumentException e) {
+            telegramService.answerCallbackQuery(callbackQueryId, "❌ " + e.getMessage());
+            java.util.LinkedHashMap<String, String> buttonsData = new java.util.LinkedHashMap<>();
+            buttonsData.put("❌ Cancelar", "solreq_cancel");
+            telegramService.editMessageWithDynamicButtons(String.valueOf(telegramUserId), messageId,
+                    "⚠️ No se pudo enviar la solicitud:\n" + e.getMessage(), buttonsData);
+            return;
+        }
+
+        pendingSolicitudes.remove(telegramUserId);
+        telegramService.answerCallbackQuery(callbackQueryId, "");
+
+        // El detalle con botones "Ya hice el retiro"/"Cancelar" ya lo manda
+        // RetiradorServiceImpl.crearSolicitud (notificarN8n) como mensaje NUEVO en
+        // este mismo chat — no lo repetimos acá, solo cerramos esta pantalla.
+        telegramService.editMessageTextOnly(String.valueOf(telegramUserId), messageId,
+                "✅ Solicitud #" + creada.getId() + " enviada. Mira el mensaje siguiente para confirmarla.");
+    }
+
+    private void handleSolreqCancel(String callbackQueryId, Long telegramUserId, Integer messageId) {
+        pendingSolicitudes.remove(telegramUserId);
+
+        Retirador retirador = retiradorRepository.findByTelegramChatId(telegramUserId).orElse(null);
+        if (retirador == null || retirador.getEfectivo() == null) {
+            telegramService.editMessageTextOnly(String.valueOf(telegramUserId), messageId, "Solicitud cancelada.");
             telegramService.answerCallbackQuery(callbackQueryId, "");
             return;
         }
@@ -784,6 +1143,7 @@ public class TelegramWebhookService {
         buttonsData.put("🧾 Registrar gasto", "gasto_start");
         buttonsData.put("📊 Movimientos", "movimientos_start");
         buttonsData.put("💵 Cliente pagó", "cliente_pago_start");
+        buttonsData.put("📤 Solicitar retiro", "webapp:" + miniAppBaseUrl + "/miniapp/retiro.html");
         telegramService.editMessageWithDynamicButtons(String.valueOf(telegramUserId), messageId, texto, buttonsData);
     }
 
@@ -1248,6 +1608,11 @@ public class TelegramWebhookService {
             PendingClientePago pendingClientePago = pendingClientePagos.get(chatId);
             if (pendingClientePago != null) {
                 handleClientePagoMonto(pendingClientePago, chatId, text);
+                return;
+            }
+            PendingSolicitudRetiro pendingSolicitud = pendingSolicitudes.get(chatId);
+            if (pendingSolicitud != null && pendingSolicitud.cuentaEnCurso != null) {
+                handleSolreqMonto(pendingSolicitud, chatId, text);
                 return;
             }
         }
