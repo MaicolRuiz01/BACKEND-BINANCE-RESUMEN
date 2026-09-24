@@ -269,8 +269,9 @@
     return '$' + Math.round(n || 0).toLocaleString('es-CO');
   }
 
+  // Trunca a DECENAS (antes era a centenas — cambiado a pedido de Milton, 24/09/2026).
   function truncarACentenas(v) {
-    return Math.floor(Math.max(v, 0) / 100) * 100;
+    return Math.floor(Math.max(v, 0) / 10) * 10;
   }
 
   function disponibleReal(c) {
