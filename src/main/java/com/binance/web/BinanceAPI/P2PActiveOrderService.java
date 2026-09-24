@@ -521,6 +521,9 @@ public class P2PActiveOrderService {
         return !lastKnownStatus.isEmpty();
     }
 
+    /** Cuántas órdenes están en seguimiento ahora mismo (para el latido del poll). */
+    public int cuantasEnSeguimiento() { return enSeguimiento.size(); }
+
     /** true si ya se hizo al menos un poll — para no alarmar antes de tener datos reales. */
     public boolean yaHizoPrimerPoll() {
         return firstPollDone;
