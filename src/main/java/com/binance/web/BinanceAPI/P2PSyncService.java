@@ -45,23 +45,14 @@ public class P2PSyncService {
     private final java.util.concurrent.atomic.AtomicBoolean syncEnCurso =
             new java.util.concurrent.atomic.AtomicBoolean(false);
 
-    /**
-     * COLA de importaciones pedidas mientras otra estaba corriendo.
-     *
-     * Antes, si el candado estaba tomado, la petición simplemente se descartaba. El caso típico:
-     * la sync completa arranca, consulta Binance (la venta aún está en curso), la venta se completa,
-     * el poll de 15 s pide importarla YA… y como el candado está tomado, se pierde. La venta
-     * esperaba a la siguiente sync completa y el saldo COP tardaba minutos en subir.
-     *
-     * Ahora la petición queda anotada y quien tiene el candado la ejecuta apenas termina.
-     */
+    /** Si se pide una sync completa mientras otra corre, queda anotada y se repite al terminar. */
     private final java.util.concurrent.atomic.AtomicBoolean completaPendiente =
             new java.util.concurrent.atomic.AtomicBoolean(false);
-    /** Importaciones rápidas pendientes por cuenta Binance: desde cuándo pedir y qué órdenes resolver. */
-    private final java.util.concurrent.ConcurrentHashMap<String, Rapida> rapidasPendientes =
+    /** Un candado por número de orden: evita guardar dos veces la misma sin frenar a las demás. */
+    private final java.util.concurrent.ConcurrentHashMap<String, Object> candadosPorOrden =
             new java.util.concurrent.ConcurrentHashMap<>();
 
-    /** Pedido de importación rápida: ventana a pedirle a Binance y órdenes que hay que resolver. */
+    /** Pedido de importación puntual: cuenta, ventana a pedirle a Binance y órdenes a resolver. */
     private record Rapida(long desdeMs, java.util.Set<String> ordenes) {
         Rapida unir(Rapida otra) {
             java.util.Set<String> todas = new java.util.HashSet<>(this.ordenes);
@@ -101,25 +92,48 @@ public class P2PSyncService {
      * @return número total de ventas P2P nuevas encontradas y guardadas
      */
     public int syncAllAccounts() {
-        completaPendiente.set(true);
-        return procesarPendientes();
+        // La sync COMPLETA sigue siendo de a una por vez (recorre 36 h de todas las cuentas y
+        // tarda), pero YA NO BLOQUEA a las importaciones puntuales.
+        if (!syncEnCurso.compareAndSet(false, true)) {
+            completaPendiente.set(true);   // hay otra corriendo: se repite al terminar
+            log.debug("[Sync] Ya hay una sync completa corriendo; se encola.");
+            return 0;
+        }
+        int total = 0;
+        try {
+            do {
+                completaPendiente.set(false);
+                long t0 = System.currentTimeMillis();
+                log.info("[Sync] Sync completa: inicio");
+                total += ejecutarCompleta();
+                log.info("[Sync] Sync completa: fin en {} ms ({} venta(s) nueva(s))",
+                        System.currentTimeMillis() - t0, total);
+            } while (completaPendiente.get());
+        } finally {
+            syncEnCurso.set(false);
+        }
+        return total;
     }
 
     /**
-     * Importación RÁPIDA de una sola cuenta, pidiendo a Binance solo desde {@code desdeMs}.
+     * Importación PUNTUAL de una cuenta, pidiendo a Binance solo desde {@code desdeMs}.
      *
-     * La usa el poll de 15 s cuando una orden en curso desaparece (se completó o se canceló):
-     * como ya sabemos de qué cuenta es y a qué hora se creó, no hace falta la sync completa
-     * (36 h de todas las cuentas, varias páginas cada una) — basta una página con unas pocas
-     * órdenes. Pasa de segundos a una fracción de segundo.
+     * La dispara el poll cuando una orden sale del listado (se completó o se canceló). Es el
+     * camino CRÍTICO: de esto depende que el saldo suba a los pocos segundos de liberar.
      *
-     * @return ventas nuevas guardadas (0 si quedó en cola detrás de otra importación)
+     * NO usa el candado de la sync completa. Antes sí, y ahí estaba el problema: la sync completa
+     * de 36 h se tomaba minutos, y mientras tanto CADA importación puntual se iba a la cola y
+     * devolvía 0 ventas. En los logs se veía "COMPLETED pero su venta no quedó registrada" una y
+     * otra vez, con el dinero sin llegar al saldo, aunque todo lo demás funcionara.
+     *
+     * Que corran a la vez es seguro: cada orden se guarda bajo su propio candado (ver
+     * {@link #persistirConCandado}), existsByNumberOrder descarta las ya guardadas, y la columna
+     * number_order es única en la base.
      */
     public int importarOrdenesRecientes(String cuentaBinance, long desdeMs, java.util.Set<String> ordenes) {
         if (cuentaBinance == null || cuentaBinance.isBlank()) return 0;
         java.util.Set<String> pedidas = ordenes != null ? new java.util.HashSet<>(ordenes) : java.util.Set.of();
-        rapidasPendientes.merge(cuentaBinance, new Rapida(desdeMs, pedidas), Rapida::unir);
-        return procesarPendientes();
+        return ejecutarRapida(cuentaBinance, new Rapida(desdeMs, pedidas));
     }
 
     /** ¿La venta de esa orden ya quedó registrada? Lo usa el seguimiento para saber si puede soltarla. */
@@ -128,42 +142,20 @@ public class P2PSyncService {
                 && saleP2PRepository.existsByNumberOrder(orderNumber);
     }
 
-    private boolean hayPendientes() {
-        return completaPendiente.get() || !rapidasPendientes.isEmpty();
-    }
-
     /**
-     * Ejecuta todo lo que haya en cola. Si otra importación ya tiene el candado, no espera:
-     * deja su pedido anotado y vuelve — el que tiene el candado lo procesa al terminar.
+     * Guarda UNA orden impidiendo que dos hilos la guarden a la vez (la sync completa y la
+     * importación puntual pueden coincidir sobre la misma orden). El candado es POR ORDEN, así
+     * que dos ventas distintas se guardan en paralelo sin estorbarse.
      */
-    private int procesarPendientes() {
-        int total = 0;
-        while (hayPendientes()) {
-            if (!syncEnCurso.compareAndSet(false, true)) {
-                log.debug("[Sync] Importación en curso; el pedido quedó en cola.");
-                return total;
+    private boolean persistirConCandado(JsonNode obj, AccountBinance account, String orderNumber) {
+        Object candado = candadosPorOrden.computeIfAbsent(orderNumber, k -> new Object());
+        try {
+            synchronized (candado) {
+                return self.persistirVenta(obj, account);
             }
-            try {
-                while (hayPendientes()) {
-                    if (completaPendiente.getAndSet(false)) {
-                        // La completa cubre todas las cuentas → las rápidas pedidas ANTES de
-                        // arrancarla quedan incluidas. Las que lleguen durante, se hacen después.
-                        rapidasPendientes.clear();
-                        total += ejecutarCompleta();
-                        continue;
-                    }
-                    for (String cuenta : new ArrayList<>(rapidasPendientes.keySet())) {
-                        Rapida pedido = rapidasPendientes.remove(cuenta);
-                        if (pedido != null) total += ejecutarRapida(cuenta, pedido);
-                    }
-                }
-            } finally {
-                syncEnCurso.set(false);
-            }
-            // Si alguien anotó un pedido justo entre la última revisión y soltar el candado,
-            // el while de afuera lo detecta y lo procesa (o lo procesa quien tome el candado).
+        } finally {
+            candadosPorOrden.remove(orderNumber, candado);
         }
-        return total;
     }
 
     private int ejecutarCompleta() {
@@ -305,7 +297,7 @@ public class P2PSyncService {
                 }
                 if (!isValidSell(obj)) continue;
                 try {
-                    if (self.persistirVenta(obj, account)) newCount++;
+                    if (persistirConCandado(obj, account, obj.path("orderNumber").asText())) newCount++;
                 } catch (Exception e) {
                     log.warn("[Sync] No se pudo guardar la orden {} ({}): {}",
                             obj.path("orderNumber").asText(), account.getName(), e.getMessage());
