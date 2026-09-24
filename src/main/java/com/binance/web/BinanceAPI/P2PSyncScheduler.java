@@ -62,9 +62,42 @@ public class P2PSyncScheduler {
      * y notifica al frontend via SSE si hay cambios.
      * Solo corre si hay clientes SSE conectados para no gastar requests.
      */
-    @Scheduled(fixedDelayString = "${p2p.active-poll-ms:5000}")
+    /**
+     * Deja escrito en el arranque QUÉ versión del camino P2P está corriendo y con qué ajustes.
+     *
+     * Perdimos días sin saber si lo desplegado tenía o no los últimos cambios: los síntomas de
+     * "versión vieja" y "bug nuevo" se parecen demasiado. Con esta línea, el log lo dice solo.
+     */
+    @jakarta.annotation.PostConstruct
+    public void avisarConfiguracion() {
+        log.info("[P2P] Arranque — DISTRIBUTING cuenta como venta: SI | poll cada {} ms | "
+                + "ventana de ordenes en curso: {} h | sync completa cada {} ms",
+                pollMs, ventanaHoras, syncIntervalMs);
+    }
+
+    @org.springframework.beans.factory.annotation.Value("${p2p.active-poll-ms:5000}")
+    private long pollMs;
+    @org.springframework.beans.factory.annotation.Value("${p2p.ventana-activas-horas:1}")
+    private long ventanaHoras;
+    @org.springframework.beans.factory.annotation.Value("${p2p.sync.interval-ms:180000}")
+    private long syncIntervalMs;
+
+    /** Último latido escrito (para no llenar el log: uno por minuto basta). */
+    private long ultimoLatidoMs = 0L;
+
+    // SIN @Scheduled a propósito: lo dispara P2PPollRunner desde un hilo exclusivo, para que
+    // ninguna otra tarea programada pueda dejar la actualización de saldos esperando turno.
     public void pollActiveOrders() {
         try {
+            // Latido: prueba de que el poll está vivo. Sin esto, un poll caído se ve igual que
+            // "no hubo cambios": silencio absoluto en el log.
+            long ahora = System.currentTimeMillis();
+            if (ahora - ultimoLatidoMs >= 60_000L) {
+                ultimoLatidoMs = ahora;
+                log.info("[ActivePoll] vivo — {} orden(es) en curso, {} en seguimiento",
+                        activeOrderService.getOrdenesUltimoPoll().size(),
+                        activeOrderService.cuantasEnSeguimiento());
+            }
             // Órdenes que se cayeron de la ventana de 4 h sin resolverse (apeladas, trabadas):
             // se revisan una por una antes de armar el listado, para que vuelvan a aparecer si
             // siguen vivas. Va primero para que detectStatusChanges ya las vea incluidas.

@@ -63,6 +63,24 @@ public class P2PActiveOrderService {
 
     private final ObjectMapper mapper = new ObjectMapper();
 
+    /** Horas hacia atrás que se le piden a Binance para armar el listado de órdenes en curso. */
+    @org.springframework.beans.factory.annotation.Value("${p2p.ventana-activas-horas:1}")
+    private long ventanaActivasHoras;
+
+    /**
+     * SNAPSHOT COMPARTIDO del último listado leído de Binance.
+     *
+     * El poll ya consulta cada 5 s. Antes, ADEMÁS, cada pantalla abierta pedía su propia consulta
+     * a Binance cada 15 s (y cada una recorría todas las cuentas): con tres pantallas abiertas se
+     * triplicaban las llamadas sin aportar nada, porque los datos son los mismos. Ahora todos
+     * comparten la foto del poll mientras esté fresca; la pre-asignación sí se refresca de la BD,
+     * que es lo que el operador acaba de cambiar y tiene que verse al instante.
+     */
+    private volatile ConsultaActivas snapshot = null;
+    private volatile long snapshotMs = 0L;
+    @org.springframework.beans.factory.annotation.Value("${p2p.snapshot-ttl-ms:4000}")
+    private long snapshotTtlMs;
+
     @Autowired private BinanceService binanceService;
     @Autowired private AccountBinanceRepository accountBinanceRepository;
     @Autowired private P2PPreAsignacionRepository preAsignacionRepository;
@@ -198,6 +216,29 @@ public class P2PActiveOrderService {
      * no se pudieron leer. Tratarlas como completadas disparaba importaciones y avisos falsos.
      */
     public ConsultaActivas consultarActivas() {
+        // Foto fresca del poll → se reutiliza (solo se refresca la pre-asignación, que es lo que
+        // cambia cuando el operador asigna una cuenta y debe verse de inmediato).
+        ConsultaActivas cache = snapshot;
+        if (cache != null && System.currentTimeMillis() - snapshotMs < snapshotTtlMs) {
+            List<ActiveP2POrderDto> copias = new ArrayList<>(cache.ordenes().size());
+            for (ActiveP2POrderDto o : cache.ordenes()) copias.add(copiaConPreAsignacion(o));
+            return new ConsultaActivas(copias, cache.cuentasConError());
+        }
+        return consultarActivasFresco();
+    }
+
+    /** Copia del DTO con la pre-asignación recién leída de la BD. */
+    private ActiveP2POrderDto copiaConPreAsignacion(ActiveP2POrderDto o) {
+        ActiveP2POrderDto copia = new ActiveP2POrderDto(
+                o.getOrderNumber(), o.getStatus(), o.getStatusLabel(), o.getAccountBinance(),
+                o.getDollarsUs(), o.getPesosCop(), o.getTasa(), o.getCreateTime(),
+                null, null, "PENDIENTE", o.getCounterPartNickName());
+        aplicarPreAsignacion(copia);
+        return copia;
+    }
+
+    /** Consulta de verdad a Binance (la que hace el poll cada 5 s). */
+    private ConsultaActivas consultarActivasFresco() {
         List<AccountBinance> accounts = accountBinanceRepository.findByTipoAndActivaTrue("BINANCE");
         Set<String> conError = ConcurrentHashMap.newKeySet();
 
@@ -258,16 +299,28 @@ public class P2PActiveOrderService {
         for (ActiveP2POrderDto o : ordenes) {
             vistaActivaEn.put(o.getOrderNumber(), ahora);
         }
-        return new ConsultaActivas(ordenes, conError);
+        ConsultaActivas resultado = new ConsultaActivas(ordenes, conError);
+        // Solo se guarda como foto compartida si TODAS las cuentas respondieron: una lista a
+        // medias no puede servirse a las pantallas como si fuera el estado real.
+        if (conError.isEmpty()) {
+            snapshot = resultado;
+            snapshotMs = ahora;
+        }
+        return resultado;
     }
 
     /**
      * Retorna órdenes activas de una cuenta específica.
      */
     public List<ActiveP2POrderDto> getActiveOrdersForAccount(String accountName) throws Exception {
-        // Ventana: últimas 4h (P2P órdenes raramente duran más; reduce llamadas Binance)
+        // Ventana corta a propósito (1 h por defecto): esta consulta corre cada 5 s por cuenta, y
+        // cada hora extra son más páginas que pedirle a Binance. Con el volumen de ventas de un día
+        // cargado, 4 h eran 4 páginas por cuenta por vuelta — así es como nos ganábamos el límite de
+        // peticiones, y cuando Binance corta, NADA se importa y los saldos se congelan.
+        // Las órdenes más viejas que sigan vivas (apeladas, trabadas) no se pierden: quedan en
+        // seguimiento y se las revisa una por una (ver revisarSeguimiento).
         long endMs   = Instant.now().toEpochMilli();
-        long startMs = endMs - (4L * 60 * 60 * 1000);
+        long startMs = endMs - (ventanaActivasHoras * 60 * 60 * 1000L);
 
         String json   = binanceService.getP2POrdersInRange(accountName, startMs, endMs, "SELL");
         JsonNode root = mapper.readTree(json);
@@ -382,7 +435,8 @@ public class P2PActiveOrderService {
         }
         ultimoPollRealMs = Instant.now().toEpochMilli();
 
-        ConsultaActivas consulta = consultarActivas();
+        // El poll SIEMPRE lee fresco de Binance: es quien mantiene actualizada la foto compartida.
+        ConsultaActivas consulta = consultarActivasFresco();
         List<ActiveP2POrderDto> allActive = consulta.ordenes();
         Set<String> cuentasConError = consulta.cuentasConError();
         List<ActiveP2POrderDto> changed   = new ArrayList<>();
@@ -466,6 +520,9 @@ public class P2PActiveOrderService {
     public boolean hayOrdenesActivas() {
         return !lastKnownStatus.isEmpty();
     }
+
+    /** Cuántas órdenes están en seguimiento ahora mismo (para el latido del poll). */
+    public int cuantasEnSeguimiento() { return enSeguimiento.size(); }
 
     /** true si ya se hizo al menos un poll — para no alarmar antes de tener datos reales. */
     public boolean yaHizoPrimerPoll() {
