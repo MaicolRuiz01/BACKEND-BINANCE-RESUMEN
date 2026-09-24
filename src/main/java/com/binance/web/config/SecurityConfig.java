@@ -106,8 +106,16 @@ public class SecurityConfig {
         config.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/**", config);
 
+        // ORDEN IMPORTA: UrlBasedCorsConfigurationSource recorre las reglas en el
+        // orden en que se registran y se queda con la PRIMERA que haga match —
+        // no elige la más específica. Por eso las reglas específicas van ANTES
+        // que el "/**" genérico; si "/**" se registrara primero, se comería
+        // siempre el match y las reglas de abajo nunca se alcanzarían a usar
+        // (esto causó el bug real: la Mini App seguía recibiendo "Invalid CORS
+        // request" aunque su regla específica ya existía, porque nunca se llegaba
+        // a evaluar).
+        //
         // La Mini App de Telegram se sirve desde un dominio distinto cada vez en
         // dev (ngrok/cloudflare) y desde el dominio de Railway en prod — no tiene
         // sentido mantener una lista fija de orígenes para esto como con el
@@ -116,7 +124,7 @@ public class SecurityConfig {
         // TelegramInitDataValidator), así que abrir el origen acá no expone nada
         // sensible por CSRF/CORS. Además, algunos WebViews embebidos (Telegram
         // Desktop/móvil) mandan Origin: null para contenido embebido, que la
-        // config de arriba rechaza con "Invalid CORS request".
+        // config de abajo (la genérica) rechaza con "Invalid CORS request".
         CorsConfiguration miniAppConfig = new CorsConfiguration();
         miniAppConfig.setAllowedOriginPatterns(List.of("*"));
         miniAppConfig.setAllowedMethods(List.of("GET", "POST", "OPTIONS"));
@@ -124,6 +132,8 @@ public class SecurityConfig {
         miniAppConfig.setAllowCredentials(false);
         source.registerCorsConfiguration("/telegram/miniapp/**", miniAppConfig);
         source.registerCorsConfiguration("/miniapp/**", miniAppConfig);
+
+        source.registerCorsConfiguration("/**", config);
 
         return source;
     }
