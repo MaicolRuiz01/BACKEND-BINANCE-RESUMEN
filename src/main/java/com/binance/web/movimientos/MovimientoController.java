@@ -351,6 +351,9 @@ public class MovimientoController {
         dto.setSaldoCajaResultante(movimiento.getSaldoCajaResultante());
         dto.setSaldoCajaDestinoResultante(movimiento.getSaldoCajaDestinoResultante());
 
+        // 🔹 Cuánto le quedamos debiendo al proveedor tras el pago
+        dto.setSaldoProveedorResultante(movimiento.getSaldoProveedorResultante());
+
         return dto;
     }
 

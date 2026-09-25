@@ -97,4 +97,13 @@ public class Movimiento {
      * (solo aplica a TRANSFERENCIA CAJA, que mueve dos cajas a la vez).
      */
     private Double saldoCajaDestinoResultante;
+
+    /**
+     * Saldo del proveedor pagado (campo "pagoProveedor") INMEDIATAMENTE DESPUÉS de este pago:
+     * positivo = le quedamos debiendo, negativo = nos queda debiendo, 0 = a paz y salvo.
+     * Es una foto del momento del pago (pedido del cliente, 24/09/2026: que cada pago diga
+     * "le quedamos debiendo X"). Por ahora solo se llena en PAGO PROVEEDOR; null en los demás
+     * tipos y en pagos anteriores a este campo.
+     */
+    private Double saldoProveedorResultante;
 }

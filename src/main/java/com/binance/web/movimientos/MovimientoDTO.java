@@ -35,6 +35,9 @@ public class MovimientoDTO {
     private Integer cuentaOrigenId;
     private Integer cuentaDestinoId;
 
+    /** Saldo del proveedor después del pago (+ le debemos, − nos debe). Solo en PAGO PROVEEDOR. */
+    private Double saldoProveedorResultante;
+
     /** Constructor liviano para la proyección JPQL de movimientos de caja (evita el N+1 del EAGER). */
     public MovimientoDTO(Integer id, String tipo, LocalDateTime fecha, Double monto,
                          String cuentaOrigen, String cuentaDestino, String caja, String cajaDestino,

@@ -6,9 +6,11 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import com.binance.web.Entity.*;
 import com.binance.web.Repository.*;
@@ -186,7 +188,7 @@ public class P2PSyncService {
         long t0 = System.currentTimeMillis();
         try {
             Map<String, String> estados = new HashMap<>();
-            int nuevas = procesarRango(account, pedido.desdeMs(), Instant.now().toEpochMilli(), estados);
+            int nuevas = procesarRango(account, pedido.desdeMs(), Instant.now().toEpochMilli(), estados, false);
             log.info("[Sync] Importación rápida {} → {} venta(s) nueva(s) en {} ms",
                     cuentaBinance, nuevas, System.currentTimeMillis() - t0);
             resolverDesaparecidas(cuentaBinance, pedido.ordenes(), estados);
@@ -253,7 +255,7 @@ public class P2PSyncService {
         long endMs   = Instant.now().toEpochMilli();
         long startMs = resolveStartMs(account);
 
-        int newCount = procesarRango(account, startMs, endMs, null);
+        int newCount = procesarRango(account, startMs, endMs, null, true);
 
         // Siempre actualiza el timestamp aunque no haya habido órdenes nuevas
         self.actualizarEstadoSync(account, endMs);
@@ -263,11 +265,15 @@ public class P2PSyncService {
     /**
      * Lee de Binance las ventas de la cuenta creadas en [startMs, endMs] y guarda las completadas.
      * @param estadosVistos si no es null, se llena con el estado que Binance reportó para cada orden.
+     * @param esCompleta    true si la llama la sync completa (la red de seguridad): cada venta que
+     *                      registre es una que la importación rápida NO trajo, y se avisa en el log.
      */
     private int procesarRango(AccountBinance account, long startMs, long endMs,
-                              Map<String, String> estadosVistos) throws Exception {
+                              Map<String, String> estadosVistos, boolean esCompleta) throws Exception {
         // ── 1) LECTURA a Binance, sin transacción abierta ──
+        long t0 = System.currentTimeMillis();
         String json = binanceService.getP2POrdersInRange(account.getName(), startMs, endMs, "SELL");
+        long msBinance = System.currentTimeMillis() - t0;
         JsonNode root = mapper.readTree(json);
 
         if (root.has("error")) {
@@ -281,12 +287,37 @@ public class P2PSyncService {
         // ── 2) ESCRITURA: una transacción corta por orden ──
         // Si una orden falla, las demás igual se guardan (antes se perdía el lote completo).
         if (data.isArray()) {
+            // Antes se preguntaba a la base orden por orden (2–3 consultas cada una, incluso por las
+            // ya registradas). Con mucho movimiento cada importación tardaba 15–48 s y el poll,
+            // que es quien la corre, dejaba de vigilar mientras tanto: las cancelaciones tardaban
+            // minutos en quitarse del amarillo. Ahora se pregunta UNA vez por lote qué ventas ya
+            // están registradas (y con qué comisión) y qué canceladas tienen pre-asignación, y
+            // solo se toca la base por las órdenes que de verdad tienen algo que hacer.
+            Set<String> numeros = new HashSet<>();
             for (JsonNode obj : data) {
+                String on = obj.path("orderNumber").asText("");
+                if (!on.isBlank()) numeros.add(on);
+            }
+            Map<String, Double> registradas = new HashMap<>();
+            Set<String> conPreAsignacion = new HashSet<>();
+            List<String> lista = new ArrayList<>(numeros);
+            for (int i = 0; i < lista.size(); i += 500) {
+                List<String> lote = lista.subList(i, Math.min(i + 500, lista.size()));
+                for (Object[] fila : saleP2PRepository.findComisionesByNumberOrders(lote)) {
+                    registradas.put((String) fila[0], fila[1] != null ? ((Number) fila[1]).doubleValue() : 0.0);
+                }
+                conPreAsignacion.addAll(preAsignacionRepository.findOrderNumbersIn(lote));
+            }
+
+            for (JsonNode obj : data) {
+                String orderNumber = obj.path("orderNumber").asText();
                 if (estadosVistos != null) {
-                    estadosVistos.put(obj.path("orderNumber").asText(),
-                            obj.path("orderStatus").asText("").toUpperCase());
+                    estadosVistos.put(orderNumber, obj.path("orderStatus").asText("").toUpperCase());
                 }
                 if (isCanceledSell(obj)) {
+                    // Solo hay algo que hacer si tiene pre-asignación que borrar, o si se registró
+                    // como venta (aviso REVISAR). Las demás canceladas no tocan la base.
+                    if (!conPreAsignacion.contains(orderNumber) && !registradas.containsKey(orderNumber)) continue;
                     try {
                         self.limpiarPreAsignacionCancelada(obj.path("orderNumber").asText());
                     } catch (Exception e) {
@@ -296,13 +327,37 @@ public class P2PSyncService {
                     continue;
                 }
                 if (!isValidSell(obj)) continue;
+                Double comisionGuardada = registradas.get(orderNumber);
+                if (comisionGuardada != null) {
+                    // Ya registrada. Solo se vuelve a tocar si se completó con una comisión distinta
+                    // a la guardada (se guardó al liberar); persistirVenta hace ese ajuste.
+                    boolean comisionCambio = "COMPLETED".equalsIgnoreCase(obj.path("orderStatus").asText(""))
+                            && Math.abs(comisionDe(obj) - comisionGuardada) >= 0.000001;
+                    if (!comisionCambio) continue;
+                }
                 try {
-                    if (persistirConCandado(obj, account, obj.path("orderNumber").asText())) newCount++;
+                    if (persistirConCandado(obj, account, orderNumber)) {
+                        newCount++;
+                        if (esCompleta) {
+                            long minutos = (System.currentTimeMillis() - obj.path("createTime").asLong(0)) / 60_000;
+                            log.warn("[Sync] RED DE SEGURIDAD registró la venta {} ({}, estado {}, creada hace {} min) "
+                                    + "— la importación rápida no la trajo.",
+                                    obj.path("orderNumber").asText(), account.getName(),
+                                    obj.path("orderStatus").asText(""), minutos);
+                        }
+                    }
                 } catch (Exception e) {
                     log.warn("[Sync] No se pudo guardar la orden {} ({}): {}",
                             obj.path("orderNumber").asText(), account.getName(), e.getMessage());
                 }
             }
+        }
+        {
+            // Medición: dice si la lentitud (de la completa o de la rápida) está en Binance o en la base.
+            log.info("[Sync] {} {}: {} orden(es) de Binance en {} ms, revisión/guardado en {} ms, {} nueva(s)",
+                    esCompleta ? "Completa" : "Rápida", account.getName(),
+                    data.isArray() ? data.size() : 0, msBinance,
+                    System.currentTimeMillis() - t0 - msBinance, newCount);
         }
         return newCount;
     }

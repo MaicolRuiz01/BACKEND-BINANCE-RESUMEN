@@ -1,6 +1,7 @@
 package com.binance.web.movimientosbridge;
 
 import com.binance.web.Entity.AccountCop;
+import com.binance.web.Entity.BankType;
 import com.binance.web.Repository.AccountCopRepository;
 import com.binance.web.conciliacion.ConciliacionBancariaService;
 import com.binance.web.detencion.DetencionService;
@@ -99,6 +100,12 @@ public class MovimientosHeartbeatServiceImpl implements MovimientosHeartbeatServ
             // conciliacionBancariaService.solicitarConciliacion, la cola correcta.
             for (AccountCop cuenta : todas) {
                 if (!Boolean.TRUE.equals(cuenta.getActivaParaP2P())) continue;
+                // Movimientos solo corre cuentas Bancolombia. Una Nequi (u otro banco) activa en
+                // P2P nunca aparece en su reporte, y sin este filtro se reencolaba cada ciclo para
+                // siempre: la Conciliación, que solo busca entre Bancolombia, la descartaba como
+                // "ya no activa" y en el siguiente heartbeat volvía a entrar (caso 'Milton Polania',
+                // NEQUI, 23/09/2026).
+                if (cuenta.getBankType() != BankType.BANCOLOMBIA) continue;
                 if (!reportadasNormalizadas.contains(normalizar(cuenta.getName()))) {
                     log.warn("[Heartbeat] '{}' está activa en P2P pero Movimientos no la reporta corriendo — "
                             + "reencolando activación.", cuenta.getName());

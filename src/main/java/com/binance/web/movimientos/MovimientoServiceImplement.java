@@ -388,6 +388,8 @@ public class MovimientoServiceImplement implements MovimientoService {
 		// Actualizar el balance del proveedor (¡ahora sí se ejecuta!)
 		supplier.setBalance(supplier.getBalance() - monto);
 		supplierRepository.save(supplier);
+		// Foto de cuánto le quedamos debiendo después de este pago (ver Movimiento.saldoProveedorResultante).
+		pagoProveedor.setSaldoProveedorResultante(round2(supplier.getBalance()));
 
 		// Llenar los datos restantes del Movimiento
 		pagoProveedor.setTipo("PAGO PROVEEDOR");

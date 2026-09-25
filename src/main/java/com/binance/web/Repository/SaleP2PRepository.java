@@ -30,6 +30,11 @@ public interface SaleP2PRepository extends JpaRepository<SaleP2P, Integer> {
     @Query("SELECT s.numberOrder FROM SaleP2P s WHERE s.numberOrder IS NOT NULL")
     Set<String> findAllOrderNumbers();
 
+    /** De estas órdenes, cuáles ya están registradas y con qué comisión: [numberOrder, commission].
+     *  Una sola consulta por lote para la importación P2P (antes era una por orden). */
+    @Query("SELECT s.numberOrder, s.commission FROM SaleP2P s WHERE s.numberOrder IN :numeros")
+    List<Object[]> findComisionesByNumberOrders(@Param("numeros") java.util.Collection<String> numeros);
+
     @Query("""
         SELECT s FROM SaleP2P s
         WHERE s.date >= :start AND s.date < :end
