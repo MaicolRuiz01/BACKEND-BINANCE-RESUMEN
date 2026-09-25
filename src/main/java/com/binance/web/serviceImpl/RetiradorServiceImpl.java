@@ -201,26 +201,13 @@ public class RetiradorServiceImpl implements RetiradorService {
                                 + String.format("%,.0f", detalle.totalDetalle()) + "). Revisa el monto antes de enviar.");
             }
 
-            double comprometido = solicitudRepository.sumComprometidoPorCuenta(cuenta.getId());
-            double disponible = cuenta.getBalance() - comprometido;
-            // Tolerancia = 0.50, ni un peso más: en COP no existen los centavos, y el
-            // saldo se MUESTRA redondeado al peso más cercano (ej. $999.6 se ve como
-            // "$1.000"). Si no se permite ese margen, pedir exactamente lo que la
-            // pantalla muestra podría rechazarse por el redondeo de la vista — no es
-            // plata de más, es la definición exacta de "lo que dice la pantalla es lo
-            // que se puede retirar". La corrección real es que el saldo ahora se
-            // redondea SIEMPRE al descontarlo (ver confirmarInterno), así que este
-            // margen debería usarse cada vez menos.
-            if (disponible < detalle.totalDetalle() - 0.50) {
-                throw new IllegalArgumentException(
-                        "Saldo insuficiente en la cuenta " + cuenta.getName() + " (saldo: $"
-                                + String.format("%,.0f", cuenta.getBalance())
-                                + ", ya comprometido en retiros pendientes de confirmar: $"
-                                + String.format("%,.0f", comprometido)
-                                + ", disponible: $" + String.format("%,.0f", disponible)
-                                + ", solicitado: $" + String.format("%,.0f", detalle.totalDetalle()) + ")");
-            }
-
+            // Bloqueo de "saldo insuficiente" QUITADO a propósito (pedido de Milton,
+            // 24/09/2026): ahora sí se permite solicitar más de lo que hay en la
+            // cuenta — al confirmar, el saldo queda en negativo (ver confirmarInterno,
+            // mismo cambio ahí). Aplica igual en la web, el bot de Telegram y la Mini
+            // App, porque los tres pasan por este mismo método. El cupo diario por
+            // canal (cajero/corresponsal) SÍ se sigue validando — es una regla aparte,
+            // no relacionada con el saldo de la cuenta.
             validarCupoDiario(detalle, cuenta);
         }
     }
@@ -374,23 +361,20 @@ public class RetiradorServiceImpl implements RetiradorService {
      * acredita a la caja — nunca la solicitada originalmente.
      */
     private SolicitudRetiro confirmarInterno(SolicitudRetiro solicitud) {
-        // Validar saldo Y cupo diario suficiente en TODAS las cuentas antes de restar nada.
+        // Validar cupo diario suficiente en TODAS las cuentas antes de restar nada.
         // El cupo se revalida acá (no solo al crear la solicitud) porque puede haber
         // pasado tiempo entre que se creó y se confirma, y mientras tanto el cupo
         // pudo haberse gastado por otro retiro (directo o de otra solicitud).
+        //
+        // Bloqueo de "saldo insuficiente" QUITADO a propósito (pedido de Milton,
+        // 24/09/2026): ahora sí se permite confirmar aunque el monto supere el
+        // saldo de la cuenta — el saldo queda en negativo tras el descuento de más
+        // abajo (ver totalUsar / cuenta.setBalance). Aplica igual en la web, el bot
+        // de Telegram y la Mini App, porque los tres pasan por este mismo método.
         for (DetalleRetiro detalle : solicitud.getDetalles()) {
             AccountCop cuenta = detalle.getCuentaCop();
             double montoCajeroUsar = detalle.montoCajeroFinal();
             double montoCorresponsalUsar = detalle.montoCorresponsalFinal();
-            double totalUsar = montoCajeroUsar + montoCorresponsalUsar;
-
-            // Misma tolerancia mínima (solo ruido de coma flotante) que en validarSaldoSuficiente.
-            if (cuenta.getBalance() < totalUsar - 0.50) {
-                throw new IllegalStateException(
-                        "Saldo insuficiente en la cuenta " + cuenta.getName() + " (disponible: $"
-                                + String.format("%,.0f", cuenta.getBalance()) + ", requerido: $"
-                                + String.format("%,.0f", totalUsar) + ")");
-            }
 
             // Cuentas sin banco configurado (ej: cuentas de prueba viejas) no tienen
             // regla de cupo diario que aplicarles — no bloqueamos por esto.
