@@ -16,6 +16,11 @@ public interface P2PPreAsignacionRepository extends JpaRepository<P2PPreAsignaci
 
     boolean existsByOrderNumber(String orderNumber);
 
+    /** De estas órdenes, cuáles tienen pre-asignación. Una sola consulta por lote. */
+    @Query("SELECT p.orderNumber FROM P2PPreAsignacion p WHERE p.orderNumber IN :numeros")
+    java.util.Set<String> findOrderNumbersIn(
+            @org.springframework.data.repository.query.Param("numeros") java.util.Collection<String> numeros);
+
     /**
      * Pre-asignaciones creadas antes de una fecha. Se usa para limpiar las que quedaron
      * huérfanas: órdenes que se cancelaron o se cayeron y por lo tanto nunca se completaron,
