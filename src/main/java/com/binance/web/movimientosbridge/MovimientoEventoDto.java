@@ -104,4 +104,18 @@ public class MovimientoEventoDto {
     private String chatsFull;
 
     private String timestamp;
+
+    /**
+     * UUID generado en pochonance_bridge.py, uno por cada POST a /evento —
+     * Escenario 2 (25/09/2026): permite que Python, después de recibir el 200
+     * OK de este POST (que solo confirma que Pochonance RECIBIÓ el evento, no
+     * que ya le llegó a los usuarios por Telegram), pueda preguntar más tarde
+     * "¿ya se entregó esto?" vía GET /movimientos/evento/{eventoId}/estado, y
+     * si no hay respuesta a tiempo, disparar el fallback directo
+     * (_fallback_telegram_directo, que ya existe). Opcional: si no viene
+     * (ej. una prueba manual), simplemente no se guarda estado para consultar
+     * después — el evento se procesa igual.
+     */
+    @JsonProperty("evento_id")
+    private String eventoId;
 }

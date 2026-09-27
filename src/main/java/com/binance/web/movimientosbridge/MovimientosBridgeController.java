@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -37,6 +38,13 @@ import java.util.Map;
  *   qué cuentas tiene corriendo AHORA MISMO, para que el backend reencole
  *   activaciones/detenciones que se hayan perdido silenciosamente. Ver
  *   MovimientosHeartbeatService.
+ * - GET  /evento/{eventoId}/estado → pochonance_bridge.py, Escenario 2
+ *   (25/09/2026): después del 200 OK de /evento (que solo confirma que
+ *   Pochonance RECIBIÓ el evento), Python hace polling corto acá para saber
+ *   si ya le llegó al usuario por Telegram. Mismo patrón de polling que
+ *   /activacion/pendiente — evita que Pochonance (Railway, en la nube) tenga
+ *   que llamar de vuelta a un servidor en la máquina de Milton, que no es
+ *   alcanzable desde internet.
  */
 @Slf4j
 @RestController
@@ -166,5 +174,32 @@ public class MovimientosBridgeController {
                 : List.of();
         movimientosHeartbeatService.reconciliar(cuentasActivas);
         return ResponseEntity.ok(Map.of("ok", true));
+    }
+
+    /**
+     * Escenario 2 (25/09/2026): pochonance_bridge.py llama esto en un loop
+     * corto (ej. cada 1-2s) durante el timer de fallback, preguntando por el
+     * evento_id que mandó en el POST /evento original.
+     *
+     * - 200 {"entregado": true}  → ya le llegó a los usuarios, Python no
+     *   necesita hacer nada más.
+     * - 200 {"entregado": false} → Pochonance ya terminó de procesarlo, pero
+     *   SÍ hubo una falla real de entrega — Python puede activar el fallback
+     *   de una vez, sin esperar a que venza el timer completo.
+     * - 204 (sin cuerpo) → Pochonance todavía no ha terminado de procesarlo
+     *   (o el evento_id no existe / ya expiró del caché) — Python sigue
+     *   esperando dentro de su timer.
+     */
+    @GetMapping("/evento/{eventoId}/estado")
+    public ResponseEntity<?> obtenerEstadoEntrega(
+            @RequestHeader(value = "X-Bot-Api-Key", required = false) String apiKeyRecibida,
+            @PathVariable String eventoId) {
+
+        ResponseEntity<Map<String, String>> err = _errorSiApiKeyInvalida(apiKeyRecibida);
+        if (err != null) return err;
+
+        return movimientosBridgeService.consultarEstadoEntrega(eventoId)
+                .<ResponseEntity<?>>map(entregado -> ResponseEntity.ok(Map.of("entregado", entregado)))
+                .orElseGet(() -> ResponseEntity.noContent().build());
     }
 }
