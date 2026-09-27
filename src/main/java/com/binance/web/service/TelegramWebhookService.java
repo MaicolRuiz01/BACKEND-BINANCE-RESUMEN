@@ -1447,15 +1447,28 @@ public class TelegramWebhookService {
             return;
         }
 
+        // 25/09/2026: se responde el callback DE INMEDIATO, antes de confirmar nada.
+        // Antes se dejaba el botón de Telegram "cargando" hasta que confirmarSolicitud
+        // terminaba (bloqueo de caja + cuentas + guardar todo), y si el retirador
+        // volvía a tocar otro botón de otra solicitud mientras tanto (exactamente lo
+        // que pasó la noche del 24/09: varias solicitudes aceptadas casi seguidas sin
+        // esperar), esos milisegundos de más aumentaban la ventana en la que dos
+        // confirmaciones podían pisarse. Responder ya mismo no evita el problema de
+        // fondo (ese ya se arregló con los bloqueos de fila), pero sí quita la
+        // tentación de volver a tocar el botón porque "no reaccionó".
+        telegramService.answerCallbackQuery(callbackQueryId, "");
+
         try {
             retiradorService.confirmarSolicitud(solicitudId);
         } catch (IllegalStateException e) {
-            telegramService.answerCallbackQuery(callbackQueryId, "❌ " + e.getMessage());
+            // Ya no se puede usar answerCallbackQuery para avisar el error (el
+            // callback de este clic ya se respondió arriba) — se manda como mensaje
+            // normal del chat en su lugar.
+            telegramService.sendMessage(String.valueOf(telegramUserId), "❌ " + e.getMessage());
             return;
         }
 
         Retirador retirador = retiradorRepository.findById(solicitud.getRetirador().getId()).orElse(null);
-        telegramService.answerCallbackQuery(callbackQueryId, "");
 
         if (messageId != null) {
             telegramService.editMessageTextOnly(String.valueOf(telegramUserId), messageId,

@@ -13,8 +13,13 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.client.RestTemplate;
 import com.binance.web.util.HttpClientFactory;
+
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 
 import java.time.*;
 import java.util.*;
@@ -41,6 +46,9 @@ public class RetiradorServiceImpl implements RetiradorService {
     private final MovimientoRepository movimientoRepository;
     private final RestTemplate restTemplate = HttpClientFactory.timed();
     private final TelegramService telegramService;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     // Mapa para recordar el message_id del último recordatorio enviado a cada
     // retirador (ID_Retirador -> Message_ID)
@@ -371,8 +379,34 @@ public class RetiradorServiceImpl implements RetiradorService {
         // saldo de la cuenta — el saldo queda en negativo tras el descuento de más
         // abajo (ver totalUsar / cuenta.setBalance). Aplica igual en la web, el bot
         // de Telegram y la Mini App, porque los tres pasan por este mismo método.
+        // Bloqueo de fila de CADA cuenta involucrada, ANTES de leer/validar nada de
+        // ellas — mismo fix que ya tiene Efectivo (ver EfectivoRepository, incidente
+        // 14/08/2026), aplicado ahora también a AccountCop (25/09/2026). Sin esto, dos
+        // confirmaciones que tocan la MISMA cuenta casi al mismo tiempo pueden leer el
+        // mismo saldo viejo y una pisa la resta de la otra (así se perdió el descuento
+        // de un retiro la noche del 24/09, aunque en ese caso resultó que la cuenta
+        // afectada no colisionó con nada más — fue la CAJA la que sí perdió una suma).
+        //
+        // entityManager.refresh() es indispensable acá, no solo el @Lock: si esta
+        // misma fila de AccountCop ya estaba cargada en el contexto de persistencia de
+        // esta transacción (ej. porque solicitudRepository.findByIdForUpdate ya trajo
+        // la solicitud con sus detalles y sus cuentas asociadas), Hibernate puede
+        // devolver el objeto Java YA CACHEADO en vez de refrescarlo con la fila recién
+        // bloqueada — el lock de BD queda bien puesto, pero el valor en memoria sigue
+        // viejo (mismo incidente documentado en EfectivoRepository.findByIdForUpdate).
+        Map<Integer, AccountCop> cuentasBloqueadas = new HashMap<>();
         for (DetalleRetiro detalle : solicitud.getDetalles()) {
-            AccountCop cuenta = detalle.getCuentaCop();
+            Integer cuentaId = detalle.getCuentaCop().getId();
+            if (!cuentasBloqueadas.containsKey(cuentaId)) {
+                AccountCop bloqueada = accountCopRepository.findByIdForUpdate(cuentaId)
+                        .orElseThrow(() -> new RuntimeException("Cuenta COP no encontrada: " + cuentaId));
+                entityManager.refresh(bloqueada);
+                cuentasBloqueadas.put(cuentaId, bloqueada);
+            }
+        }
+
+        for (DetalleRetiro detalle : solicitud.getDetalles()) {
+            AccountCop cuenta = cuentasBloqueadas.get(detalle.getCuentaCop().getId());
             double montoCajeroUsar = detalle.montoCajeroFinal();
             double montoCorresponsalUsar = detalle.montoCorresponsalFinal();
 
@@ -433,7 +467,10 @@ public class RetiradorServiceImpl implements RetiradorService {
                 : 0.0;
 
         for (DetalleRetiro detalle : solicitud.getDetalles()) {
-            AccountCop cuenta = detalle.getCuentaCop();
+            // Reutiliza la MISMA instancia ya bloqueada y refrescada de arriba — no
+            // volver a leer detalle.getCuentaCop() acá (eso traería otra vez el objeto
+            // cacheado, sin el lock ni el refresh).
+            AccountCop cuenta = cuentasBloqueadas.get(detalle.getCuentaCop().getId());
             double montoCajeroUsar = detalle.montoCajeroFinal();
             double montoCorresponsalUsar = detalle.montoCorresponsalFinal();
 
@@ -544,15 +581,41 @@ public class RetiradorServiceImpl implements RetiradorService {
         // el mensaje nunca cambió a "Retiro completado"). Igual que
         // cancelarSolicitud ya limpia su mensaje al cancelar, acá lo limpiamos al
         // confirmar, sin importar por dónde se haya confirmado.
+        //
+        // 25/09/2026: esta llamada a Telegram (HTTP, puede tardar) se movió para
+        // que se dispare DESPUÉS de que la transacción confirme (afterCommit) — antes
+        // se hacía acá mismo, mientras la fila de la caja y de las cuentas seguían
+        // bloqueadas (ver los findByIdForUpdate de arriba), lo que alargaba
+        // innecesariamente cuánto tiempo otras confirmaciones casi simultáneas tenían
+        // que esperar. No cambia lo que el retirador ve, solo cuándo se manda.
         if (retirador.getTelegramChatId() != null && solicitud.getTelegramPrivateMessageId() != null) {
-            try {
-                telegramService.editMessageTextOnly(
-                        String.valueOf(retirador.getTelegramChatId()),
-                        solicitud.getTelegramPrivateMessageId(),
-                        "✅ *Retiro completado*\n" + resumenCuentasYMontos(solicitud));
-            } catch (Exception e) {
-                log.error("[Retiro] No se pudo limpiar el mensaje de Telegram al confirmar la solicitud #{}: {}",
-                        solicitud.getId(), e.getMessage());
+            final String chatId = String.valueOf(retirador.getTelegramChatId());
+            final Integer privateMessageId = solicitud.getTelegramPrivateMessageId();
+            final Long solicitudId = solicitud.getId();
+            final String texto = "✅ *Retiro completado*\n" + resumenCuentasYMontos(solicitud);
+
+            if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        try {
+                            telegramService.editMessageTextOnly(chatId, privateMessageId, texto);
+                        } catch (Exception e) {
+                            log.error("[Retiro] No se pudo limpiar el mensaje de Telegram al confirmar la solicitud #{}: {}",
+                                    solicitudId, e.getMessage());
+                        }
+                    }
+                });
+            } else {
+                // Fallback defensivo (no debería pasar: este método siempre corre
+                // dentro de una transacción @Transactional) — mejor mandarlo ya que
+                // perderlo silenciosamente.
+                try {
+                    telegramService.editMessageTextOnly(chatId, privateMessageId, texto);
+                } catch (Exception e) {
+                    log.error("[Retiro] No se pudo limpiar el mensaje de Telegram al confirmar la solicitud #{}: {}",
+                            solicitudId, e.getMessage());
+                }
             }
         }
 

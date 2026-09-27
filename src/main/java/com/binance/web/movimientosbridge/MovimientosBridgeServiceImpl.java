@@ -1,5 +1,7 @@
 package com.binance.web.movimientosbridge;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.binance.web.Entity.AccountCop;
 import com.binance.web.conciliacion.ConciliacionBancariaService;
 import com.binance.web.service.CuentasP2PTelegramService;
@@ -12,6 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Formatea los eventos del bridge imitando, campo por campo, el mismo
@@ -40,10 +43,81 @@ public class MovimientosBridgeServiceImpl implements MovimientosBridgeService {
     @Value("${app.cuentasp2p.chats-confiables:}")
     private String chatsConfiablesRaw;
 
+    /**
+     * Escenario 2 (25/09/2026): resultado de entrega por evento_id, para que
+     * Python (pochonance_bridge.py) pueda preguntar más tarde si ya le llegó
+     * al usuario por Telegram, sin necesitar un servidor propio ni que
+     * Railway le pueda "tocar" de vuelta a su máquina — mismo patrón de
+     * polling que ya usa pochonance_activador.py contra /activacion/pendiente.
+     * TTL de 2 minutos: de sobra para el timer de 30s que va a usar Python,
+     * y así el caché nunca crece sin límite.
+     */
+    private final Cache<String, Boolean> estadoEntregaPorEvento = Caffeine.newBuilder()
+            .expireAfterWrite(2, TimeUnit.MINUTES)
+            .maximumSize(10_000)
+            .build();
+
+    /**
+     * Escenario 2 — candado de idempotencia (25/09/2026, pedido de Milton):
+     * pochonance_bridge.py reintenta el POST /evento hasta 5 veces si algo
+     * falla de red. Si un intento SÍ llegó a procesarse acá (mensajes ya
+     * mandados por Telegram) pero la RESPUESTA se perdió en el camino de
+     * vuelta a Python, Python cree que falló y reintenta — con el MISMO
+     * evento_id. Sin este candado, ese reintento volvía a mandar la
+     * notificación por segunda vez (duplicidad real). Se marca ANTES de
+     * mandar nada (no al final), para que dos reintentos casi simultáneos
+     * tampoco se cuelen los dos a la vez. Mismo TTL que estadoEntregaPorEvento
+     * (2 min) — de sobra para la ventana de reintentos de Python (que en el
+     * peor caso, con backoff exponencial 5+10+20+40s, dura menos de 80s).
+     */
+    private final Cache<String, Boolean> eventosEnProceso = Caffeine.newBuilder()
+            .expireAfterWrite(2, TimeUnit.MINUTES)
+            .maximumSize(10_000)
+            .build();
+
+    /** true si este evento_id YA se había visto antes (duplicado a ignorar). */
+    private boolean esEventoDuplicado(String eventoId) {
+        if (eventoId == null || eventoId.isBlank()) {
+            return false; // sin evento_id (ej. prueba manual) — no se puede deduplicar, se procesa igual.
+        }
+        // putIfAbsent es atómico: si dos hilos llegan casi al mismo tiempo con el
+        // mismo evento_id, solo uno de los dos obtiene null (primera vez) — el
+        // otro ve el valor ya puesto y sabe que debe abstenerse.
+        Boolean yaExistia = eventosEnProceso.asMap().putIfAbsent(eventoId, Boolean.TRUE);
+        return yaExistia != null;
+    }
+
+    @Override
+    public Optional<Boolean> consultarEstadoEntrega(String eventoId) {
+        if (eventoId == null || eventoId.isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(estadoEntregaPorEvento.getIfPresent(eventoId));
+    }
+
+    private void registrarEstadoEntrega(MovimientoEventoDto evento, boolean entregado) {
+        String eventoId = evento.getEventoId();
+        if (eventoId != null && !eventoId.isBlank()) {
+            estadoEntregaPorEvento.put(eventoId, entregado);
+        }
+    }
+
     @Override
     public void procesarEvento(MovimientoEventoDto evento) {
         if (evento == null || evento.getEvento() == null) {
             log.warn("[CuentasP2P Bridge] Evento vacío o sin tipo — ignorado.");
+            return;
+        }
+
+        if (esEventoDuplicado(evento.getEventoId())) {
+            log.info("[CuentasP2P Bridge] evento_id={} ya se procesó antes (reintento de Python "
+                            + "tras perder la respuesta) — se ignora para no notificar dos veces.",
+                    evento.getEventoId());
+            // No se vuelve a mandar nada por Telegram, pero SÍ hay que dejar que
+            // Python confirme la entrega si consulta el estado — si el primer
+            // intento ya había terminado y guardado un resultado, sigue ahí
+            // (mismo evento_id); si el primer intento sigue en curso, Python lo
+            // verá cuando ese primero termine de guardarlo.
             return;
         }
 
@@ -68,6 +142,7 @@ public class MovimientosBridgeServiceImpl implements MovimientosBridgeService {
 
         if (texto == null) {
             log.warn("[CuentasP2P Bridge] Tipo de evento desconocido: {}", evento.getEvento());
+            registrarEstadoEntrega(evento, false);
             return;
         }
 
@@ -94,6 +169,11 @@ public class MovimientosBridgeServiceImpl implements MovimientosBridgeService {
             log.info("[CuentasP2P Bridge] '{}' no está activa en P2P — evento '{}' no se reenvía a Cuentas P2P "
                             + "(el bot de Movimientos la sigue monitoreando normal, esto solo filtra Telegram).",
                     evento.getCuenta(), evento.getEvento());
+            // "entregado: true" a propósito — es una decisión intencional de NO
+            // mandar nada por Cuentas P2P (la cuenta no está seleccionada en P2P),
+            // no una falla. Si se marcara false, el fallback de Python mandaría
+            // igual la notificación directa, contradiciendo este filtro.
+            registrarEstadoEntrega(evento, true);
             return;
         }
 
@@ -109,6 +189,9 @@ public class MovimientosBridgeServiceImpl implements MovimientosBridgeService {
         if (chats.isEmpty()) {
             log.warn("[CuentasP2P Bridge] No hay chats confiables (ni en el evento ni en app.cuentasp2p.chats-confiables) — evento de '{}' no se le manda a nadie.",
                     evento.getCuenta());
+            // "entregado: false" a propósito — acá SÍ es una falla real (nadie se
+            // enteró), así que el fallback de Python debe activarse.
+            registrarEstadoEntrega(evento, false);
             return;
         }
 
@@ -126,6 +209,16 @@ public class MovimientosBridgeServiceImpl implements MovimientosBridgeService {
         // avisos únicos, no un flujo que haya que ir tachando.
         boolean esMovimiento = "movimiento".equals(evento.getEvento());
 
+        // Escenario 2 (25/09/2026): "entregado" solo queda true si TODOS los
+        // envíos de abajo devolvieron un message_id real. sendMessage /
+        // sendMessageConBotonLiberar de CuentasP2PTelegramServiceImpl ya
+        // atrapan cualquier excepción y devuelven null en vez de propagarla
+        // (por diseño, para no tumbar el resto del batch) — hasta ahora esa
+        // falla se perdía en el log y nadie más se enteraba. Este es
+        // justamente el hueco que tapa el Escenario 2: antes, un fallo acá
+        // dejaba a Pochonance respondiendo 200 OK igual, sin que Python
+        // supiera que en realidad no le llegó a nadie.
+        boolean entregadoOk = true;
         for (String chatId : chats) {
             boolean recibeCompleto = (chatsFull == null) || chatsFull.contains(chatId);
             String textoAEnviar = recibeCompleto ? texto : textoCorto;
@@ -133,19 +226,22 @@ public class MovimientosBridgeServiceImpl implements MovimientosBridgeService {
                 // "movimiento" nunca es tan largo como para necesitar partirse —
                 // el botón "✅" debe quedar pegado al mensaje, así que este
                 // camino sigue mandando un solo mensaje.
-                cuentasP2PTelegramService.sendMessageConBotonLiberar(chatId, textoAEnviar);
+                Integer messageId = cuentasP2PTelegramService.sendMessageConBotonLiberar(chatId, textoAEnviar);
+                if (messageId == null) entregadoOk = false;
             } else {
                 // "conexion_exitosa" (18/09/2026, incidente reportado por Milton:
                 // el mensaje llegaba cortado con "y N más" cuando el día tenía
                 // muchos movimientos) puede superar el límite de 4096 de
                 // Telegram — se parte en varios mensajes, nunca se descarta nada.
                 for (String bloque : partirEnBloques(textoAEnviar)) {
-                    cuentasP2PTelegramService.sendMessage(chatId, bloque);
+                    Integer messageId = cuentasP2PTelegramService.sendMessage(chatId, bloque);
+                    if (messageId == null) entregadoOk = false;
                 }
             }
         }
-        log.info("[CuentasP2P Bridge] Evento '{}' de '{}' enviado a {} chat(s).",
-                evento.getEvento(), evento.getCuenta(), chats.size());
+        registrarEstadoEntrega(evento, entregadoOk);
+        log.info("[CuentasP2P Bridge] Evento '{}' de '{}' enviado a {} chat(s) (entregado={}).",
+                evento.getEvento(), evento.getCuenta(), chats.size(), entregadoOk);
     }
 
     // ── Formateo — mismo layout que _notificar_tx() (mensaje "completo") ──
