@@ -282,6 +282,32 @@ public class AccountCopController {
 		return ResponseEntity.ok(cuenta);
 	}
 
+	/**
+	 * POST /cuenta-cop/{id}/restablecer-cupo
+	 * Devuelve los cupos de HOY (cajero y corresponsal) al máximo de su banco, igual que el reset
+	 * de medianoche. Para casos puntuales (p. ej. un retiro que se registró mal y dejó el cupo
+	 * gastado). No toca el saldo. Queda en el log con los valores anteriores por si hay que revisar.
+	 */
+	@PostMapping("/{id}/restablecer-cupo")
+	@org.springframework.transaction.annotation.Transactional
+	public ResponseEntity<?> restablecerCupo(@PathVariable Integer id) {
+		AccountCop cuenta = accountCopRepository.findById(id).orElse(null);
+		if (cuenta == null) return ResponseEntity.notFound().build();
+		if (cuenta.getBankType() == null) {
+			return ResponseEntity.badRequest().body(Map.of("error", "La cuenta no tiene banco asignado."));
+		}
+		double cajero = com.binance.web.util.CupoDiarioRules.maxCajeroPorBanco(cuenta.getBankType());
+		double corresponsal = com.binance.web.util.CupoDiarioRules.maxCorresponsalPorBanco(cuenta.getBankType());
+		org.slf4j.LoggerFactory.getLogger(AccountCopController.class).info(
+				"[Cupos] Restablecido a mano el cupo de '{}' (id {}): cajero {} → {}, corresponsal {} → {}",
+				cuenta.getName(), id, cuenta.getCupoCajeroDisponibleHoy(), cajero,
+				cuenta.getCupoCorresponsalDisponibleHoy(), corresponsal);
+		accountCopRepository.restablecerCupos(id, cajero, corresponsal,
+				java.time.LocalDate.now(java.time.ZoneId.of("America/Bogota")));
+		return ResponseEntity.ok(Map.of("cupoCajeroDisponibleHoy", cajero,
+				"cupoCorresponsalDisponibleHoy", corresponsal));
+	}
+
 	// ══════════════════════════════════════════════════════════════
 	// LLAVES BREBE
 	// ══════════════════════════════════════════════════════════════

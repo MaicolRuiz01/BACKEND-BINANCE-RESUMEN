@@ -58,6 +58,20 @@ public interface AccountCopRepository extends JpaRepository<AccountCop, Integer>
 	@Query("UPDATE AccountCop a SET a.balance = a.balance + :monto WHERE a.id = :id")
 	int sumarSaldo(@Param("id") Integer id, @Param("monto") double monto);
 
+	/** Deja los cupos del día en los valores dados SIN tocar el saldo ni otros campos
+	 *  (un save() de la entidad completa podría pisar un cambio de saldo concurrente). */
+	@Modifying
+	@Query("""
+		UPDATE AccountCop a SET a.cupoCajeroDisponibleHoy = :cajero,
+		       a.cupoCorresponsalDisponibleHoy = :corresponsal,
+		       a.cupoDiarioMax = :cajero + :corresponsal,
+		       a.cupoDisponibleHoy = :cajero + :corresponsal,
+		       a.cupoFecha = :fecha
+		WHERE a.id = :id
+	""")
+	int restablecerCupos(@Param("id") Integer id, @Param("cajero") double cajero,
+			@Param("corresponsal") double corresponsal, @Param("fecha") java.time.LocalDate fecha);
+
 	/** Trae todas las cuentas con sus brebeKeys en UNA sola consulta (evita el N+1 del EAGER). */
 	@Query("SELECT DISTINCT a FROM AccountCop a LEFT JOIN FETCH a.brebeKeys")
 	List<AccountCop> findAllWithBrebeKeys();
