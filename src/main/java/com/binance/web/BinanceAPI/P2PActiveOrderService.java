@@ -88,6 +88,8 @@ public class P2PActiveOrderService {
     /** @Lazy: evita una referencia circular al arrancar (el sync no depende de este servicio,
      *  pero la cadena de servicios que usa sí podría). */
     @Autowired @org.springframework.context.annotation.Lazy private P2PSyncService syncService;
+    /** @Lazy: P2PChatService también consulta este servicio (estado de la orden). */
+    @Autowired @org.springframework.context.annotation.Lazy private P2PChatService chatService;
 
     /**
      * Cache en memoria del último estado conocido por orderNumber.
@@ -377,6 +379,20 @@ public class P2PActiveOrderService {
         // Si la venta ya se importó (se completó justo antes de asignar), aplicarla ya.
         syncService.aplicarPreAsignacionSiYaSeImporto(orderNumber);
         AccountCopSaldoListener.notificarTrasCommit();
+
+        // Enviar al cliente, por el chat de la orden, los datos de la cuenta asignada. Va
+        // programado con unos segundos de espera (y fuera de esta transacción): si el operador
+        // se equivocó y corrige enseguida, solo sale la cuenta final. Nunca rompe la asignación.
+        try {
+            chatService.programarEnvioCuenta(orderNumber);
+        } catch (Exception e) {
+            log.warn("[PreAsign] No se pudo programar el envío por chat de {}: {}", orderNumber, e.getMessage());
+        }
+    }
+
+    /** Último estado de Binance conocido para la orden (TRADING, BUYER_PAYED…), o null. */
+    public String estadoConocido(String orderNumber) {
+        return orderNumber == null ? null : lastKnownStatus.get(orderNumber);
     }
 
     /** true si la orden ya tiene pre-asignación guardada (la asignación automática no la pisa). */

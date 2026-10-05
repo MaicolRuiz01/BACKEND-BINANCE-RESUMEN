@@ -16,6 +16,20 @@ public interface P2PPreAsignacionRepository extends JpaRepository<P2PPreAsignaci
 
     boolean existsByOrderNumber(String orderNumber);
 
+    /**
+     * Marca que al cliente ya se le enviaron por chat los datos de la cuenta {@code copId}.
+     * UPDATE puntual (no un save de la entidad) para no pisar lo que el operador cambie a la vez.
+     */
+    @org.springframework.data.jpa.repository.Modifying
+    @org.springframework.transaction.annotation.Transactional
+    @Query("UPDATE P2PPreAsignacion p SET p.chatCopEnviadoId = :copId, p.chatEnviadoAt = :cuando "
+         + "WHERE p.orderNumber = :orderNumber")
+    int marcarCuentaEnviada(@org.springframework.data.repository.query.Param("orderNumber") String orderNumber,
+                            @org.springframework.data.repository.query.Param("copId") Integer copId,
+                            @org.springframework.data.repository.query.Param("cuando") LocalDateTime cuando);
+
+    List<P2PPreAsignacion> findByOrderNumberIn(java.util.Collection<String> orderNumbers);
+
     /** De estas órdenes, cuáles tienen pre-asignación. Una sola consulta por lote. */
     @Query("SELECT p.orderNumber FROM P2PPreAsignacion p WHERE p.orderNumber IN :numeros")
     java.util.Set<String> findOrderNumbersIn(

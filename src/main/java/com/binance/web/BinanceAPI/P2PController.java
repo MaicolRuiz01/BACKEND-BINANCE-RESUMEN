@@ -39,6 +39,21 @@ public class P2PController {
         return ResponseEntity.ok().body(binanceService.getP2POrdersInRange(account, start, end, null));
     }
 
+    /**
+     * PRUEBA (solo lectura): verifica si cada cuenta Binance puede obtener las credenciales
+     * del chat P2P (paso previo a enviar automáticamente la cuenta a depositar). No envía
+     * ningún mensaje. Sin "account" prueba todas las cuentas Binance activas con API key.
+     * Ej: GET /api/p2p/chat/probar-credencial?account=Luis
+     */
+    @GetMapping("/chat/probar-credencial")
+    public ResponseEntity<List<Map<String, Object>>> probarCredencialChat(
+            @RequestParam(value = "account", required = false) String account) {
+        List<String> cuentas = (account == null || account.isBlank())
+                ? binanceService.getAllAccountNames()
+                : List.of(account);
+        return ResponseEntity.ok(cuentas.stream().map(binanceService::probarCredencialChat).toList());
+    }
+
     /** Búsqueda general de anuncios en el marketplace de Binance P2P */
     @PostMapping("/anuncios")
     public ResponseEntity<List<AnuncioDto>> obtenerAnunciosFiltrados(@RequestBody Map<String, Object> filtros) {

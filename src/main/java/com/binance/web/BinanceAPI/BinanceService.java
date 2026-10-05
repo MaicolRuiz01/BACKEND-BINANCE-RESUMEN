@@ -258,6 +258,72 @@ public class BinanceService {
 		return getP2POrdersInRange(account, startTime, endTime, null);
 	}
 
+	/**
+	 * PRUEBA (solo lectura): pide a Binance las credenciales del chat P2P de una cuenta
+	 * (GET /sapi/v1/c2c/chat/retrieveChatCredential). No envía mensajes ni cambia nada.
+	 * Sirve para saber si la API key actual (y la cuenta, sea Merchant o no) tiene acceso
+	 * al chat antes de construir el envío automático de la cuenta a depositar.
+	 *
+	 * Las credenciales NO se devuelven completas: solo se indica si llegaron, para no
+	 * dejar el token del chat expuesto en la respuesta HTTP.
+	 */
+	public Map<String, Object> probarCredencialChat(String account) {
+		Map<String, Object> out = new LinkedHashMap<>();
+		out.put("cuenta", account);
+		try {
+			if (getApiCredentials(account) == null) {
+				out.put("ok", false);
+				out.put("error", "Cuenta no válida o sin API key.");
+				return out;
+			}
+			String raw = obtenerCredencialChatCruda(account);
+			JsonNode root = mapper.readTree(raw);
+			JsonNode data = root.path("data");
+			boolean ok = data.hasNonNull("listenKey") && data.hasNonNull("listenToken");
+			out.put("ok", ok);
+			out.put("code", root.path("code").asText(null));
+			out.put("message", root.path("message").asText(root.path("msg").asText(null)));
+			out.put("chatWssUrl", data.path("chatWssUrl").asText(null));
+			out.put("listenKeyRecibido", data.hasNonNull("listenKey"));
+			out.put("listenTokenRecibido", data.hasNonNull("listenToken"));
+			if (!ok) out.put("respuestaCruda", raw);
+		} catch (Exception e) {
+			// binanceGet ya incluye el código HTTP y el cuerpo de Binance en el mensaje
+			// (ahí sale si falta permiso o si la cuenta no es Merchant).
+			out.put("ok", false);
+			out.put("error", e.getMessage());
+		}
+		return out;
+	}
+
+	/**
+	 * Respuesta cruda de GET /sapi/v1/c2c/chat/retrieveChatCredential para la cuenta:
+	 * {"code":"000000","data":{"chatWssUrl":..,"listenKey":..,"listenToken":..}}.
+	 * El listenKey/listenToken son los que abren el WebSocket del chat (ver P2PChatService).
+	 */
+	/**
+	 * Respuesta cruda de GET /sapi/v1/c2c/chat/retrieveChatMessagesWithPagination: los mensajes
+	 * del chat de una orden (texto e imágenes), paginados. Solo lectura.
+	 */
+	public String obtenerMensajesChatCrudos(String account, String orderNo, int page, int rows) throws Exception {
+		String[] creds = getApiCredentials(account);
+		if (creds == null) throw new IllegalArgumentException("Cuenta Binance no válida o sin API key: " + account);
+		long ts = getServerTime();
+		String query = "orderNo=" + java.net.URLEncoder.encode(orderNo, StandardCharsets.UTF_8)
+				+ "&page=" + page + "&rows=" + rows + "&recvWindow=60000&timestamp=" + ts;
+		return binanceGet("https://api.binance.com/sapi/v1/c2c/chat/retrieveChatMessagesWithPagination?"
+				+ query + "&signature=" + hmacSha256(creds[1], query), creds[0]);
+	}
+
+	public String obtenerCredencialChatCruda(String account) throws Exception {
+		String[] creds = getApiCredentials(account);
+		if (creds == null) throw new IllegalArgumentException("Cuenta Binance no válida o sin API key: " + account);
+		long ts = getServerTime();
+		String query = "clientType=web&recvWindow=60000&timestamp=" + ts;
+		return binanceGet("https://api.binance.com/sapi/v1/c2c/chat/retrieveChatCredential?"
+				+ query + "&signature=" + hmacSha256(creds[1], query), creds[0]);
+	}
+
 	// ─────────────────────────────────────────────────────────────
 	// Futures
 	// ─────────────────────────────────────────────────────────────

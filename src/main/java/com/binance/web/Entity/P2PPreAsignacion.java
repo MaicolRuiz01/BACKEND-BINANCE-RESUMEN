@@ -65,4 +65,15 @@ public class P2PPreAsignacion {
      */
     @Column(name = "pesos_cop")
     private Double pesosCop;
+
+    /**
+     * Cuenta COP cuyos datos ya se le enviaron al cliente por el chat de la orden (envío
+     * automático al asignar, ver P2PChatService). Si el operador cambia la asignación a otra
+     * cuenta, deja de coincidir con cuentaCop y se envía la nueva. null = aún no se envió.
+     */
+    @Column(name = "chat_cop_enviado_id")
+    private Integer chatCopEnviadoId;
+
+    @Column(name = "chat_enviado_at")
+    private LocalDateTime chatEnviadoAt;
 }
