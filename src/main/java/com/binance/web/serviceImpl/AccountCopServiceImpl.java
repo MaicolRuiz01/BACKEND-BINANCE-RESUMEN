@@ -242,7 +242,8 @@ public class AccountCopServiceImpl implements AccountCopService {
 	 * caiga la haría pasarse. Valores en MILES de COP, misma unidad que el resto de cupos.
 	 */
 	private static final double SUBLIMITE_CUPO_RESTANTE = 1_000.0;
-	private static final int CUENTAS_A_ACTIVAR_POR_JORNADA = 5;
+	// Son 7 desde 06/10/2026 (antes 5). El nombre del metodo conserva "Cinco" para no tocar JornadaController ni la interfaz.
+	private static final int CUENTAS_A_ACTIVAR_POR_JORNADA = 7;
 
 	@Override
 	@Transactional
@@ -297,6 +298,9 @@ public class AccountCopServiceImpl implements AccountCopService {
 	    for (AccountCop acc : todas) {
 	        boolean estabaActivaAntes = Boolean.TRUE.equals(acc.getActivaParaP2P());
 	        acc.setActivaParaP2P(idsElegidas.contains(acc.getId()));
+	        // Las elegidas quedan marcadas para el canal de la hora (cajero o corresponsal): ese tipo es el
+	        // que usa el retiro automatico y el que se ve en el icono de la cuenta en P2P.
+	        if (idsElegidas.contains(acc.getId())) acc.setCupoTipoP2P(canal.name());
 	        cuentaP2PSyncService.sincronizar(acc, estabaActivaAntes);
 	    }
 	    AccountCopRepository.saveAll(todas);
