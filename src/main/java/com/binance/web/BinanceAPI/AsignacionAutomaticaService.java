@@ -48,7 +48,11 @@ import lombok.extern.slf4j.Slf4j;
  *  3) Si una cuenta agota su cupo (disponible ≤ −TOLERANCIA), se desactiva de P2P
  *     (avisando al bot vía {@link CuentaP2PSyncService}) y se ACTIVA la siguiente candidata con cupo.
  *  4) El cupo que cuenta depende de la HORA ({@link VentanaCupoP2P}): de 00:00 a 18:29 solo el de
- *     CORRESPONSAL y de 18:30 a 23:59 solo el de CAJERO. El otro canal se ignora.
+ *     CORRESPONSAL y de 18:30 a 23:59 solo el de CAJERO. El otro canal se ignora. A las 18:30 el cambio
+ *     es inmediato (en el siguiente ciclo): las cuentas sin espacio de cajero se cierran y se abren otras.
+ *     EXCEPCIÓN, a cualquier hora: si ya NO hay ninguna cuenta con espacio de CORRESPONSAL (todas
+ *     cumplieron su tope del día), se pasa a CAJERO de inmediato, sin esperar las 18:30. Al día siguiente,
+ *     con los cupos nuevos, vuelve solo a corresponsal.
  *  5) SELECCIÓN DE CUENTAS: si NO hay ninguna cuenta activa en P2P, el Auto elige y activa las 7 más
  *     cercanas al límite del canal de la hora (AccountCopService.activarCincoCuentasMasCercanasAlCupo),
  *     lo que además le avisa a Movimientos para que las abra. Pasa al prenderlo y, si ya está
@@ -70,7 +74,11 @@ import lombok.extern.slf4j.Slf4j;
  *     fuente del naranja de la pantalla): una orden recién liberada y aún sin importar sigue contando, y las
  *     pre-asignaciones huérfanas no bloquean.
  * 10) TIPO DE CUPO: las cuentas que el Auto elige o repone quedan marcadas (cupoTipoP2P) con el canal
- *     de la hora. Las que YA estaban activas no se tocan, ni siquiera cuando la ventana cambia.
+ *     de la hora. Cuando el canal de trabajo CAMBIA (18:30, medianoche, o porque se acabó el corresponsal), las
+ *     cuentas activas que siguen recibiendo ventas en el canal nuevo pasan a ese canal SIN avisar a Movimientos:
+ *     solo cambia la marca, la cuenta no se cierra ni se reabre. Las que no sirven para el canal nuevo se cierran
+ *     por la regla de cuenta llena. Dentro de una misma ventana no se pisa un cambio hecho a mano, y una cuenta
+ *     marcada AMBOS no se toca.
  *     OJO: ese tipo decide por qué canal se dispara el retiro automático de la cuenta.
  * 11) NO REPETIDAS: una cuenta que ya tiene una venta EN CURSO por el mismo monto exacto no recibe
  *     otra igual (el depósito sería indistinguible en Movimientos). Vale mientras la primera no se
@@ -111,6 +119,12 @@ public class AsignacionAutomaticaService {
     /** @Lazy: evita un ciclo de dependencias; solo se usa para elegir las cuentas iniciales. */
     @Autowired @Lazy private AccountCopService accountCopService;
     @Autowired @Lazy private AsignacionAutomaticaService self;
+
+    /** Último canal efectivo usado: sirve para avisar en el log solo cuando cambia. */
+    private volatile Canal ultimoCanalEfectivo;
+
+    /** Último canal de trabajo cuyo marcado ya se aplicó a las cuentas activas (null tras un reinicio). */
+    private volatile Canal ultimoCanalAplicado;
 
     /** Evita repetir en cada ciclo el aviso de "no hay candidatas para reponer el grupo". */
     private volatile boolean sinCandidatasAvisado;
@@ -202,8 +216,9 @@ public class AsignacionAutomaticaService {
         List<AccountCop> todas = accountCopRepository.findAll();
         todas.stream().filter(a -> a.getBankType() != null).forEach(CupoDiarioRules::asegurarCupoHoy);
 
-        // Canal de la hora actual: solo su cupo cuenta (corresponsal de día, cajero desde 18:30).
-        Canal canal = VentanaCupoP2P.canalAhora(reloj);
+        // Canal que cuenta: el de la hora (corresponsal de día, cajero desde 18:30), salvo que ya no quede
+        // ninguna cuenta con cupo de corresponsal: entonces se pasa a cajero de inmediato.
+        Canal canal = canalEfectivo(todas, VentanaCupoP2P.canalAhora(reloj));
         List<AccountCop> cambiadas = new ArrayList<>();
 
         // Lo que está "en curso" por cuenta (una sola lectura por ciclo, misma foto de la BD que el saldo de arriba).
@@ -212,6 +227,9 @@ public class AsignacionAutomaticaService {
         // 1) Mantener el grupo: sacar las ya llenas sin ventas abiertas y reponer hasta tener 7 que reciban ventas
         //    (también abre las primeras cuentas si no había ninguna activa).
         mantenerGrupo(todas, enCursoCuentas, canal, cambiadas);
+
+        // 1b) Si el canal de trabajo cambió, las cuentas que siguen sirviendo pasan a él (solo la marca, sin avisar a Movimientos).
+        aplicarCanalSiCambio(todas, enCursoCuentas, canal, cambiadas);
 
         // 2) Ventas sin cuenta asignada, más antiguas primero.
         List<ActiveP2POrderDto> pendientes = ordenes.stream()
@@ -267,6 +285,38 @@ public class AsignacionAutomaticaService {
         }
 
         if (!cambiadas.isEmpty()) accountCopRepository.saveAll(cambiadas);
+    }
+
+    // ── Canal efectivo ────────────────────────────────────────────
+
+    /**
+     * Canal con el que se trabaja en este ciclo. Es el de la hora, salvo que sea CORRESPONSAL y ya no haya
+     * ninguna cuenta con cupo de corresponsal: en ese caso se pasa a CAJERO sin esperar a las 18:30.
+     * (De noche, con cajero, no hay salto al otro canal: eso requiere el cupo del día siguiente.)
+     */
+    private Canal canalEfectivo(List<AccountCop> todas, Canal porHora) {
+        Canal efectivo = porHora;
+        if (porHora == Canal.CORRESPONSAL && !hayCapacidad(todas, Canal.CORRESPONSAL)) {
+            efectivo = Canal.CAJERO;
+        }
+        if (efectivo != ultimoCanalEfectivo) {
+            if (efectivo != porHora) {
+                log.info("[AutoAsign] Ya no queda cupo de CORRESPONSAL en ninguna cuenta → se pasa a {} (la hora pedía {}).",
+                        efectivo, porHora);
+            } else if (ultimoCanalEfectivo != null) {
+                log.info("[AutoAsign] Canal de trabajo: {}.", efectivo);
+            }
+            ultimoCanalEfectivo = efectivo;
+        }
+        return efectivo;
+    }
+
+    /** ¿Alguna cuenta Bancolombia no bloqueada, activa o no, tiene todavía espacio suficiente en ese canal? */
+    private boolean hayCapacidad(List<AccountCop> todas, Canal canal) {
+        return todas.stream().anyMatch(a -> a.getId() != null
+                && !Boolean.TRUE.equals(a.getBloqueada())
+                && a.getBankType() == BankType.BANCOLOMBIA
+                && VentanaCupoP2P.cupoHoy(a, canal) - bal(a) >= SUBLIMITE_ACTIVAR);
     }
 
     // ── Mantenimiento del grupo ───────────────────────────────────
@@ -343,6 +393,29 @@ public class AsignacionAutomaticaService {
             recibiendo++;
         }
         sinCandidatasAvisado = false;
+    }
+
+    /**
+     * Cuando el canal de trabajo cambia (o es el primer ciclo tras un reinicio), las cuentas activas que
+     * SIGUEN recibiendo ventas en el canal nuevo pasan a ese canal. Solo se cambia la marca (cupoTipoP2P): no se
+     * llama a CuentaP2PSyncService, así que Movimientos no se entera y la sesión de la cuenta sigue corriendo.
+     * Una cuenta marcada AMBOS no se toca; una que ya no sirve para el canal se queda como está hasta que
+     * salga del grupo. Dentro de una misma ventana no se vuelve a tocar (no se pisa un cambio manual).
+     */
+    private void aplicarCanalSiCambio(List<AccountCop> todas, EnCurso enCurso, Canal canal, List<AccountCop> cambiadas) {
+        if (canal == ultimoCanalAplicado) return;
+        String nuevo = canal.name();
+        for (AccountCop a : todas) {
+            if (!esDelGrupo(a)) continue;
+            String actual = a.getCupoTipoP2P();
+            if (!"CORRESPONSAL".equals(actual) && !"CAJERO".equals(actual)) continue; // AMBOS u otro: no se toca
+            if (nuevo.equals(actual)) continue;
+            if (disponible(a, enCurso.comprometido(), canal) <= 0) continue;          // no sirve para el canal nuevo
+            log.info("[AutoAsign] {} pasa de {} a {} (sigue activa, sin avisar a Movimientos).", a.getName(), actual, nuevo);
+            a.setCupoTipoP2P(nuevo);
+            cambiadas.add(a);
+        }
+        ultimoCanalAplicado = canal;
     }
 
     /** Cuenta Bancolombia activa en P2P y no bloqueada: la que Movimientos está (o debe estar) monitoreando. */
