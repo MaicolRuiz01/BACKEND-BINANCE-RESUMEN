@@ -514,8 +514,9 @@ class AsignacionAutomaticaReglasTest {
     // ── Tolerancia de $500.000 ────────────────────────────────────
 
     @Test
-    void cuentaCasiLlena_recibePrimeroLasVentasQueLaCompletan() {
+    void cuentaCasiLlena_recibePrimeroLaVentaQueLaCompleta_yLasDemasVanAOtra() {
         // William: 9.988 de 10.000 (espacio 12). Llegan ventas de 100, 200 y 300.
+        // La de 100 completa el cupo (queda en -88, dentro de la tolerancia); desde ahi ya no recibe mas.
         AccountCop william = cuenta(1, 9_988, 10_000, 2_700);
         AccountCop otra = cuenta(2, 3_000, 10_000, 2_700);
         when(accountCopRepository.findAll()).thenReturn(List.of(william, otra));
@@ -523,8 +524,8 @@ class AsignacionAutomaticaReglasTest {
         servicio.asignar(List.of(orden("v100", 100, null), orden("v200", 200, null), orden("v300", 300, null)));
 
         verify(activeOrderService).upsertPreAsignacion(eq("v100"), eq(1), any(), any()); // 12-100 = -88
-        verify(activeOrderService).upsertPreAsignacion(eq("v200"), eq(1), any(), any()); // -88-200 = -288
-        verify(activeOrderService).upsertPreAsignacion(eq("v300"), eq(2), any(), any()); // -288-300 = -588: ya se pasa de 500
+        verify(activeOrderService).upsertPreAsignacion(eq("v200"), eq(2), any(), any()); // el cupo ya se completo
+        verify(activeOrderService).upsertPreAsignacion(eq("v300"), eq(2), any(), any());
     }
 
     @Test
@@ -550,5 +551,81 @@ class AsignacionAutomaticaReglasTest {
         servicio.asignar(List.of(orden("grande", 2_000, null)));
 
         verify(activeOrderService).upsertPreAsignacion(eq("grande"), eq(2), any(), any());
+    }
+
+    // ── La tolerancia solo completa el cupo (regla de Milton, 07/10/2026) ──
+
+    @Test
+    void tolerancia_cuentaEn9500_ventaDe1000_seMandaYQuedaEn10500() {
+        AccountCop a = cuenta(1, 9_500, 10_000, 2_700);
+        AccountCop otra = cuenta(2, 1_000, 10_000, 2_700);
+        when(accountCopRepository.findAll()).thenReturn(List.of(a, otra));
+
+        servicio.asignar(List.of(orden("o1", 1_000, null)));
+
+        verify(activeOrderService).upsertPreAsignacion(eq("o1"), eq(1), any(), any());
+    }
+
+    @Test
+    void tolerancia_cuentaYaPasadaDelCupo_noRecibeMas_aunqueQuepaEnLaTolerancia() {
+        // Caso real Leidy: 10.199 con cupo 10.000 y una venta de 240 que la llevaba a 10.439.
+        AccountCop leidy = cuenta(1, 10_199, 10_000, 2_700);
+        AccountCop otra = cuenta(2, 3_000, 10_000, 2_700);
+        when(accountCopRepository.findAll()).thenReturn(List.of(leidy, otra));
+
+        // Leidy tiene otra venta abierta (de 50), asi que no sale del grupo y solo se prueba la regla.
+        servicio.asignar(List.of(orden("abierta", 50, 1), orden("nueva", 240, null)));
+
+        verify(activeOrderService).upsertPreAsignacion(eq("nueva"), eq(2), any(), any());
+        verify(activeOrderService, never()).upsertPreAsignacion(eq("nueva"), eq(1), any(), any());
+    }
+
+    @Test
+    void tolerancia_dosVentasSeguidas_laPrimeraCompletaElCupo_laSegundaVaAOtra() {
+        // Montos distintos a proposito: con montos iguales la bloquearia la regla de repetidas, no esta.
+        AccountCop a = cuenta(1, 9_500, 10_000, 2_700);
+        AccountCop otra = cuenta(2, 2_000, 10_000, 2_700);
+        when(accountCopRepository.findAll()).thenReturn(List.of(a, otra));
+
+        servicio.asignar(List.of(orden("o500", 500, null), orden("o400", 400, null)));
+
+        verify(activeOrderService).upsertPreAsignacion(eq("o500"), eq(1), any(), any()); // queda exacto en 10.000
+        verify(activeOrderService).upsertPreAsignacion(eq("o400"), eq(2), any(), any()); // el cupo ya esta completo
+    }
+
+    @Test
+    void tolerancia_cupoExactoCompletado_noRecibeNada() {
+        AccountCop a = cuenta(1, 9_500, 10_000, 2_700);
+        AccountCop otra = cuenta(2, 2_000, 10_000, 2_700);
+        when(accountCopRepository.findAll()).thenReturn(List.of(a, otra));
+
+        // 9.500 + 500 abierta = 10.000 exactos: disponible 0 -> ya no recibe, ni siquiera 10.
+        servicio.asignar(List.of(orden("abierta", 500, 1), orden("chica", 10, null)));
+
+        verify(activeOrderService).upsertPreAsignacion(eq("chica"), eq(2), any(), any());
+    }
+
+    @Test
+    void tolerancia_enCajero_cuentaEn2200_ventaDe1000_seMandaYQuedaEn3200() {
+        horaDelDia(19, 0);
+        AccountCop a = cuenta(1, 2_200, 10_000, 2_700);   // cajero: espacio 500
+        AccountCop otra = cuenta(2, 100, 10_000, 2_700);  // cajero: espacio 2.600
+        when(accountCopRepository.findAll()).thenReturn(List.of(a, otra));
+
+        servicio.asignar(List.of(orden("o1", 1_000, null)));
+
+        verify(activeOrderService).upsertPreAsignacion(eq("o1"), eq(1), any(), any());
+    }
+
+    @Test
+    void tolerancia_enCajero_cuentaYaPasada_noRecibeMas() {
+        horaDelDia(19, 0);
+        AccountCop pasada = cuenta(1, 2_900, 10_000, 2_700);  // cajero: -200
+        AccountCop otra = cuenta(2, 500, 10_000, 2_700);      // cajero: 2.200
+        when(accountCopRepository.findAll()).thenReturn(List.of(pasada, otra));
+
+        servicio.asignar(List.of(orden("abierta", 50, 1), orden("nueva", 240, null)));
+
+        verify(activeOrderService).upsertPreAsignacion(eq("nueva"), eq(2), any(), any());
     }
 }

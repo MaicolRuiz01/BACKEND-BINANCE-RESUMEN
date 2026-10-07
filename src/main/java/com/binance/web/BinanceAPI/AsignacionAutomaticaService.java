@@ -40,6 +40,10 @@ import lombok.extern.slf4j.Slf4j;
  *  1) Se asigna primero a las cuentas COP MÁS CERCANAS a su límite (menor cupo disponible),
  *     siempre que la venta quepa.
  *  2) Una venta "cabe" si tras asignarla la cuenta no se pasa del cupo por más de {@link #TOLERANCIA}
+ *     Y SOLO si la cuenta todavía no completó su cupo (disponible proyectado > 0, contando las ventas
+ *     en curso ya asignadas): la tolerancia sirve para COMPLETAR el cupo, no para seguir llenando
+ *     después de completado. Ej: en 9.500 llega 1.000 → queda en 10.500 (se manda); en 10.199 llega
+ *     240 → no se manda. Igual para corresponsal y cajero.
  *     (el cliente permite pasarse hasta $500.000: acordado en las llamadas; antes estaba en $50.000 por
  *     error y por eso las cuentas casi llenas no recibían las ventas que las completaban).
  *  3) Si una cuenta agota su cupo (disponible ≤ −TOLERANCIA), se desactiva de P2P
@@ -316,6 +320,7 @@ public class AsignacionAutomaticaService {
                 .filter(a -> a.getBankType() == BankType.BANCOLOMBIA) // solo Bancolombia (lo que Movimientos monitorea)
                 .filter(a -> !cuentasPendientes.estaPendiente(a.getName())) // Movimientos ya confirmó que la abrió
                 .filter(a -> !montosAbiertos.getOrDefault(a.getId(), Set.of()).contains(clave)) // no repetidas
+                .filter(a -> disponible(a, comprometido, canal) > 0) // cupo aún sin completar: la tolerancia solo sirve para completarlo
                 .filter(a -> disponible(a, comprometido, canal) - monto >= -TOLERANCIA) // cabe (hasta 500k de exceso)
                 .min(Comparator.comparingDouble(a -> disponible(a, comprometido, canal)))
                 .orElse(null);
