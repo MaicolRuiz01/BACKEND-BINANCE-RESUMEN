@@ -22,6 +22,8 @@ public class CuentaP2PSyncServiceImpl implements CuentaP2PSyncService {
     // mecanismo, ya probado y funcionando.
     private final ConciliacionBancariaService conciliacionBancariaService;
     private final DetencionService detencionService;
+    /** Cuentas pedidas a Movimientos y aun sin confirmar (la asignacion automatica no las usa). */
+    private final com.binance.web.movimientosbridge.MovimientosCuentasPendientes cuentasPendientes;
 
     // INTERRUPTOR DE SEGURIDAD (agosto 2026, mismo criterio que USAR_PRODUCCION
     // en el bot y los bloques "fase de pruebas" que ya existían en este mismo
@@ -51,10 +53,12 @@ public class CuentaP2PSyncServiceImpl implements CuentaP2PSyncService {
         if (estaActivaAhora) {
             log.info("[CuentaP2PSync] '{}' pasó a activa en P2P — encolando activación de monitoreo.",
                     cuenta.getName());
+            cuentasPendientes.marcarPendiente(cuenta.getName());
             conciliacionBancariaService.solicitarConciliacion(cuenta);
         } else {
             log.info("[CuentaP2PSync] '{}' dejó de estar activa en P2P — encolando detención de monitoreo.",
                     cuenta.getName());
+            cuentasPendientes.descartar(cuenta.getName());
             detencionService.solicitarDetencion(cuenta);
         }
     }
