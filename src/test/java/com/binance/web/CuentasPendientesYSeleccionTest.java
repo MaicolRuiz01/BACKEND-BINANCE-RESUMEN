@@ -81,4 +81,30 @@ class CuentasPendientesYSeleccionTest {
         assertTrue(elegidas.stream().allMatch(a -> a.getBankType() == BankType.BANCOLOMBIA));
         assertFalse(Boolean.TRUE.equals(nequi.getActivaParaP2P()));
     }
+
+    @Test
+    void seleccion_eligeComoMaximoSieteCuentas() {
+        java.util.List<AccountCop> nueve = new java.util.ArrayList<>();
+        for (int i = 1; i <= 9; i++) {
+            nueve.add(cuenta(i, BankType.BANCOLOMBIA, i * 100)); // todas con espacio de sobra en ambos canales
+        }
+        when(accountCopRepository.findAll()).thenReturn(nueve);
+
+        List<AccountCop> elegidas = accountCopService.activarCincoCuentasMasCercanasAlCupo();
+
+        assertEquals(7, elegidas.size());
+        // las 7 mas cercanas al limite = las de mayor saldo (ids 3..9)
+        assertTrue(elegidas.stream().noneMatch(a -> a.getId() == 1 || a.getId() == 2));
+    }
+
+    @Test
+    void seleccion_marcaLasElegidasConElCanalDeLaHora() {
+        AccountCop b1 = cuenta(2, BankType.BANCOLOMBIA, 500);
+        b1.setCupoTipoP2P("AMBOS");
+        when(accountCopRepository.findAll()).thenReturn(List.of(b1));
+
+        accountCopService.activarCincoCuentasMasCercanasAlCupo();
+
+        assertEquals(com.binance.web.util.VentanaCupoP2P.canalAhora().name(), b1.getCupoTipoP2P());
+    }
 }

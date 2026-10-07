@@ -45,7 +45,7 @@ import lombok.extern.slf4j.Slf4j;
  *     (avisando al bot vía {@link CuentaP2PSyncService}) y se ACTIVA la siguiente candidata con cupo.
  *  4) El cupo que cuenta depende de la HORA ({@link VentanaCupoP2P}): de 00:00 a 18:29 solo el de
  *     CORRESPONSAL y de 18:30 a 23:59 solo el de CAJERO. El otro canal se ignora.
- *  5) SELECCIÓN DE CUENTAS: si NO hay ninguna cuenta activa en P2P, el Auto elige y activa las 5 más
+ *  5) SELECCIÓN DE CUENTAS: si NO hay ninguna cuenta activa en P2P, el Auto elige y activa las 7 más
  *     cercanas al límite del canal de la hora (AccountCopService.activarCincoCuentasMasCercanasAlCupo),
  *     lo que además le avisa a Movimientos para que las abra. Pasa al prenderlo y, si ya está
  *     prendido, cuando llega una venta y no queda ninguna cuenta activa. Si ya hay cuentas activas
@@ -60,7 +60,10 @@ import lombok.extern.slf4j.Slf4j;
  *     que no quepan) pero sigue activa y monitoreada hasta que esas ventas se cierren: si una se
  *     cae, la cuenta recupera espacio; si se libera, ahí sí sale. Se revisa en cada ciclo, haya o
  *     no ventas por asignar.
- *  9) NO REPETIDAS: una cuenta que ya tiene una venta EN CURSO por el mismo monto exacto no recibe
+ *  9) TIPO DE CUPO: las cuentas que el Auto elige o repone quedan marcadas (cupoTipoP2P) con el canal
+ *     de la hora. Las que YA estaban activas no se tocan, ni siquiera cuando la ventana cambia.
+ *     OJO: ese tipo decide por qué canal se dispara el retiro automático de la cuenta.
+ * 10) NO REPETIDAS: una cuenta que ya tiene una venta EN CURSO por el mismo monto exacto no recibe
  *     otra igual (el depósito sería indistinguible en Movimientos). Vale mientras la primera no se
  *     cierre: al liberarse sale de la lista de órdenes en curso y el monto vuelve a estar disponible.
  *
@@ -135,7 +138,7 @@ public class AsignacionAutomaticaService {
     }
 
     /**
-     * Si no hay ninguna cuenta activa en P2P, elige y activa las 5 más cercanas al límite del canal
+     * Si no hay ninguna cuenta activa en P2P, elige y activa las 7 más cercanas al límite del canal
      * de la hora. Cada activación se le avisa a Movimientos (CuentaP2PSyncService). Si ya hay
      * cuentas activas no hace nada. Devuelve true si eligió cuentas.
      */
@@ -317,7 +320,7 @@ public class AsignacionAutomaticaService {
                 .orElse(null);
     }
 
-    /** Activa la siguiente candidata (inactiva, con cupo), la más cercana al límite — igual que la selección de las 5. */
+    /** Activa la siguiente candidata (inactiva, con cupo), la más cercana al límite — igual que la selección de las 7. */
     private AccountCop activarSiguiente(List<AccountCop> todas, Canal canal) {
         AccountCop next = todas.stream()
                 .filter(a -> a.getId() != null)
@@ -333,6 +336,7 @@ public class AsignacionAutomaticaService {
         }
         boolean antes = Boolean.TRUE.equals(next.getActivaParaP2P());
         next.setActivaParaP2P(true);
+        next.setCupoTipoP2P(canal.name());
         cuentaP2PSyncService.sincronizar(next, antes);
         log.info("[AutoAsign] Activada la siguiente cuenta COP: {}", next.getName());
         return next;

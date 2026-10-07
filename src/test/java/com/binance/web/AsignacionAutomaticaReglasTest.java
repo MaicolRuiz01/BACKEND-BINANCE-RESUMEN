@@ -101,6 +101,8 @@ class AsignacionAutomaticaReglasTest {
         assertEquals(Canal.CORRESPONSAL, VentanaCupoP2P.canalEn(LocalTime.of(18, 29, 59)));
         assertEquals(Canal.CAJERO, VentanaCupoP2P.canalEn(LocalTime.of(18, 30)));
         assertEquals(Canal.CAJERO, VentanaCupoP2P.canalEn(LocalTime.of(23, 59, 59)));
+        assertEquals(Canal.CAJERO, VentanaCupoP2P.canalEn(LocalTime.of(18, 40)));
+        assertEquals(Canal.CORRESPONSAL, VentanaCupoP2P.canalEn(LocalTime.of(1, 0)));
     }
 
     @Test
@@ -472,5 +474,40 @@ class AsignacionAutomaticaReglasTest {
 
         assertEquals(true, a.getActivaParaP2P());
         verify(cuentaP2PSyncService, never()).sincronizar(any(), any(Boolean.class));
+    }
+
+    // ── Tipo de cupo (icono cajero / corresponsal) ────────────────
+
+    @Test
+    void lasCuentasYaActivas_noSeRemarcan_aunqueCambieLaVentana() {
+        AccountCop a = cuenta(1, 1_000, 10_000, 2_700);
+        a.setCupoTipoP2P("CORRESPONSAL");
+        AccountCop b = cuenta(2, 1_000, 10_000, 2_700);
+        b.setCupoTipoP2P("AMBOS");
+        when(accountCopRepository.findAll()).thenReturn(List.of(a, b));
+
+        horaDelDia(10, 0);
+        servicio.asignar(List.of());
+        horaDelDia(20, 40); // ya es ventana de cajero
+        servicio.asignar(List.of());
+        horaDelDia(1, 0);   // y de madrugada, corresponsal
+        servicio.asignar(List.of());
+
+        assertEquals("CORRESPONSAL", a.getCupoTipoP2P());
+        assertEquals("AMBOS", b.getCupoTipoP2P());
+    }
+
+    @Test
+    void laCuentaDeReemplazo_quedaMarcadaConElCanalDeLaHora() {
+        horaDelDia(19, 0);
+        AccountCop llena = cuenta(1, 3_000, 10_000, 2_700);  // cajero: espacio -300 -> llena
+        AccountCop candidata = inactiva(2, 500);              // cajero: espacio 2.200
+        candidata.setCupoTipoP2P("AMBOS");
+        when(accountCopRepository.findAll()).thenReturn(List.of(llena, candidata));
+
+        servicio.asignar(List.of());
+
+        assertEquals(true, candidata.getActivaParaP2P());
+        assertEquals("CAJERO", candidata.getCupoTipoP2P());
     }
 }
