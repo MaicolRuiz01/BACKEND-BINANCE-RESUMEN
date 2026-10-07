@@ -36,6 +36,7 @@ public class MovimientosBridgeServiceImpl implements MovimientosBridgeService {
 
     private final CuentasP2PTelegramService cuentasP2PTelegramService;
     private final ConciliacionBancariaService conciliacionBancariaService;
+    private final MovimientosCuentasPendientes cuentasPendientes;
 
     // Lista fija de chats de confianza (ver nota en application-dev.properties:
     // por ahora es una lista manual, misma idea que FULL_NOTIF_IDS en
@@ -125,6 +126,8 @@ public class MovimientosBridgeServiceImpl implements MovimientosBridgeService {
         // conciliación de la cuenta — independiente de si hay o no chats de
         // Telegram configurados abajo, para que esto nunca se pierda.
         if ("conexion_exitosa".equals(evento.getEvento())) {
+            // Prueba real de que Movimientos abrió la cuenta: ya puede recibir ventas del Auto.
+            cuentasPendientes.confirmar(evento.getCuenta());
             conciliacionBancariaService.registrarResultadoCuenta(
                     evento.getCuenta(), true, null, null);
         } else if ("error_login".equals(evento.getEvento())) {

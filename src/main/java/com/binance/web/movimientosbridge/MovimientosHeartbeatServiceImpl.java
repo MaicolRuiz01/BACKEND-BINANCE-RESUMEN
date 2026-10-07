@@ -50,6 +50,7 @@ public class MovimientosHeartbeatServiceImpl implements MovimientosHeartbeatServ
     private final ConciliacionBancariaService conciliacionBancariaService;
     private final DetencionService detencionService;
     private final MovimientosConectividadMonitor conectividadMonitor;
+    private final MovimientosCuentasPendientes cuentasPendientes;
 
     /** Mismo criterio de normalización que ConciliacionBancariaServiceImpl —
      *  minúsculas, sin tildes, espacios colapsados, para que un espacio de
@@ -109,6 +110,7 @@ public class MovimientosHeartbeatServiceImpl implements MovimientosHeartbeatServ
                 if (!reportadasNormalizadas.contains(normalizar(cuenta.getName()))) {
                     log.warn("[Heartbeat] '{}' está activa en P2P pero Movimientos no la reporta corriendo — "
                             + "reencolando activación.", cuenta.getName());
+                    cuentasPendientes.marcarPendiente(cuenta.getName());
                     conciliacionBancariaService.solicitarConciliacion(cuenta);
                 }
             }

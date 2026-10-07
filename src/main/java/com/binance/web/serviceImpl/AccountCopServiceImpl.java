@@ -24,6 +24,7 @@ import com.binance.web.activacion.CuentaP2PSyncService;
 import com.binance.web.service.AccountCopService;
 import com.binance.web.service.RetiradorService;
 import com.binance.web.util.CupoDiarioRules;
+import com.binance.web.util.VentanaCupoP2P;
 
 @Service
 public class AccountCopServiceImpl implements AccountCopService {
@@ -248,6 +249,10 @@ public class AccountCopServiceImpl implements AccountCopService {
 	public List<AccountCop> activarCincoCuentasMasCercanasAlCupo() {
 	    List<AccountCop> todas = AccountCopRepository.findAll();
 
+	    // Regla horaria: de 00:00 a 18:29 se mira el cupo de CORRESPONSAL y desde las 18:30 el de
+	    // CAJERO (ver VentanaCupoP2P). El cupo del otro canal se ignora al elegir.
+	    VentanaCupoP2P.Canal canal = VentanaCupoP2P.canalAhora();
+
 	    // Candidatas: no bloqueadas, con banco definido, y con cupo restante (cupoDiarioMax -
 	    // balance) dentro del rango [SUBLIMITE_CUPO_RESTANTE, +inf). Un restante negativo o cero
 	    // significa que ya se pasó del cupo; uno positivo pero por debajo del sub-límite significa
@@ -255,13 +260,14 @@ public class AccountCopServiceImpl implements AccountCopService {
 	    List<AccountCop> candidatas = new ArrayList<>();
 	    for (AccountCop acc : todas) {
 	        if (Boolean.TRUE.equals(acc.getBloqueada())) continue;
-	        if (acc.getBankType() == null) continue;
+	        // Por ahora solo Bancolombia: es el único banco que Movimientos monitorea.
+	        if (acc.getBankType() != BankType.BANCOLOMBIA) continue;
 
 	        CupoDiarioRules.asegurarCupoHoy(acc);
 
-	        double cupoTotal = acc.getCupoDiarioMax() != null ? acc.getCupoDiarioMax() : 0.0;
+	        double cupoCanal = VentanaCupoP2P.cupoHoy(acc, canal);
 	        double saldo = acc.getBalance() != null ? acc.getBalance() : 0.0;
-	        double restante = cupoTotal - saldo;
+	        double restante = cupoCanal - saldo;
 
 	        if (restante >= SUBLIMITE_CUPO_RESTANTE) {
 	            candidatas.add(acc);
@@ -270,7 +276,7 @@ public class AccountCopServiceImpl implements AccountCopService {
 
 	    // La más cerca de llenar su cupo total primero (menor cupo restante).
 	    candidatas.sort(Comparator.comparingDouble(acc ->
-	            (acc.getCupoDiarioMax() != null ? acc.getCupoDiarioMax() : 0.0)
+	            VentanaCupoP2P.cupoHoy(acc, canal)
 	                    - (acc.getBalance() != null ? acc.getBalance() : 0.0)));
 
 	    List<AccountCop> elegidas = candidatas.stream()

@@ -3,8 +3,10 @@ package com.binance.web.BinanceAPI;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
@@ -17,9 +19,15 @@ import com.binance.web.Entity.AccountCop;
 import com.binance.web.Entity.AutoAsignacionConfig;
 import com.binance.web.Repository.AccountCopRepository;
 import com.binance.web.Repository.AutoAsignacionConfigRepository;
+import com.binance.web.Repository.P2PPreAsignacionRepository;
+import com.binance.web.Entity.BankType;
 import com.binance.web.activacion.CuentaP2PSyncService;
+import com.binance.web.movimientosbridge.MovimientosCuentasPendientes;
+import com.binance.web.service.AccountCopService;
 import com.binance.web.dto.ActiveP2POrderDto;
 import com.binance.web.util.CupoDiarioRules;
+import com.binance.web.util.VentanaCupoP2P;
+import com.binance.web.util.VentanaCupoP2P.Canal;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -35,6 +43,26 @@ import lombok.extern.slf4j.Slf4j;
  *     (el cliente permite pasarse "solo un poquito": hasta $50.000).
  *  3) Si una cuenta agota su cupo (disponible ≤ −TOLERANCIA), se desactiva de P2P
  *     (avisando al bot vía {@link CuentaP2PSyncService}) y se ACTIVA la siguiente candidata con cupo.
+ *  4) El cupo que cuenta depende de la HORA ({@link VentanaCupoP2P}): de 00:00 a 18:29 solo el de
+ *     CORRESPONSAL y de 18:30 a 23:59 solo el de CAJERO. El otro canal se ignora.
+ *  5) SELECCIÓN DE CUENTAS: si NO hay ninguna cuenta activa en P2P, el Auto elige y activa las 5 más
+ *     cercanas al límite del canal de la hora (AccountCopService.activarCincoCuentasMasCercanasAlCupo),
+ *     lo que además le avisa a Movimientos para que las abra. Pasa al prenderlo y, si ya está
+ *     prendido, cuando llega una venta y no queda ninguna cuenta activa. Si ya hay cuentas activas
+ *     (aunque sean pocas) NO elige otras: trabaja con las que están.
+ *  6) SOLO BANCOLOMBIA: es el único banco que Movimientos monitorea, así que solo esas cuentas se
+ *     eligen y reciben ventas del Auto (por ahora).
+ *  7) CONFIRMADAS: una cuenta recién activada no recibe ventas hasta que Movimientos confirme que la
+ *     abrió (evento "conexion_exitosa", ver {@link MovimientosCuentasPendientes}).
+ *  8) CUENTA LLENA: una cuenta sale del grupo (se desactiva y se reemplaza por otra candidata) cuando
+ *     su cupo del canal ya se cumplió con plata REAL (cupo − saldo ≤ 0) y NO le queda ninguna venta
+ *     abierta. Mientras tenga ventas abiertas se asume que esa plata ya llegó (no recibe más ventas
+ *     que no quepan) pero sigue activa y monitoreada hasta que esas ventas se cierren: si una se
+ *     cae, la cuenta recupera espacio; si se libera, ahí sí sale. Se revisa en cada ciclo, haya o
+ *     no ventas por asignar.
+ *  9) NO REPETIDAS: una cuenta que ya tiene una venta EN CURSO por el mismo monto exacto no recibe
+ *     otra igual (el depósito sería indistinguible en Movimientos). Vale mientras la primera no se
+ *     cierre: al liberarse sale de la lista de órdenes en curso y el monto vuelve a estar disponible.
  *
  * Unidades: todos los montos van en MILES de COP (igual que pesosCop y los cupos diarios),
  * por eso la tolerancia de $50.000 es 50.0 aquí.
@@ -51,12 +79,23 @@ public class AsignacionAutomaticaService {
     /** Cupo restante mínimo (MILES) para activar una cuenta nueva como reemplazo. */
     private static final double SUBLIMITE_ACTIVAR = 1_000.0;
     private static final Integer CONFIG_ID = 1;
+    /** Una cuenta está "llena" cuando su espacio real en el canal (cupo − saldo, MILES) llega a esto o menos. */
+    private static final double LIMITE_LLENA = 0.0;
 
     @Autowired private P2PActiveOrderService activeOrderService;
     @Autowired private AccountCopRepository accountCopRepository;
     @Autowired private CuentaP2PSyncService cuentaP2PSyncService;
     @Autowired private AutoAsignacionConfigRepository configRepository;
+    /** Ventas con cuenta pre-asignada cuya venta aún no se importó (las que siguen "en curso"). */
+    @Autowired private P2PPreAsignacionRepository preAsignacionRepository;
+    /** Cuentas pedidas a Movimientos y aun sin confirmar: no reciben ventas hasta que confirme. */
+    @Autowired private MovimientosCuentasPendientes cuentasPendientes;
+    /** @Lazy: evita un ciclo de dependencias; solo se usa para elegir las cuentas iniciales. */
+    @Autowired @Lazy private AccountCopService accountCopService;
     @Autowired @Lazy private AsignacionAutomaticaService self;
+
+    /** Reloj para la regla horaria (en pruebas se reemplaza para fijar la hora). */
+    private java.time.Clock reloj = java.time.Clock.system(VentanaCupoP2P.ZONA);
 
     /** Evita que dos ciclos se solapen (el poll corre cada 15 s). */
     private final AtomicBoolean enCurso = new AtomicBoolean(false);
@@ -76,7 +115,40 @@ public class AsignacionAutomaticaService {
         cfg.setActiva(activa);
         configRepository.save(cfg);
         log.info("[AutoAsign] Asignación automática {}", activa ? "ACTIVADA" : "DESACTIVADA");
+        if (activa) {
+            // Al prenderlo sin ninguna cuenta seleccionada, las elige. Si falla, el interruptor igual queda ON:
+            // el ciclo lo reintentará cuando llegue una venta.
+            try {
+                seleccionarCuentasSiNoHay(accountCopRepository.findAll());
+            } catch (Exception e) {
+                log.warn("[AutoAsign] No se pudieron elegir las cuentas al activar: {}", e.getMessage());
+            }
+        }
         return activa;
+    }
+
+    /** ¿Hay al menos una cuenta activa en P2P (y no bloqueada)? */
+    private static boolean hayCuentasActivas(List<AccountCop> todas) {
+        return todas.stream().anyMatch(a -> Boolean.TRUE.equals(a.getActivaParaP2P())
+                && !Boolean.TRUE.equals(a.getBloqueada())
+                && a.getBankType() == BankType.BANCOLOMBIA);
+    }
+
+    /**
+     * Si no hay ninguna cuenta activa en P2P, elige y activa las 5 más cercanas al límite del canal
+     * de la hora. Cada activación se le avisa a Movimientos (CuentaP2PSyncService). Si ya hay
+     * cuentas activas no hace nada. Devuelve true si eligió cuentas.
+     */
+    private boolean seleccionarCuentasSiNoHay(List<AccountCop> todas) {
+        if (hayCuentasActivas(todas)) return false;
+        List<AccountCop> elegidas = accountCopService.activarCincoCuentasMasCercanasAlCupo();
+        if (elegidas == null || elegidas.isEmpty()) {
+            log.warn("[AutoAsign] No hay cuentas activas ni candidatas con cupo para elegir.");
+            return false;
+        }
+        log.info("[AutoAsign] No había cuentas activas: se eligieron {} ({}).", elegidas.size(),
+                elegidas.stream().map(AccountCop::getName).collect(Collectors.joining(", ")));
+        return true;
     }
 
     // ── Motor ─────────────────────────────────────────────────────
@@ -91,11 +163,11 @@ public class AsignacionAutomaticaService {
      *                pedírselas a Binance en cada tick (el doble de llamadas por cuenta cada 15 s).
      */
     public void ejecutar(List<ActiveP2POrderDto> ordenes) {
-        if (ordenes == null || ordenes.isEmpty()) return;
         if (!isActiva()) return;
         if (!enCurso.compareAndSet(false, true)) return; // ya hay un ciclo corriendo
         try {
-            self.asignar(ordenes);
+            // Sin ventas en curso igual se revisa el grupo: una cuenta puede haberse llenado al liberarse su última venta.
+            self.asignar(ordenes != null ? ordenes : List.of());
         } catch (Exception e) {
             log.warn("[AutoAsign] Error en el ciclo de asignación automática: {}", e.getMessage());
         } finally {
@@ -105,17 +177,33 @@ public class AsignacionAutomaticaService {
 
     @Transactional
     public void asignar(List<ActiveP2POrderDto> ordenes) {
-        // Órdenes sin cuenta asignada, más antiguas primero.
+        // Cuentas COP en memoria, con los cupos del día al día.
+        List<AccountCop> todas = accountCopRepository.findAll();
+        todas.stream().filter(a -> a.getBankType() != null).forEach(CupoDiarioRules::asegurarCupoHoy);
+
+        // Canal de la hora actual: solo su cupo cuenta (corresponsal de día, cajero desde 18:30).
+        Canal canal = VentanaCupoP2P.canalAhora(reloj);
+        List<AccountCop> cambiadas = new ArrayList<>();
+
+        // 1) Mantener el grupo: sacar las cuentas ya llenas (y sin ventas abiertas) y reponerlas.
+        mantenerGrupo(todas, ordenes, canal, cambiadas);
+
+        // 2) Ventas sin cuenta asignada, más antiguas primero.
         List<ActiveP2POrderDto> pendientes = ordenes.stream()
                 .filter(o -> o.getPreAsignadoCopId() == null)
                 .sorted(Comparator.comparing(ActiveP2POrderDto::getCreateTime,
                         Comparator.nullsLast(Comparator.naturalOrder())))
                 .collect(Collectors.toList());
-        if (pendientes.isEmpty()) return;
+        if (pendientes.isEmpty()) {
+            if (!cambiadas.isEmpty()) accountCopRepository.saveAll(cambiadas);
+            return;
+        }
 
-        // Cuentas COP en memoria, con los cupos del día al día.
-        List<AccountCop> todas = accountCopRepository.findAll();
-        todas.stream().filter(a -> a.getBankType() != null).forEach(CupoDiarioRules::asegurarCupoHoy);
+        // Sin ninguna cuenta activa no hay a quién asignar: se eligen y se vuelve a leer.
+        if (seleccionarCuentasSiNoHay(todas)) {
+            todas = accountCopRepository.findAll();
+            todas.stream().filter(a -> a.getBankType() != null).forEach(CupoDiarioRules::asegurarCupoHoy);
+        }
 
         // "Comprometido" = pesosCop de las ventas EN CURSO ya pre-asignadas a cada cuenta.
         // Aún no se importaron, así que todavía no bajaron el balance: hay que restarlo aparte
@@ -127,13 +215,22 @@ public class AsignacionAutomaticaService {
             }
         }
 
-        List<AccountCop> cambiadas = new ArrayList<>();
+        // Montos exactos de las ventas EN CURSO ya asignadas a cada cuenta (la lista solo trae
+        // órdenes no finalizadas: una liberada o cancelada ya no está). Sirve para no repetir.
+        Map<Integer, Set<Long>> montosAbiertos = new HashMap<>();
+        for (ActiveP2POrderDto o : ordenes) {
+            if (o.getPreAsignadoCopId() != null) {
+                montosAbiertos.computeIfAbsent(o.getPreAsignadoCopId(), k -> new HashSet<>())
+                        .add(claveMonto(val(o.getPesosCop())));
+            }
+        }
 
         for (ActiveP2POrderDto o : pendientes) {
             double monto = val(o.getPesosCop());
-            AccountCop elegida = elegirCuenta(todas, comprometido, monto);
+            AccountCop elegida = elegirCuenta(todas, comprometido, montosAbiertos, monto, canal);
             if (elegida == null) {
-                log.info("[AutoAsign] Sin cuenta con cupo para la orden {} ({} miles).", o.getOrderNumber(), monto);
+                log.info("[AutoAsign] Sin cuenta con cupo de {} (y sin otra orden igual abierta) para la orden {} ({} miles).",
+                        canal, o.getOrderNumber(), monto);
                 continue;
             }
 
@@ -148,44 +245,87 @@ public class AsignacionAutomaticaService {
                 continue;
             }
             comprometido.merge(elegida.getId(), monto, Double::sum);
-            log.info("[AutoAsign] Orden {} → {} (disponible restante {} miles).",
-                    o.getOrderNumber(), elegida.getName(), disponible(elegida, comprometido));
-
-            // ¿Agotó su cupo? → desactivar y activar la siguiente candidata.
-            if (disponible(elegida, comprometido) <= -TOLERANCIA) {
-                desactivar(elegida);
-                cambiadas.add(elegida);
-                AccountCop siguiente = activarSiguiente(todas);
-                if (siguiente != null) cambiadas.add(siguiente);
-            }
+            montosAbiertos.computeIfAbsent(elegida.getId(), k -> new HashSet<>()).add(claveMonto(monto));
+            log.info("[AutoAsign] Orden {} → {} (cupo {} restante {} miles).",
+                    o.getOrderNumber(), elegida.getName(), canal, disponible(elegida, comprometido, canal));
+            // OJO: aunque esta venta la deje sin espacio, la cuenta NO se desactiva acá: tiene una venta
+            // abierta y su plata todavía no llega. mantenerGrupo la saca cuando esa venta se cierre.
         }
 
         if (!cambiadas.isEmpty()) accountCopRepository.saveAll(cambiadas);
     }
 
+    // ── Mantenimiento del grupo ───────────────────────────────────
+
+    /** Cuentas que todavía esperan plata: tienen alguna venta en curso asignada. */
+    private Set<Integer> cuentasConVentasAbiertas(List<ActiveP2POrderDto> ordenes) {
+        Set<Integer> ids = new HashSet<>();
+        for (ActiveP2POrderDto o : ordenes) {
+            if (o.getPreAsignadoCopId() != null) ids.add(o.getPreAsignadoCopId());
+        }
+        // También las pre-asignaciones guardadas sin importar: la lista de órdenes puede venir
+        // incompleta si Binance falló en este ciclo, y no se debe sacar una cuenta que espera plata.
+        // (Incluye alguna huérfana de una orden cancelada: en ese caso la cuenta se queda un rato más.)
+        for (var p : preAsignacionRepository.findSinImportar()) {
+            if (p.getCopId() != null) ids.add(p.getCopId());
+        }
+        return ids;
+    }
+
+    /**
+     * Saca del grupo las cuentas cuyo cupo del canal ya se cumplió con plata real y que no esperan
+     * ninguna venta, y activa en su lugar la siguiente candidata (el grupo mantiene su tamaño).
+     */
+    private void mantenerGrupo(List<AccountCop> todas, List<ActiveP2POrderDto> ordenes,
+                               Canal canal, List<AccountCop> cambiadas) {
+        Set<Integer> conVentasAbiertas = null; // se calcula solo si hace falta (evita una consulta por ciclo)
+        for (AccountCop a : new ArrayList<>(todas)) {
+            if (a.getId() == null) continue;
+            if (!Boolean.TRUE.equals(a.getActivaParaP2P()) || Boolean.TRUE.equals(a.getBloqueada())) continue;
+            if (a.getBankType() != BankType.BANCOLOMBIA) continue;
+            if (VentanaCupoP2P.cupoHoy(a, canal) - bal(a) > LIMITE_LLENA) continue; // todavía tiene espacio
+
+            if (conVentasAbiertas == null) conVentasAbiertas = cuentasConVentasAbiertas(ordenes);
+            if (conVentasAbiertas.contains(a.getId())) continue; // espera plata: se queda hasta que se cierre
+
+            log.info("[AutoAsign] {} llegó al límite de {} sin ventas abiertas → sale del grupo.", a.getName(), canal);
+            desactivar(a);
+            cambiadas.add(a);
+            AccountCop siguiente = activarSiguiente(todas, canal);
+            if (siguiente != null) cambiadas.add(siguiente);
+        }
+    }
+
     // ── Selección ─────────────────────────────────────────────────
 
-    /** Entre las cuentas ACTIVAS donde la venta quepa, la MÁS cercana al límite (menor disponible). */
-    private AccountCop elegirCuenta(List<AccountCop> todas, Map<Integer, Double> comprometido, double monto) {
+    /**
+     * Entre las cuentas ACTIVAS donde la venta quepa, la MÁS cercana al límite (menor disponible),
+     * descartando las que ya tienen una venta en curso por ese mismo monto exacto.
+     */
+    private AccountCop elegirCuenta(List<AccountCop> todas, Map<Integer, Double> comprometido,
+                                    Map<Integer, Set<Long>> montosAbiertos, double monto, Canal canal) {
+        long clave = claveMonto(monto);
         return todas.stream()
                 .filter(a -> a.getId() != null)
                 .filter(a -> Boolean.TRUE.equals(a.getActivaParaP2P()))
                 .filter(a -> !Boolean.TRUE.equals(a.getBloqueada()))
-                .filter(a -> a.getBankType() != null)
-                .filter(a -> disponible(a, comprometido) - monto >= -TOLERANCIA) // cabe (hasta 50k de exceso)
-                .min(Comparator.comparingDouble(a -> disponible(a, comprometido)))
+                .filter(a -> a.getBankType() == BankType.BANCOLOMBIA) // solo Bancolombia (lo que Movimientos monitorea)
+                .filter(a -> !cuentasPendientes.estaPendiente(a.getName())) // Movimientos ya confirmó que la abrió
+                .filter(a -> !montosAbiertos.getOrDefault(a.getId(), Set.of()).contains(clave)) // no repetidas
+                .filter(a -> disponible(a, comprometido, canal) - monto >= -TOLERANCIA) // cabe (hasta 50k de exceso)
+                .min(Comparator.comparingDouble(a -> disponible(a, comprometido, canal)))
                 .orElse(null);
     }
 
     /** Activa la siguiente candidata (inactiva, con cupo), la más cercana al límite — igual que la selección de las 5. */
-    private AccountCop activarSiguiente(List<AccountCop> todas) {
+    private AccountCop activarSiguiente(List<AccountCop> todas, Canal canal) {
         AccountCop next = todas.stream()
                 .filter(a -> a.getId() != null)
                 .filter(a -> !Boolean.TRUE.equals(a.getActivaParaP2P()))
                 .filter(a -> !Boolean.TRUE.equals(a.getBloqueada()))
-                .filter(a -> a.getBankType() != null)
-                .filter(a -> (max(a) - bal(a)) >= SUBLIMITE_ACTIVAR)
-                .min(Comparator.comparingDouble(a -> max(a) - bal(a)))
+                .filter(a -> a.getBankType() == BankType.BANCOLOMBIA)
+                .filter(a -> (VentanaCupoP2P.cupoHoy(a, canal) - bal(a)) >= SUBLIMITE_ACTIVAR)
+                .min(Comparator.comparingDouble(a -> VentanaCupoP2P.cupoHoy(a, canal) - bal(a)))
                 .orElse(null);
         if (next == null) {
             log.info("[AutoAsign] No hay más cuentas candidatas con cupo para activar.");
@@ -207,12 +347,17 @@ public class AsignacionAutomaticaService {
 
     // ── Helpers ───────────────────────────────────────────────────
 
-    /** Cupo disponible proyectado (MILES) = tope diario − balance − ventas en curso ya asignadas. */
-    private double disponible(AccountCop acc, Map<Integer, Double> comprometido) {
-        return max(acc) - bal(acc) - comprometido.getOrDefault(acc.getId(), 0.0);
+    /**
+     * Cupo disponible proyectado (MILES) = cupo de retiro que le queda HOY en el canal de la hora
+     * − balance − ventas en curso ya asignadas.
+     */
+    private double disponible(AccountCop acc, Map<Integer, Double> comprometido, Canal canal) {
+        return VentanaCupoP2P.cupoHoy(acc, canal) - bal(acc) - comprometido.getOrDefault(acc.getId(), 0.0);
     }
 
-    private double max(AccountCop a) { return a.getCupoDiarioMax() != null ? a.getCupoDiarioMax() : 0.0; }
+    /** Monto exacto en pesos, para comparar sin errores de decimales (el monto va en miles de COP). */
+    private static long claveMonto(double montoMiles) { return Math.round(montoMiles * 1000.0); }
+
     private double bal(AccountCop a) { return a.getBalance() != null ? a.getBalance() : 0.0; }
     private double val(Double d)     { return d != null ? d : 0.0; }
 }
