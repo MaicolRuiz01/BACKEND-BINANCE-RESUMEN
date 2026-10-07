@@ -19,7 +19,6 @@ import com.binance.web.Entity.AccountCop;
 import com.binance.web.Entity.AutoAsignacionConfig;
 import com.binance.web.Repository.AccountCopRepository;
 import com.binance.web.Repository.AutoAsignacionConfigRepository;
-import com.binance.web.Repository.P2PPreAsignacionRepository;
 import com.binance.web.Entity.BankType;
 import com.binance.web.activacion.CuentaP2PSyncService;
 import com.binance.web.movimientosbridge.MovimientosCuentasPendientes;
@@ -64,7 +63,9 @@ import lombok.extern.slf4j.Slf4j;
  *     abierta. Mientras tenga ventas abiertas se asume que esa plata ya llegó (no recibe más ventas
  *     que no quepan) pero sigue activa y monitoreada hasta que esas ventas se cierren: si una se
  *     cae, la cuenta recupera espacio; si se libera, ahí sí sale. Se revisa en cada ciclo, haya o
- *     no ventas por asignar.
+ *     no ventas por asignar. Lo comprometido y las ventas abiertas salen de SaldosEnCursoService (la misma
+ *     fuente del naranja de la pantalla): una orden recién liberada y aún sin importar sigue contando, y las
+ *     pre-asignaciones huérfanas no bloquean.
  *  9) TIPO DE CUPO: las cuentas que el Auto elige o repone quedan marcadas (cupoTipoP2P) con el canal
  *     de la hora. Las que YA estaban activas no se tocan, ni siquiera cuando la ventana cambia.
  *     OJO: ese tipo decide por qué canal se dispara el retiro automático de la cuenta.
@@ -94,8 +95,12 @@ public class AsignacionAutomaticaService {
     @Autowired private AccountCopRepository accountCopRepository;
     @Autowired private CuentaP2PSyncService cuentaP2PSyncService;
     @Autowired private AutoAsignacionConfigRepository configRepository;
-    /** Ventas con cuenta pre-asignada cuya venta aún no se importó (las que siguen "en curso"). */
-    @Autowired private P2PPreAsignacionRepository preAsignacionRepository;
+    /**
+     * Fuente ÚNICA de lo "en curso" por cuenta: la misma que pinta el naranja de la pantalla. Incluye las
+     * órdenes activas Y las que acaban de salir del listado esperando su importación (ya no están entre las
+     * activas pero su plata todavía no está en el saldo), y descarta las huérfanas.
+     */
+    @Autowired private SaldosEnCursoService saldosEnCursoService;
     /** Cuentas pedidas a Movimientos y aun sin confirmar: no reciben ventas hasta que confirme. */
     @Autowired private MovimientosCuentasPendientes cuentasPendientes;
     /** @Lazy: evita un ciclo de dependencias; solo se usa para elegir las cuentas iniciales. */
@@ -193,8 +198,11 @@ public class AsignacionAutomaticaService {
         Canal canal = VentanaCupoP2P.canalAhora(reloj);
         List<AccountCop> cambiadas = new ArrayList<>();
 
+        // Lo que está "en curso" por cuenta (una sola lectura por ciclo, misma foto de la BD que el saldo de arriba).
+        EnCurso enCursoCuentas = calcularEnCurso(ordenes);
+
         // 1) Mantener el grupo: sacar las cuentas ya llenas (y sin ventas abiertas) y reponerlas.
-        mantenerGrupo(todas, ordenes, canal, cambiadas);
+        mantenerGrupo(todas, enCursoCuentas.conVentas(), canal, cambiadas);
 
         // 2) Ventas sin cuenta asignada, más antiguas primero.
         List<ActiveP2POrderDto> pendientes = ordenes.stream()
@@ -213,15 +221,10 @@ public class AsignacionAutomaticaService {
             todas.stream().filter(a -> a.getBankType() != null).forEach(CupoDiarioRules::asegurarCupoHoy);
         }
 
-        // "Comprometido" = pesosCop de las ventas EN CURSO ya pre-asignadas a cada cuenta.
-        // Aún no se importaron, así que todavía no bajaron el balance: hay que restarlo aparte
-        // para no sobre-asignar la misma cuenta.
-        Map<Integer, Double> comprometido = new HashMap<>();
-        for (ActiveP2POrderDto o : ordenes) {
-            if (o.getPreAsignadoCopId() != null) {
-                comprometido.merge(o.getPreAsignadoCopId(), val(o.getPesosCop()), Double::sum);
-            }
-        }
+        // "Comprometido" = plata de las ventas EN CURSO ya pre-asignadas a cada cuenta (incluye las recién
+        // liberadas que aún no se importaron). Todavía no bajaron el balance: hay que restarlas aparte
+        // para no sobre-asignar la misma cuenta. Se copia porque dentro del ciclo se va sumando.
+        Map<Integer, Double> comprometido = new HashMap<>(enCursoCuentas.comprometido());
 
         // Montos exactos de las ventas EN CURSO ya asignadas a cada cuenta (la lista solo trae
         // órdenes no finalizadas: una liberada o cancelada ya no está). Sirve para no repetir.
@@ -265,35 +268,51 @@ public class AsignacionAutomaticaService {
 
     // ── Mantenimiento del grupo ───────────────────────────────────
 
-    /** Cuentas que todavía esperan plata: tienen alguna venta en curso asignada. */
-    private Set<Integer> cuentasConVentasAbiertas(List<ActiveP2POrderDto> ordenes) {
-        Set<Integer> ids = new HashSet<>();
+    /** Lo que cada cuenta tiene en curso: plata comprometida y cuáles tienen alguna venta abierta. */
+    private record EnCurso(Map<Integer, Double> comprometido, Set<Integer> conVentas) {}
+
+    /**
+     * Une dos miradas a lo "en curso": SaldosEnCursoService (órdenes activas + recién salidas esperando
+     * importación, sin huérfanas) y la lista de órdenes activas del poll. Una orden no se cuenta dos
+     * veces (se deduplica por número de orden). Así una venta recién liberada y aún sin importar sigue
+     * contando como comprometida, que era el punto ciego que dejaba llenar de más la cuenta más cercana al límite.
+     */
+    private EnCurso calcularEnCurso(List<ActiveP2POrderDto> ordenes) {
+        Map<Integer, Double> comprometido = new HashMap<>();
+        Set<Integer> conVentas = new HashSet<>();
+        Set<String> vistas = new HashSet<>();
+
+        List<SaldosEnCursoService.SaldoEnCurso> deServicio = saldosEnCursoService.calcular();
+        if (deServicio != null) {
+            for (SaldosEnCursoService.SaldoEnCurso s : deServicio) {
+                if (s.id() == null || s.detalle() == null) continue;
+                for (SaldosEnCursoService.DetalleEnCurso d : s.detalle()) {
+                    comprometido.merge(s.id(), d.pesos(), Double::sum);
+                    conVentas.add(s.id());
+                    vistas.add(d.orderNumber());
+                }
+            }
+        }
         for (ActiveP2POrderDto o : ordenes) {
-            if (o.getPreAsignadoCopId() != null) ids.add(o.getPreAsignadoCopId());
+            if (o.getPreAsignadoCopId() == null || vistas.contains(o.getOrderNumber())) continue;
+            comprometido.merge(o.getPreAsignadoCopId(), val(o.getPesosCop()), Double::sum);
+            conVentas.add(o.getPreAsignadoCopId());
         }
-        // También las pre-asignaciones guardadas sin importar: la lista de órdenes puede venir
-        // incompleta si Binance falló en este ciclo, y no se debe sacar una cuenta que espera plata.
-        // (Incluye alguna huérfana de una orden cancelada: en ese caso la cuenta se queda un rato más.)
-        for (var p : preAsignacionRepository.findSinImportar()) {
-            if (p.getCopId() != null) ids.add(p.getCopId());
-        }
-        return ids;
+        return new EnCurso(comprometido, conVentas);
     }
 
     /**
      * Saca del grupo las cuentas cuyo cupo del canal ya se cumplió con plata real y que no esperan
      * ninguna venta, y activa en su lugar la siguiente candidata (el grupo mantiene su tamaño).
      */
-    private void mantenerGrupo(List<AccountCop> todas, List<ActiveP2POrderDto> ordenes,
+    private void mantenerGrupo(List<AccountCop> todas, Set<Integer> conVentasAbiertas,
                                Canal canal, List<AccountCop> cambiadas) {
-        Set<Integer> conVentasAbiertas = null; // se calcula solo si hace falta (evita una consulta por ciclo)
         for (AccountCop a : new ArrayList<>(todas)) {
             if (a.getId() == null) continue;
             if (!Boolean.TRUE.equals(a.getActivaParaP2P()) || Boolean.TRUE.equals(a.getBloqueada())) continue;
             if (a.getBankType() != BankType.BANCOLOMBIA) continue;
             if (VentanaCupoP2P.cupoHoy(a, canal) - bal(a) > LIMITE_LLENA) continue; // todavía tiene espacio
 
-            if (conVentasAbiertas == null) conVentasAbiertas = cuentasConVentasAbiertas(ordenes);
             if (conVentasAbiertas.contains(a.getId())) continue; // espera plata: se queda hasta que se cierre
 
             log.info("[AutoAsign] {} llegó al límite de {} sin ventas abiertas → sale del grupo.", a.getName(), canal);

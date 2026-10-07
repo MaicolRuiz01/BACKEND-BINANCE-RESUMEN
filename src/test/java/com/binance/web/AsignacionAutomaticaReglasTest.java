@@ -2,11 +2,11 @@ package com.binance.web;
 
 import com.binance.web.BinanceAPI.AsignacionAutomaticaService;
 import com.binance.web.BinanceAPI.P2PActiveOrderService;
+import com.binance.web.BinanceAPI.SaldosEnCursoService;
 import com.binance.web.Entity.AccountCop;
 import com.binance.web.Entity.BankType;
 import com.binance.web.Repository.AccountCopRepository;
 import com.binance.web.Repository.AutoAsignacionConfigRepository;
-import com.binance.web.Repository.P2PPreAsignacionRepository;
 import com.binance.web.activacion.CuentaP2PSyncService;
 import com.binance.web.dto.ActiveP2POrderDto;
 import com.binance.web.movimientosbridge.MovimientosCuentasPendientes;
@@ -49,7 +49,7 @@ class AsignacionAutomaticaReglasTest {
     @Mock private AutoAsignacionConfigRepository configRepository;
     @Mock private AccountCopService accountCopService;
     @Mock private MovimientosCuentasPendientes cuentasPendientes;
-    @Mock private P2PPreAsignacionRepository preAsignacionRepository;
+    @Mock private SaldosEnCursoService saldosEnCursoService;
 
     @InjectMocks private AsignacionAutomaticaService servicio;
 
@@ -402,9 +402,7 @@ class AsignacionAutomaticaReglasTest {
     void listaDeOrdenesVacia_peroPreAsignacionEnBd_noSacaLaCuenta() {
         AccountCop llena = cuenta(1, 10_100, 10_000, 2_700);
         when(accountCopRepository.findAll()).thenReturn(List.of(llena));
-        P2PPreAsignacionRepository.PreSinImportar pre = org.mockito.Mockito.mock(P2PPreAsignacionRepository.PreSinImportar.class);
-        when(pre.getCopId()).thenReturn(1);
-        when(preAsignacionRepository.findSinImportar()).thenReturn(List.of(pre));
+        when(saldosEnCursoService.calcular()).thenReturn(List.of(enCurso(1, 600, "en-bd")));
 
         servicio.asignar(List.of()); // el poll no devolvio ordenes (p. ej. Binance fallo)
 
@@ -627,5 +625,54 @@ class AsignacionAutomaticaReglasTest {
         servicio.asignar(List.of(orden("abierta", 50, 1), orden("nueva", 240, null)));
 
         verify(activeOrderService).upsertPreAsignacion(eq("nueva"), eq(2), any(), any());
+    }
+
+    // ── Fuente unica de lo "en curso" (misma que el naranja de la pantalla) ──
+
+    private SaldosEnCursoService.SaldoEnCurso enCurso(int copId, double pesosEnCurso, String... ordenes) {
+        List<SaldosEnCursoService.DetalleEnCurso> det = new ArrayList<>();
+        for (String o : ordenes) det.add(new SaldosEnCursoService.DetalleEnCurso(o, pesosEnCurso / ordenes.length));
+        return new SaldosEnCursoService.SaldoEnCurso(copId, 0.0, 2_700.0, 10_000.0, pesosEnCurso, det);
+    }
+
+    @Test
+    void ordenRecienLiberadaSinImportar_sigueContandoComoComprometida() {
+        // La de 600 ya salio de la lista de activas (se libero) pero aun no esta en el saldo.
+        AccountCop a = cuenta(1, 9_500, 10_000, 2_700);
+        AccountCop otra = cuenta(2, 2_000, 10_000, 2_700);
+        when(accountCopRepository.findAll()).thenReturn(List.of(a, otra));
+        when(saldosEnCursoService.calcular()).thenReturn(List.of(enCurso(1, 600, "liberada-sin-importar")));
+
+        servicio.asignar(List.of(orden("nueva", 500, null)));
+
+        // 10.000 - 9.500 - 600 = -100: ya no cabe nada mas, la venta va a la otra cuenta.
+        verify(activeOrderService).upsertPreAsignacion(eq("nueva"), eq(2), any(), any());
+    }
+
+    @Test
+    void rafagaDeLiberadasSinImportar_laCuentaMasCercanaNoSePasa() {
+        // Caso Yeiner: 9.900 de saldo y varias ventas ya liberadas por importar (150 + 130).
+        AccountCop yeiner = cuenta(1, 9_900, 10_000, 2_700);
+        AccountCop otra = cuenta(2, 3_000, 10_000, 2_700);
+        when(accountCopRepository.findAll()).thenReturn(List.of(yeiner, otra));
+        when(saldosEnCursoService.calcular()).thenReturn(List.of(enCurso(1, 280, "l1", "l2")));
+
+        servicio.asignar(List.of(orden("nueva", 100, null)));
+
+        verify(activeOrderService).upsertPreAsignacion(eq("nueva"), eq(2), any(), any());
+    }
+
+    @Test
+    void unaOrdenEnLaListaYEnElServicio_noSeCuentaDosVeces() {
+        AccountCop a = cuenta(1, 9_500, 10_000, 2_700);   // espacio 500
+        AccountCop otra = cuenta(2, 2_000, 10_000, 2_700);
+        when(accountCopRepository.findAll()).thenReturn(List.of(a, otra));
+        when(saldosEnCursoService.calcular()).thenReturn(List.of(enCurso(1, 400, "x")));
+
+        // La misma orden 'x' (400) viene en la lista de activas y en el servicio.
+        servicio.asignar(List.of(orden("x", 400, 1), orden("nueva", 500, null)));
+
+        // Contada una vez: disponible 100 > 0 y 100-500 = -400 (dentro de la tolerancia) -> va a 'a'.
+        verify(activeOrderService).upsertPreAsignacion(eq("nueva"), eq(1), any(), any());
     }
 }
