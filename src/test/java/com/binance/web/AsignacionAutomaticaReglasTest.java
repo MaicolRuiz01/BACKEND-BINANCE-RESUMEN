@@ -242,20 +242,16 @@ class AsignacionAutomaticaReglasTest {
     }
 
     @Test
-    void sinCuentasActivas_alVenirUnaVenta_eligeLasCuentasYLaAsigna() {
+    void sinCuentasActivas_alVenirUnaVenta_abreLasCuentasYLaAsigna() {
         AccountCop c1 = inactiva(1, 9_000);
         AccountCop c2 = inactiva(2, 5_000);
         when(accountCopRepository.findAll()).thenReturn(List.of(c1, c2));
-        // La seleccion real activa las cuentas: aqui se simula marcandolas activas.
-        when(accountCopService.activarCincoCuentasMasCercanasAlCupo()).thenAnswer(inv -> {
-            c1.setActivaParaP2P(true);
-            c2.setActivaParaP2P(true);
-            return List.of(c1, c2);
-        });
 
         servicio.asignar(List.of(orden("o1", 1_000, null)));
 
-        verify(accountCopService).activarCincoCuentasMasCercanasAlCupo();
+        // El mantenimiento abre las dos candidatas (no llega a 7: no hay mas) y la venta va a la mas cercana.
+        verify(cuentaP2PSyncService).sincronizar(c1, false);
+        verify(cuentaP2PSyncService).sincronizar(c2, false);
         verify(activeOrderService).upsertPreAsignacion(eq("o1"), eq(1), any(), any());
     }
 
@@ -273,9 +269,8 @@ class AsignacionAutomaticaReglasTest {
 
     @Test
     void sinCuentasActivas_yNingunaCandidata_noAsignaNada() {
-        AccountCop c1 = inactiva(1, 9_900); // le queda menos del sublimite
+        AccountCop c1 = inactiva(1, 9_900); // le queda menos del sublimite: no es candidata
         when(accountCopRepository.findAll()).thenReturn(List.of(c1));
-        when(accountCopService.activarCincoCuentasMasCercanasAlCupo()).thenReturn(List.of());
 
         servicio.asignar(List.of(orden("o1", 500, null)));
 
@@ -334,14 +329,11 @@ class AsignacionAutomaticaReglasTest {
         nequi.setBankType(BankType.NEQUI);
         AccountCop banco = inactiva(2, 5_000);
         when(accountCopRepository.findAll()).thenReturn(List.of(nequi, banco));
-        when(accountCopService.activarCincoCuentasMasCercanasAlCupo()).thenAnswer(inv -> {
-            banco.setActivaParaP2P(true);
-            return List.of(banco);
-        });
 
         servicio.asignar(List.of(orden("o1", 500, null)));
 
-        verify(accountCopService).activarCincoCuentasMasCercanasAlCupo();
+        // La Nequi no cuenta como cuenta del grupo: se abre la Bancolombia y es la que recibe la venta.
+        verify(cuentaP2PSyncService).sincronizar(banco, false);
         verify(activeOrderService).upsertPreAsignacion(eq("o1"), eq(2), any(), any());
     }
 
@@ -394,8 +386,9 @@ class AsignacionAutomaticaReglasTest {
 
         servicio.asignar(List.of(orden("abierta", 600, 1)));
 
-        assertEquals(true, llena.getActivaParaP2P());
-        verify(cuentaP2PSyncService, never()).sincronizar(any(), eq(true));
+        assertEquals(true, llena.getActivaParaP2P());                   // sigue activa y monitoreada
+        verify(cuentaP2PSyncService, never()).sincronizar(any(), eq(true)); // no se detiene
+        assertEquals(true, candidata.getActivaParaP2P());               // y su reposicion se abre de inmediato
     }
 
     @Test
@@ -674,5 +667,116 @@ class AsignacionAutomaticaReglasTest {
 
         // Contada una vez: disponible 100 > 0 y 100-500 = -400 (dentro de la tolerancia) -> va a 'a'.
         verify(activeOrderService).upsertPreAsignacion(eq("nueva"), eq(1), any(), any());
+    }
+
+    // ── Reposicion inmediata: siempre 7 cuentas que reciban ventas ──
+
+    /** n cuentas activas con espacio de sobra en ambos canales, ids desde 'desde'. */
+    private List<AccountCop> activas(int desde, int n) {
+        List<AccountCop> l = new ArrayList<>();
+        for (int i = 0; i < n; i++) l.add(cuenta(desde + i, 1_000, 10_000, 2_700));
+        return l;
+    }
+
+    private List<AccountCop> candidatas(int desde, int n) {
+        List<AccountCop> l = new ArrayList<>();
+        for (int i = 0; i < n; i++) l.add(inactiva(desde + i, 1_000 + i));
+        return l;
+    }
+
+    private List<AccountCop> juntas(List<AccountCop>... listas) {
+        List<AccountCop> l = new ArrayList<>();
+        for (List<AccountCop> x : listas) l.addAll(x);
+        return l;
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void casoYeiner_sinCupoConVentaAbierta_seQuedaMonitoreada_perolaReposicionSeAbreYa() {
+        // Yeiner: cupo de corresponsal en 0 y 401 en curso. Las otras 6 reciben ventas. Hay una candidata.
+        AccountCop yeiner = cuenta(1, 44, 0, 2_700);
+        List<AccountCop> otras = activas(2, 6);
+        List<AccountCop> cand = candidatas(20, 1);
+        when(accountCopRepository.findAll()).thenReturn(juntas(List.of(yeiner), otras, cand));
+        when(saldosEnCursoService.calcular()).thenReturn(List.of(enCurso(1, 401, "a", "b", "c")));
+
+        servicio.asignar(List.of());
+
+        assertEquals(true, yeiner.getActivaParaP2P());                    // sigue monitoreada
+        assertEquals(true, cand.get(0).getActivaParaP2P());               // la reposicion ya esta abierta
+        verify(cuentaP2PSyncService).sincronizar(cand.get(0), false);
+        verify(cuentaP2PSyncService, never()).sincronizar(eq(yeiner), eq(true));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void siempreSiete_conTresActivas_abreCuatroMas() {
+        List<AccountCop> act = activas(1, 3);
+        List<AccountCop> cand = candidatas(20, 6);
+        when(accountCopRepository.findAll()).thenReturn(juntas(act, cand));
+
+        servicio.asignar(List.of());
+
+        long activasAhora = juntas(act, cand).stream().filter(a -> Boolean.TRUE.equals(a.getActivaParaP2P())).count();
+        assertEquals(7, activasAhora);
+        verify(cuentaP2PSyncService, org.mockito.Mockito.times(4)).sincronizar(any(), eq(false));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void conOchoActivas_noQuitaNiAgregaNinguna() {
+        List<AccountCop> act = activas(1, 8);
+        List<AccountCop> cand = candidatas(20, 3);
+        when(accountCopRepository.findAll()).thenReturn(juntas(act, cand));
+
+        servicio.asignar(List.of());
+
+        verify(cuentaP2PSyncService, never()).sincronizar(any(), any(Boolean.class));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void dosCuentasLlenasSinVentas_seCierranLasDos_yAbrenDos() {
+        List<AccountCop> sanas = activas(1, 5);
+        AccountCop llena1 = cuenta(10, 10_050, 10_000, 2_700);
+        AccountCop llena2 = cuenta(11, 10_300, 10_000, 2_700);
+        List<AccountCop> cand = candidatas(20, 3);
+        when(accountCopRepository.findAll()).thenReturn(juntas(sanas, List.of(llena1, llena2), cand));
+
+        servicio.asignar(List.of());
+
+        assertEquals(false, llena1.getActivaParaP2P());
+        assertEquals(false, llena2.getActivaParaP2P());
+        long activasAhora = juntas(sanas, List.of(llena1, llena2), cand).stream()
+                .filter(a -> Boolean.TRUE.equals(a.getActivaParaP2P())).count();
+        assertEquals(7, activasAhora);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void cuentaConCupoProyectadoAgotadoPorVentasAbiertas_noCuentaEntreLasSiete_yseRepone() {
+        // 9.500 de saldo con 600 en curso: proyectado -100, ya no recibe, aunque su cupo real aun no se cumplio.
+        AccountCop casi = cuenta(1, 9_500, 10_000, 2_700);
+        List<AccountCop> otras = activas(2, 6);
+        List<AccountCop> cand = candidatas(20, 1);
+        when(accountCopRepository.findAll()).thenReturn(juntas(List.of(casi), otras, cand));
+        when(saldosEnCursoService.calcular()).thenReturn(List.of(enCurso(1, 600, "x")));
+
+        servicio.asignar(List.of());
+
+        assertEquals(true, cand.get(0).getActivaParaP2P());
+        assertEquals(true, casi.getActivaParaP2P());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void sinCandidatas_noReventaYNoActivaNada() {
+        List<AccountCop> act = activas(1, 3);
+        when(accountCopRepository.findAll()).thenReturn(act);
+
+        servicio.asignar(List.of());
+        servicio.asignar(List.of()); // dos ciclos seguidos: no debe pasar nada raro
+
+        verify(cuentaP2PSyncService, never()).sincronizar(any(), any(Boolean.class));
     }
 }

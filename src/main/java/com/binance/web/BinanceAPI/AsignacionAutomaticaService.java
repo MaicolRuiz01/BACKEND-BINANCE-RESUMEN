@@ -58,18 +58,21 @@ import lombok.extern.slf4j.Slf4j;
  *     eligen y reciben ventas del Auto (por ahora).
  *  7) CONFIRMADAS: una cuenta recién activada no recibe ventas hasta que Movimientos confirme que la
  *     abrió (evento "conexion_exitosa", ver {@link MovimientosCuentasPendientes}).
- *  8) CUENTA LLENA: una cuenta sale del grupo (se desactiva y se reemplaza por otra candidata) cuando
- *     su cupo del canal ya se cumplió con plata REAL (cupo − saldo ≤ 0) y NO le queda ninguna venta
- *     abierta. Mientras tenga ventas abiertas se asume que esa plata ya llegó (no recibe más ventas
- *     que no quepan) pero sigue activa y monitoreada hasta que esas ventas se cierren: si una se
- *     cae, la cuenta recupera espacio; si se libera, ahí sí sale. Se revisa en cada ciclo, haya o
- *     no ventas por asignar. Lo comprometido y las ventas abiertas salen de SaldosEnCursoService (la misma
+ *  8) SIEMPRE 7 QUE RECIBAN VENTAS: en cada ciclo se cuenta cuántas cuentas activas todavía pueden recibir
+ *     ventas (disponible proyectado > 0, contando lo comprometido) y, si hay menos de {@link #GRUPO_OBJETIVO},
+ *     se abren candidatas hasta completar. Una cuenta que se quedó sin cupo del canal deja de contar AL
+ *     INSTANTE y su reposición se abre de inmediato, aunque la vieja siga activa.
+ *  9) CUENTA LLENA: una cuenta se desactiva (deja de monitorearse) cuando su cupo del canal ya se cumplió con
+ *     plata REAL (cupo − saldo ≤ 0) y NO le queda ninguna venta abierta. Mientras tenga ventas abiertas
+ *     sigue activa y monitoreada (no recibe más), y si una se cae recupera espacio; cuando se cierran, sale.
+ *     No hace falta reponerla al salir: la reposición ya se abrió al dejar de recibir. Se revisa en cada
+ *     ciclo, haya o no ventas por asignar. Lo comprometido y las ventas abiertas salen de SaldosEnCursoService (la misma
  *     fuente del naranja de la pantalla): una orden recién liberada y aún sin importar sigue contando, y las
  *     pre-asignaciones huérfanas no bloquean.
- *  9) TIPO DE CUPO: las cuentas que el Auto elige o repone quedan marcadas (cupoTipoP2P) con el canal
+ * 10) TIPO DE CUPO: las cuentas que el Auto elige o repone quedan marcadas (cupoTipoP2P) con el canal
  *     de la hora. Las que YA estaban activas no se tocan, ni siquiera cuando la ventana cambia.
  *     OJO: ese tipo decide por qué canal se dispara el retiro automático de la cuenta.
- * 10) NO REPETIDAS: una cuenta que ya tiene una venta EN CURSO por el mismo monto exacto no recibe
+ * 11) NO REPETIDAS: una cuenta que ya tiene una venta EN CURSO por el mismo monto exacto no recibe
  *     otra igual (el depósito sería indistinguible en Movimientos). Vale mientras la primera no se
  *     cierre: al liberarse sale de la lista de órdenes en curso y el monto vuelve a estar disponible.
  *
@@ -88,6 +91,8 @@ public class AsignacionAutomaticaService {
     /** Cupo restante mínimo (MILES) para activar una cuenta nueva como reemplazo. */
     private static final double SUBLIMITE_ACTIVAR = 1_000.0;
     private static final Integer CONFIG_ID = 1;
+    /** Cuántas cuentas deben estar recibiendo ventas siempre (igual que AccountCopServiceImpl.CUENTAS_A_ACTIVAR_POR_JORNADA). */
+    private static final int GRUPO_OBJETIVO = 7;
     /** Una cuenta está "llena" cuando su espacio real en el canal (cupo − saldo, MILES) llega a esto o menos. */
     private static final double LIMITE_LLENA = 0.0;
 
@@ -106,6 +111,9 @@ public class AsignacionAutomaticaService {
     /** @Lazy: evita un ciclo de dependencias; solo se usa para elegir las cuentas iniciales. */
     @Autowired @Lazy private AccountCopService accountCopService;
     @Autowired @Lazy private AsignacionAutomaticaService self;
+
+    /** Evita repetir en cada ciclo el aviso de "no hay candidatas para reponer el grupo". */
+    private volatile boolean sinCandidatasAvisado;
 
     /** Reloj para la regla horaria (en pruebas se reemplaza para fijar la hora). */
     private java.time.Clock reloj = java.time.Clock.system(VentanaCupoP2P.ZONA);
@@ -201,8 +209,9 @@ public class AsignacionAutomaticaService {
         // Lo que está "en curso" por cuenta (una sola lectura por ciclo, misma foto de la BD que el saldo de arriba).
         EnCurso enCursoCuentas = calcularEnCurso(ordenes);
 
-        // 1) Mantener el grupo: sacar las cuentas ya llenas (y sin ventas abiertas) y reponerlas.
-        mantenerGrupo(todas, enCursoCuentas.conVentas(), canal, cambiadas);
+        // 1) Mantener el grupo: sacar las ya llenas sin ventas abiertas y reponer hasta tener 7 que reciban ventas
+        //    (también abre las primeras cuentas si no había ninguna activa).
+        mantenerGrupo(todas, enCursoCuentas, canal, cambiadas);
 
         // 2) Ventas sin cuenta asignada, más antiguas primero.
         List<ActiveP2POrderDto> pendientes = ordenes.stream()
@@ -213,12 +222,6 @@ public class AsignacionAutomaticaService {
         if (pendientes.isEmpty()) {
             if (!cambiadas.isEmpty()) accountCopRepository.saveAll(cambiadas);
             return;
-        }
-
-        // Sin ninguna cuenta activa no hay a quién asignar: se eligen y se vuelve a leer.
-        if (seleccionarCuentasSiNoHay(todas)) {
-            todas = accountCopRepository.findAll();
-            todas.stream().filter(a -> a.getBankType() != null).forEach(CupoDiarioRules::asegurarCupoHoy);
         }
 
         // "Comprometido" = plata de las ventas EN CURSO ya pre-asignadas a cada cuenta (incluye las recién
@@ -302,25 +305,52 @@ public class AsignacionAutomaticaService {
     }
 
     /**
-     * Saca del grupo las cuentas cuyo cupo del canal ya se cumplió con plata real y que no esperan
-     * ninguna venta, y activa en su lugar la siguiente candidata (el grupo mantiene su tamaño).
+     * Mantiene el grupo en dos pasos:
+     *  1) Desactiva (deja de monitorear) las cuentas cuyo cupo del canal ya se cumplió con plata real y que no
+     *     esperan ninguna venta.
+     *  2) Cuenta las activas que todavía pueden recibir ventas y, si hay menos de {@link #GRUPO_OBJETIVO}, abre
+     *     candidatas hasta completar. Una cuenta sin cupo pero con ventas abiertas sigue activa y monitoreada,
+     *     pero ya NO cuenta aquí: por eso su reposición se abre de inmediato y no cuando por fin se cierre.
      */
-    private void mantenerGrupo(List<AccountCop> todas, Set<Integer> conVentasAbiertas,
-                               Canal canal, List<AccountCop> cambiadas) {
+    private void mantenerGrupo(List<AccountCop> todas, EnCurso enCurso, Canal canal, List<AccountCop> cambiadas) {
+        // 1) Fuera las llenas sin ventas abiertas.
         for (AccountCop a : new ArrayList<>(todas)) {
-            if (a.getId() == null) continue;
-            if (!Boolean.TRUE.equals(a.getActivaParaP2P()) || Boolean.TRUE.equals(a.getBloqueada())) continue;
-            if (a.getBankType() != BankType.BANCOLOMBIA) continue;
+            if (!esDelGrupo(a)) continue;
             if (VentanaCupoP2P.cupoHoy(a, canal) - bal(a) > LIMITE_LLENA) continue; // todavía tiene espacio
+            if (enCurso.conVentas().contains(a.getId())) continue; // espera plata: se queda hasta que se cierre
 
-            if (conVentasAbiertas.contains(a.getId())) continue; // espera plata: se queda hasta que se cierre
-
-            log.info("[AutoAsign] {} llegó al límite de {} sin ventas abiertas → sale del grupo.", a.getName(), canal);
+            log.info("[AutoAsign] {} llegó al límite de {} sin ventas abiertas → deja de monitorearse.", a.getName(), canal);
             desactivar(a);
             cambiadas.add(a);
-            AccountCop siguiente = activarSiguiente(todas, canal);
-            if (siguiente != null) cambiadas.add(siguiente);
         }
+
+        // 2) Siempre GRUPO_OBJETIVO cuentas que puedan recibir ventas.
+        long recibiendo = todas.stream()
+                .filter(this::esDelGrupo)
+                .filter(a -> disponible(a, enCurso.comprometido(), canal) > 0)
+                .count();
+        while (recibiendo < GRUPO_OBJETIVO) {
+            AccountCop siguiente = activarSiguiente(todas, canal);
+            if (siguiente == null) {
+                if (!sinCandidatasAvisado) {
+                    log.warn("[AutoAsign] Solo {} de {} cuentas reciben ventas y no hay más candidatas con cupo de {}.",
+                            recibiendo, GRUPO_OBJETIVO, canal);
+                    sinCandidatasAvisado = true;
+                }
+                return;
+            }
+            cambiadas.add(siguiente);
+            recibiendo++;
+        }
+        sinCandidatasAvisado = false;
+    }
+
+    /** Cuenta Bancolombia activa en P2P y no bloqueada: la que Movimientos está (o debe estar) monitoreando. */
+    private boolean esDelGrupo(AccountCop a) {
+        return a.getId() != null
+                && Boolean.TRUE.equals(a.getActivaParaP2P())
+                && !Boolean.TRUE.equals(a.getBloqueada())
+                && a.getBankType() == BankType.BANCOLOMBIA;
     }
 
     // ── Selección ─────────────────────────────────────────────────
@@ -356,7 +386,7 @@ public class AsignacionAutomaticaService {
                 .min(Comparator.comparingDouble(a -> VentanaCupoP2P.cupoHoy(a, canal) - bal(a)))
                 .orElse(null);
         if (next == null) {
-            log.info("[AutoAsign] No hay más cuentas candidatas con cupo para activar.");
+            log.debug("[AutoAsign] No hay más cuentas candidatas con cupo para activar.");
             return null;
         }
         boolean antes = Boolean.TRUE.equals(next.getActivaParaP2P());
