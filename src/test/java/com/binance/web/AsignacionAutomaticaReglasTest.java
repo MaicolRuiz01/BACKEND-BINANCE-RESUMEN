@@ -10,6 +10,7 @@ import com.binance.web.Repository.AutoAsignacionConfigRepository;
 import com.binance.web.activacion.CuentaP2PSyncService;
 import com.binance.web.dto.ActiveP2POrderDto;
 import com.binance.web.movimientosbridge.MovimientosCuentasPendientes;
+import com.binance.web.service.RetiradorService;
 import com.binance.web.service.AccountCopService;
 import com.binance.web.util.VentanaCupoP2P;
 import com.binance.web.util.VentanaCupoP2P.Canal;
@@ -50,6 +51,7 @@ class AsignacionAutomaticaReglasTest {
     @Mock private AccountCopService accountCopService;
     @Mock private MovimientosCuentasPendientes cuentasPendientes;
     @Mock private SaldosEnCursoService saldosEnCursoService;
+    @Mock private RetiradorService retiradorService;
 
     @InjectMocks private AsignacionAutomaticaService servicio;
 
@@ -979,5 +981,98 @@ class AsignacionAutomaticaReglasTest {
 
         for (AccountCop c : grupo) assertEquals("CAJERO", c.getCupoTipoP2P());
         verify(cuentaP2PSyncService, never()).sincronizar(any(), any(Boolean.class));
+    }
+
+    // ── Retiro de corte de las 18:30 (gancho del Auto) ────────────
+
+    private void corteConfigurado(boolean habilitado) {
+        ReflectionTestUtils.setField(servicio, "corteHabilitado", habilitado);
+        ReflectionTestUtils.setField(servicio, "corteMinimoMiles", 500.0);
+    }
+
+    @Test
+    void corte_alas1830_seDisparaUnaSolaVezConLasCuentasActivas() {
+        corteConfigurado(true);
+        List<AccountCop> grupo = siete(1_500, "CORRESPONSAL");
+        when(accountCopRepository.findAll()).thenReturn(grupo);
+
+        horaDelDia(18, 29);
+        servicio.asignar(List.of());
+        verify(retiradorService, never()).solicitarRetiroCorteCorresponsal(any(), org.mockito.ArgumentMatchers.anyDouble());
+
+        horaDelDia(18, 30);
+        servicio.asignar(List.of());
+        horaDelDia(18, 31);
+        servicio.asignar(List.of());
+        horaDelDia(19, 0);
+        servicio.asignar(List.of());
+
+        verify(retiradorService, org.mockito.Mockito.times(1))
+                .solicitarRetiroCorteCorresponsal(org.mockito.ArgumentMatchers.argThat(l -> l.size() == 7), eq(500.0));
+    }
+
+    @Test
+    void corte_seHaceAntesDeCerrarLasCuentas_porEsoIncluyeLasQueDespuesSeCierran() {
+        corteConfigurado(true);
+        List<AccountCop> grupo = siete(5_000, "CORRESPONSAL"); // sin espacio de cajero: se cerraran a las 18:30
+        List<AccountCop> nuevas = candidatas(20, 7);
+        when(accountCopRepository.findAll()).thenReturn(juntas(grupo, nuevas));
+
+        horaDelDia(18, 30);
+        servicio.asignar(List.of());
+
+        // Aunque despues se cierran, el corte las vio activas: pidio el retiro de las 7.
+        verify(retiradorService).solicitarRetiroCorteCorresponsal(
+                org.mockito.ArgumentMatchers.argThat(l -> l.size() == 7), eq(500.0));
+        assertEquals(false, grupo.get(0).getActivaParaP2P());
+    }
+
+    @Test
+    void corte_siElBackendArrancaMuyTardeEnLaNoche_noSeDisparaFueraDeLaVentana() {
+        corteConfigurado(true);
+        when(accountCopRepository.findAll()).thenReturn(siete(1_500, "CORRESPONSAL"));
+
+        horaDelDia(21, 0);
+        servicio.asignar(List.of());
+
+        verify(retiradorService, never()).solicitarRetiroCorteCorresponsal(any(), org.mockito.ArgumentMatchers.anyDouble());
+    }
+
+    @Test
+    void corte_deDia_noSeDispara() {
+        corteConfigurado(true);
+        when(accountCopRepository.findAll()).thenReturn(siete(1_500, "CORRESPONSAL"));
+
+        horaDelDia(12, 0);
+        servicio.asignar(List.of());
+
+        verify(retiradorService, never()).solicitarRetiroCorteCorresponsal(any(), org.mockito.ArgumentMatchers.anyDouble());
+    }
+
+    @Test
+    void corte_apagadoPorConfiguracion_noSeDispara() {
+        corteConfigurado(false);
+        when(accountCopRepository.findAll()).thenReturn(siete(1_500, "CORRESPONSAL"));
+
+        horaDelDia(18, 30);
+        servicio.asignar(List.of());
+
+        verify(retiradorService, never()).solicitarRetiroCorteCorresponsal(any(), org.mockito.ArgumentMatchers.anyDouble());
+    }
+
+    @Test
+    void corte_noIncluyeCuentasInactivasNiQueNoSonBancolombia() {
+        corteConfigurado(true);
+        List<AccountCop> grupo = siete(1_500, "CORRESPONSAL");
+        AccountCop nequi = cuenta(30, 1_500, 10_000, 2_700);
+        nequi.setBankType(BankType.NEQUI);
+        AccountCop inactiva = inactiva(31, 1_500);
+        when(accountCopRepository.findAll()).thenReturn(juntas(grupo, List.of(nequi, inactiva)));
+
+        horaDelDia(18, 30);
+        servicio.asignar(List.of());
+
+        verify(retiradorService).solicitarRetiroCorteCorresponsal(
+                org.mockito.ArgumentMatchers.argThat(l -> l.size() == 7 && !l.contains(nequi) && !l.contains(inactiva)), eq(500.0));
     }
 }

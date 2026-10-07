@@ -23,6 +23,7 @@ import com.binance.web.Entity.BankType;
 import com.binance.web.activacion.CuentaP2PSyncService;
 import com.binance.web.movimientosbridge.MovimientosCuentasPendientes;
 import com.binance.web.service.AccountCopService;
+import com.binance.web.service.RetiradorService;
 import com.binance.web.dto.ActiveP2POrderDto;
 import com.binance.web.util.CupoDiarioRules;
 import com.binance.web.util.VentanaCupoP2P;
@@ -80,7 +81,12 @@ import lombok.extern.slf4j.Slf4j;
  *     por la regla de cuenta llena. Dentro de una misma ventana no se pisa un cambio hecho a mano, y una cuenta
  *     marcada AMBOS no se toca.
  *     OJO: ese tipo decide por qué canal se dispara el retiro automático de la cuenta.
- * 11) NO REPETIDAS: una cuenta que ya tiene una venta EN CURSO por el mismo monto exacto no recibe
+ * 11) RETIRO DE CORTE: la primera vez del día que el trabajo pasa a CAJERO por la hora (18:30), y solo en los
+ *     primeros {@link #VENTANA_CORTE_MIN} minutos, se pide por CORRESPONSAL todo lo que cada cuenta activa pueda
+ *     retirar por ese canal (RetiradorService.solicitarRetiroCorteCorresponsal). Se hace ANTES de cerrar cuentas,
+ *     para que las que se cierran no se queden sin su retiro, y así las cuentas quedan en cero para cajero.
+ *     Se apaga con p2p.retiro-corte-corresponsal.habilitado=false.
+ * 12) NO REPETIDAS: una cuenta que ya tiene una venta EN CURSO por el mismo monto exacto no recibe
  *     otra igual (el depósito sería indistinguible en Movimientos). Vale mientras la primera no se
  *     cierre: al liberarse sale de la lista de órdenes en curso y el monto vuelve a estar disponible.
  *
@@ -99,6 +105,8 @@ public class AsignacionAutomaticaService {
     /** Cupo restante mínimo (MILES) para activar una cuenta nueva como reemplazo. */
     private static final double SUBLIMITE_ACTIVAR = 1_000.0;
     private static final Integer CONFIG_ID = 1;
+    /** Minutos después de las 18:30 en que todavía se hace el retiro de corte (cubre un reinicio del backend). */
+    private static final long VENTANA_CORTE_MIN = 30;
     /** Cuántas cuentas deben estar recibiendo ventas siempre (igual que AccountCopServiceImpl.CUENTAS_A_ACTIVAR_POR_JORNADA). */
     private static final int GRUPO_OBJETIVO = 7;
     /** Una cuenta está "llena" cuando su espacio real en el canal (cupo − saldo, MILES) llega a esto o menos. */
@@ -116,6 +124,17 @@ public class AsignacionAutomaticaService {
     @Autowired private SaldosEnCursoService saldosEnCursoService;
     /** Cuentas pedidas a Movimientos y aun sin confirmar: no reciben ventas hasta que confirme. */
     @Autowired private MovimientosCuentasPendientes cuentasPendientes;
+    /** @Lazy: solo se usa para el retiro de corte de las 18:30. */
+    @Autowired @Lazy private RetiradorService retiradorService;
+    /** Interruptor del retiro de corte de las 18:30. */
+    @org.springframework.beans.factory.annotation.Value("${p2p.retiro-corte-corresponsal.habilitado:true}")
+    private boolean corteHabilitado;
+    /** Monto mínimo (miles de COP) para pedir el retiro de corte de una cuenta; por debajo no se molesta a los retiradores. */
+    @org.springframework.beans.factory.annotation.Value("${p2p.retiro-corte-corresponsal.minimo-miles:500}")
+    private double corteMinimoMiles;
+    /** Día en que ya se hizo el retiro de corte (en memoria: tras un reinicio dentro de la ventana se repite, y no duplica). */
+    private volatile java.time.LocalDate fechaCorteEjecutado;
+
     /** @Lazy: evita un ciclo de dependencias; solo se usa para elegir las cuentas iniciales. */
     @Autowired @Lazy private AccountCopService accountCopService;
     @Autowired @Lazy private AsignacionAutomaticaService self;
@@ -218,8 +237,13 @@ public class AsignacionAutomaticaService {
 
         // Canal que cuenta: el de la hora (corresponsal de día, cajero desde 18:30), salvo que ya no quede
         // ninguna cuenta con cupo de corresponsal: entonces se pasa a cajero de inmediato.
-        Canal canal = canalEfectivo(todas, VentanaCupoP2P.canalAhora(reloj));
+        Canal porHora = VentanaCupoP2P.canalAhora(reloj);
+        Canal canal = canalEfectivo(todas, porHora);
         List<AccountCop> cambiadas = new ArrayList<>();
+
+        // 0) Retiro de corte de las 18:30: antes de cerrar o re-marcar nada, para que las cuentas que se cierran
+        //    también queden con su retiro de corresponsal pedido.
+        retiroDeCorteSiCorresponde(todas, porHora);
 
         // Lo que está "en curso" por cuenta (una sola lectura por ciclo, misma foto de la BD que el saldo de arriba).
         EnCurso enCursoCuentas = calcularEnCurso(ordenes);
@@ -285,6 +309,26 @@ public class AsignacionAutomaticaService {
         }
 
         if (!cambiadas.isEmpty()) accountCopRepository.saveAll(cambiadas);
+    }
+
+    // ── Retiro de corte de las 18:30 ──────────────────────────────
+
+    private void retiroDeCorteSiCorresponde(List<AccountCop> todas, Canal porHora) {
+        if (!corteHabilitado || porHora != Canal.CAJERO) return;
+        java.time.ZonedDateTime ahora = java.time.ZonedDateTime.now(reloj.withZone(VentanaCupoP2P.ZONA));
+        if (ahora.toLocalTime().isAfter(VentanaCupoP2P.INICIO_CAJERO.plusMinutes(VENTANA_CORTE_MIN))) return;
+        java.time.LocalDate hoy = ahora.toLocalDate();
+        if (hoy.equals(fechaCorteEjecutado)) return;
+        fechaCorteEjecutado = hoy;
+
+        List<AccountCop> deCorte = todas.stream().filter(this::esDelGrupo).collect(Collectors.toList());
+        try {
+            int creadas = retiradorService.solicitarRetiroCorteCorresponsal(deCorte, corteMinimoMiles);
+            log.info("[AutoAsign] Retiro de corte de las 18:30: {} solicitud(es) de corresponsal sobre {} cuenta(s) activa(s).",
+                    creadas, deCorte.size());
+        } catch (Exception e) {
+            log.error("[AutoAsign] Falló el retiro de corte de las 18:30: {}", e.getMessage());
+        }
     }
 
     // ── Canal efectivo ────────────────────────────────────────────

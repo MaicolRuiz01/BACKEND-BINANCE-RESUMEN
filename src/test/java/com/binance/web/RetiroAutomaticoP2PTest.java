@@ -74,7 +74,8 @@ class RetiroAutomaticoP2PTest {
     /** Stub por defecto para que crearSolicitudGeneral() encuentre la cuenta y no haya nada más comprometido. */
     private void stubFlujoFeliz() {
         when(accountCopRepository.findById(1)).thenReturn(Optional.of(cuenta));
-        when(solicitudRepository.sumComprometidoPorCuenta(1)).thenReturn(0.0);
+        // lenient: desde 24/09/2026 (se quito el bloqueo de saldo insuficiente) ya nadie llama a esto en este flujo.
+        lenient().when(solicitudRepository.sumComprometidoPorCuenta(1)).thenReturn(0.0);
         when(solicitudRepository.sumMontoCajeroComprometidoPorCuenta(1)).thenReturn(0.0);
         // lenient: solo se invoca de verdad cuando el canal CORRESPONSAL también
         // dispara (ej. tipo AMBOS) — en los casos de un solo canal (cajero) este
@@ -308,5 +309,133 @@ class RetiroAutomaticoP2PTest {
         when(solicitudRepository.sumMontoCajeroComprometidoPorCuenta(1)).thenReturn(0.0);
 
         assertDoesNotThrow(() -> service.verificarYDispararRetiroAutomaticoP2P(cuenta));
+    }
+
+    // ── Retiro de corte de las 18:30 por corresponsal ─────────────
+
+    /** Stubs sueltos (lenient) para los casos donde cada prueba fija sus propios comprometidos. */
+    private void stubsCorte(double comprometidoCajero, double comprometidoCorresponsal) {
+        lenient().when(accountCopRepository.findById(1)).thenReturn(Optional.of(cuenta));
+        lenient().when(solicitudRepository.sumMontoCajeroComprometidoPorCuenta(1)).thenReturn(comprometidoCajero);
+        lenient().when(solicitudRepository.sumMontoCorresponsalComprometidoPorCuenta(1)).thenReturn(comprometidoCorresponsal);
+        lenient().when(solicitudRepository.sumComprometidoPorCuenta(1)).thenReturn(comprometidoCajero + comprometidoCorresponsal);
+        lenient().when(solicitudRepository.save(any(SolicitudRetiro.class))).thenAnswer(inv -> inv.getArgument(0));
+    }
+
+    private void cuentaParaCorte(double balance, double cupoCorresponsal) {
+        cuenta.setBalance(balance);
+        cuenta.setCupoCajeroDisponibleHoy(2700.0);
+        cuenta.setCupoCorresponsalDisponibleHoy(cupoCorresponsal);
+    }
+
+    private double montoCorresponsalDeLaSolicitudCreada() {
+        ArgumentCaptor<SolicitudRetiro> captor = ArgumentCaptor.forClass(SolicitudRetiro.class);
+        verify(solicitudRepository, times(1)).save(captor.capture());
+        DetalleRetiro d = captor.getValue().getDetalles().get(0);
+        assertEquals(TipoRetiro.CORRESPONSAL, d.getTipoRetiro());
+        return d.getMontoCorresponsal();
+    }
+
+    @Test
+    void corte_cuentaConMenosSaldoQueElCupo_pideTodoElSaldo() {
+        cuentaParaCorte(8000.0, 10000.0);   // ejemplo del jefe: llego a 8 millones
+        stubsCorte(0.0, 0.0);
+
+        int n = service.solicitarRetiroCorteCorresponsal(List.of(cuenta), 500.0);
+
+        assertEquals(1, n);
+        assertEquals(8000.0, montoCorresponsalDeLaSolicitudCreada(), 0.001);
+    }
+
+    @Test
+    void corte_cuentaConSaldoMayorQueElCupo_pideElCupo_yDejaElRestoParaCajero() {
+        cuentaParaCorte(11500.0, 10000.0);  // ejemplo del jefe: 11,5 millones -> retira 10 y quedan 1,5
+        stubsCorte(0.0, 0.0);
+
+        service.solicitarRetiroCorteCorresponsal(List.of(cuenta), 500.0);
+
+        assertEquals(10000.0, montoCorresponsalDeLaSolicitudCreada(), 0.001);
+    }
+
+    @Test
+    void corte_siYaSeRetiroAlgoHoy_pideElCupoRestante() {
+        cuentaParaCorte(7000.0, 4000.0);    // ya se retiraron 6.000 hoy por corresponsal
+        stubsCorte(0.0, 0.0);
+
+        service.solicitarRetiroCorteCorresponsal(List.of(cuenta), 500.0);
+
+        assertEquals(4000.0, montoCorresponsalDeLaSolicitudCreada(), 0.001);
+    }
+
+    @Test
+    void corte_cuentaSinCupoDeCorresponsal_noPide() {
+        cuentaParaCorte(8000.0, 0.0);
+        stubsCorte(0.0, 0.0);
+
+        assertEquals(0, service.solicitarRetiroCorteCorresponsal(List.of(cuenta), 500.0));
+        verify(solicitudRepository, never()).save(any());
+    }
+
+    @Test
+    void corte_siYaHayUnaSolicitudDeCorresponsalPendiente_noDuplica() {
+        cuentaParaCorte(8000.0, 10000.0);
+        stubsCorte(0.0, 8000.0);
+
+        assertEquals(0, service.solicitarRetiroCorteCorresponsal(List.of(cuenta), 500.0));
+        verify(solicitudRepository, never()).save(any());
+    }
+
+    @Test
+    void corte_montoPorDebajoDelMinimo_noPide() {
+        cuentaParaCorte(300.0, 10000.0);
+        stubsCorte(0.0, 0.0);
+
+        assertEquals(0, service.solicitarRetiroCorteCorresponsal(List.of(cuenta), 500.0));
+        verify(solicitudRepository, never()).save(any());
+    }
+
+    @Test
+    void corte_conUnCajeroPendiente_soloPideElSaldoLibre() {
+        cuentaParaCorte(11500.0, 10000.0);
+        stubsCorte(2700.0, 0.0);            // ya hay 2.700 pedidos por cajero: libres 8.800
+
+        service.solicitarRetiroCorteCorresponsal(List.of(cuenta), 500.0);
+
+        assertEquals(8800.0, montoCorresponsalDeLaSolicitudCreada(), 0.001);
+    }
+
+    @Test
+    void corte_listaNulaOCuentaNula_noRevienta() {
+        assertEquals(0, service.solicitarRetiroCorteCorresponsal(null, 500.0));
+        assertEquals(0, service.solicitarRetiroCorteCorresponsal(java.util.Arrays.asList((AccountCop) null), 500.0));
+    }
+
+    // ── El retiro por cajero descuenta lo ya pedido por corresponsal ──
+
+    @Test
+    void cajero_conCorresponsalPendiente_noPideLoQueYaTieneDueno() {
+        // 11.500 de saldo y ya se pidieron 10.000 por corresponsal: por cajero solo quedan 1.500 (< 2.700).
+        cuenta.setCupoTipoP2P("CAJERO");
+        cuentaParaCorte(11500.0, 10000.0);
+        stubsCorte(0.0, 10000.0);
+
+        service.verificarYDispararRetiroAutomaticoP2P(cuenta);
+
+        verify(solicitudRepository, never()).save(any());
+    }
+
+    @Test
+    void cajero_conCorresponsalPendiente_peroSobraSaldo_pideElCajero() {
+        cuenta.setCupoTipoP2P("CAJERO");
+        cuentaParaCorte(14000.0, 10000.0);  // libres: 14.000 - 10.000 = 4.000 >= 2.700
+        stubsCorte(0.0, 10000.0);
+
+        service.verificarYDispararRetiroAutomaticoP2P(cuenta);
+
+        ArgumentCaptor<SolicitudRetiro> captor = ArgumentCaptor.forClass(SolicitudRetiro.class);
+        verify(solicitudRepository, times(1)).save(captor.capture());
+        DetalleRetiro d = captor.getValue().getDetalles().get(0);
+        assertEquals(TipoRetiro.CAJERO, d.getTipoRetiro());
+        assertEquals(2700.0, d.getMontoCajero(), 0.001);
     }
 }
