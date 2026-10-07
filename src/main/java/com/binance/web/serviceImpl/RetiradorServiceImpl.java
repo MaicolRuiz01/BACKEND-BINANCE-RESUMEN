@@ -794,6 +794,16 @@ public class RetiradorServiceImpl implements RetiradorService {
             return; // ya hay una solicitud pendiente de confirmar para este canal — no duplicar
         }
 
+        // Saldo LIBRE: lo que ya se pidió por el OTRO canal (y sigue pendiente) ya tiene dueño y no se puede
+        // pedir otra vez. Ej: saldo 11.500 con 10.000 ya pedidos por corresponsal: por cajero solo quedan 1.500.
+        double otroCanal = tipo == TipoRetiro.CAJERO
+                ? nz(solicitudRepository.sumMontoCorresponsalComprometidoPorCuenta(cuenta.getId()))
+                : nz(solicitudRepository.sumMontoCajeroComprometidoPorCuenta(cuenta.getId()));
+        balance = balance - otroCanal;
+        if (balance + 0.5 < disponible) {
+            return; // lo que queda libre todavía no llega al tope de este canal
+        }
+
         double monto = round2(Math.min(disponible, balance));
 
         SolicitudGeneralRequestDto dto = new SolicitudGeneralRequestDto();
@@ -819,6 +829,45 @@ public class RetiradorServiceImpl implements RetiradorService {
 
     private static double nz(Double d) {
         return d != null ? d : 0.0;
+    }
+
+    @Override
+    @Transactional
+    public int solicitarRetiroCorteCorresponsal(List<AccountCop> cuentas, double minimoMiles) {
+        if (cuentas == null) return 0;
+        int creadas = 0;
+        for (AccountCop cuenta : cuentas) {
+            try {
+                if (cuenta == null || cuenta.getId() == null || cuenta.getBankType() == null) continue;
+                CupoDiarioRules.asegurarCupoHoy(cuenta);
+                double disponible = nz(cuenta.getCupoCorresponsalDisponibleHoy());
+                if (disponible <= 0) continue; // ya no queda cupo de corresponsal hoy
+                if (nz(solicitudRepository.sumMontoCorresponsalComprometidoPorCuenta(cuenta.getId())) > 0) {
+                    continue; // ya hay una solicitud de corresponsal pendiente: no duplicar
+                }
+                double libre = nz(cuenta.getBalance())
+                        - nz(solicitudRepository.sumMontoCajeroComprometidoPorCuenta(cuenta.getId()));
+                double monto = round2(Math.min(disponible, libre));
+                if (monto <= 0 || monto < minimoMiles) continue;
+
+                SolicitudGeneralRequestDto dto = new SolicitudGeneralRequestDto();
+                SolicitudGeneralRequestDto.DetalleDto detalle = new SolicitudGeneralRequestDto.DetalleDto();
+                detalle.setCuentaCopId(cuenta.getId());
+                detalle.setTipoRetiro(TipoRetiro.CORRESPONSAL);
+                detalle.setMontoCorresponsal(monto);
+                dto.setDetalles(List.of(detalle));
+
+                SolicitudRetiro creada = crearSolicitudGeneral(dto);
+                creadas++;
+                log.info("[P2P Retiro de corte] Cuenta {} (id={}): corresponsal por ${} (cupo restante {}). Solicitud #{} creada automáticamente.",
+                        cuenta.getName(), cuenta.getId(), String.format("%,.0f", monto),
+                        String.format("%,.0f", disponible), creada.getId());
+            } catch (Exception e) {
+                log.error("[P2P Retiro de corte] Error al crear la solicitud para la cuenta {}: {}",
+                        cuenta != null ? cuenta.getId() : null, e.getMessage());
+            }
+        }
+        return creadas;
     }
 
     @Override

@@ -84,4 +84,14 @@ public interface RetiradorService {
      * para esta cuenta. Se llama cada vez que el saldo de una cuenta cambia.
      */
     void verificarYDispararRetiroAutomaticoP2P(AccountCop cuenta);
+
+    /**
+     * Retiro de CORTE por corresponsal (a las 18:30, cuando el trabajo pasa a cajero): para cada cuenta pide por
+     * corresponsal todo lo que se pueda retirar hoy por ese canal, que es el menor entre el cupo de corresponsal
+     * que le queda hoy y su saldo libre (saldo menos lo ya pedido por cajero y pendiente). Ej: cupo 10.000 y saldo
+     * 8.000 pide 8.000; saldo 11.500 pide 10.000 y deja 1.500 para cajero.
+     * No pide si ya hay una solicitud de corresponsal pendiente para la cuenta, si no le queda cupo de
+     * corresponsal, o si el monto es menor que {@code minimoMiles}. Devuelve cuántas solicitudes creó.
+     */
+    int solicitarRetiroCorteCorresponsal(java.util.List<AccountCop> cuentas, double minimoMiles);
 }
