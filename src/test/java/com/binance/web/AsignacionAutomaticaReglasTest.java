@@ -510,4 +510,45 @@ class AsignacionAutomaticaReglasTest {
         assertEquals(true, candidata.getActivaParaP2P());
         assertEquals("CAJERO", candidata.getCupoTipoP2P());
     }
+
+    // ── Tolerancia de $500.000 ────────────────────────────────────
+
+    @Test
+    void cuentaCasiLlena_recibePrimeroLasVentasQueLaCompletan() {
+        // William: 9.988 de 10.000 (espacio 12). Llegan ventas de 100, 200 y 300.
+        AccountCop william = cuenta(1, 9_988, 10_000, 2_700);
+        AccountCop otra = cuenta(2, 3_000, 10_000, 2_700);
+        when(accountCopRepository.findAll()).thenReturn(List.of(william, otra));
+
+        servicio.asignar(List.of(orden("v100", 100, null), orden("v200", 200, null), orden("v300", 300, null)));
+
+        verify(activeOrderService).upsertPreAsignacion(eq("v100"), eq(1), any(), any()); // 12-100 = -88
+        verify(activeOrderService).upsertPreAsignacion(eq("v200"), eq(1), any(), any()); // -88-200 = -288
+        verify(activeOrderService).upsertPreAsignacion(eq("v300"), eq(2), any(), any()); // -288-300 = -588: ya se pasa de 500
+    }
+
+    @Test
+    void laTolerancia_esDe500mil_conLimiteInclusivo() {
+        // 9.700 de 10.000: faltan 300. Una de 800 la deja en 10.500 (justo el limite); una de 801 ya no cabe.
+        AccountCop a = cuenta(1, 9_700, 10_000, 2_700);
+        AccountCop b = cuenta(2, 2_000, 10_000, 2_700);
+        when(accountCopRepository.findAll()).thenReturn(List.of(a, b));
+
+        servicio.asignar(List.of(orden("justo", 800, null)));
+        verify(activeOrderService).upsertPreAsignacion(eq("justo"), eq(1), any(), any());
+
+        servicio.asignar(List.of(orden("pasada", 801, null)));
+        verify(activeOrderService).upsertPreAsignacion(eq("pasada"), eq(2), any(), any());
+    }
+
+    @Test
+    void ventaDe2Millones_enCuentaCasiLlena_vaALaSiguiente() {
+        AccountCop casiLlena = cuenta(1, 9_500, 10_000, 2_700);
+        AccountCop otra = cuenta(2, 3_000, 10_000, 2_700);
+        when(accountCopRepository.findAll()).thenReturn(List.of(casiLlena, otra));
+
+        servicio.asignar(List.of(orden("grande", 2_000, null)));
+
+        verify(activeOrderService).upsertPreAsignacion(eq("grande"), eq(2), any(), any());
+    }
 }
