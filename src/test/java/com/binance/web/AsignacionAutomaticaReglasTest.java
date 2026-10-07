@@ -32,6 +32,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -1074,5 +1075,113 @@ class AsignacionAutomaticaReglasTest {
 
         verify(retiradorService).solicitarRetiroCorteCorresponsal(
                 org.mockito.ArgumentMatchers.argThat(l -> l.size() == 7 && !l.contains(nequi) && !l.contains(inactiva)), eq(500.0));
+    }
+
+    // ── Rescate en cajero: una venta es una venta ─────────────────
+
+    private List<AccountCop> cuentasCajero(double... saldos) {
+        List<AccountCop> l = new ArrayList<>();
+        for (int i = 0; i < saldos.length; i++) l.add(cuenta(i + 1, saldos[i], 10_000, 2_700));
+        return l;
+    }
+
+    @Test
+    void rescate_cajero_ventaDe5Millones_vaALaCuentaConMasEspacio() {
+        horaDelDia(19, 0);
+        // Saldos 1.000 / 2.000 / 1.500 / 100: ninguna cabe una venta de 5.000, ni con tolerancia.
+        List<AccountCop> cuentas = cuentasCajero(1_000, 2_000, 1_500, 100);
+        when(accountCopRepository.findAll()).thenReturn(cuentas);
+
+        servicio.asignar(List.of(orden("grande", 5_000, null)));
+
+        verify(activeOrderService).upsertPreAsignacion(eq("grande"), eq(4), any(), any()); // la de 100
+    }
+
+    @Test
+    void rescate_cajero_siLaVentaCabeEnAlgunaCuenta_noHayRescate_vaALaMasCercanaAlLimite() {
+        horaDelDia(19, 0);
+        List<AccountCop> cuentas = cuentasCajero(1_000, 2_000, 1_500, 100);
+        when(accountCopRepository.findAll()).thenReturn(cuentas);
+
+        servicio.asignar(List.of(orden("normal", 600, null)));
+
+        // Cabe en varias: la mas cercana al limite entre las que caben es la de 2.000 (espacio 700).
+        verify(activeOrderService).upsertPreAsignacion(eq("normal"), eq(2), any(), any());
+    }
+
+    @Test
+    void rescate_soloEnCajero_enCorresponsalLaVentaQueNoCabeQuedaSinAsignar() {
+        horaDelDia(12, 0);
+        List<AccountCop> cuentas = cuentasCajero(1_000, 2_000, 1_500, 100);
+        when(accountCopRepository.findAll()).thenReturn(cuentas);
+
+        servicio.asignar(List.of(orden("enorme", 12_000, null))); // corresponsal: ninguna cabe 12.000
+
+        verify(activeOrderService, never()).upsertPreAsignacion(eq("enorme"), any(), any(), any());
+    }
+
+    @Test
+    void rescate_respetaLasNoRepetidas_unaCuentaConLaMismaVentaAbiertaSeSalta() {
+        horaDelDia(19, 0);
+        AccountCop a = cuenta(1, 100, 10_000, 2_700);    // con 3.000 abiertos: espacio -400 (la mejor del rescate)
+        AccountCop b = cuenta(2, 3_500, 10_000, 2_700);  // con una venta abierta de 100: se mantiene en el grupo
+        when(accountCopRepository.findAll()).thenReturn(List.of(a, b));
+
+        servicio.asignar(List.of(orden("abierta", 3_000, 1), orden("otra", 100, 2), orden("nueva", 3_000, null)));
+
+        verify(activeOrderService).upsertPreAsignacion(eq("nueva"), eq(2), any(), any()); // a se salta
+    }
+
+    @Test
+    void rescate_siTodasTienenLaMismaVentaAbierta_seAsignaIgualALaDeMasEspacio() {
+        horaDelDia(19, 0);
+        AccountCop a = cuenta(1, 100, 10_000, 2_700);    // con 3.000 abiertos: espacio -400
+        AccountCop b = cuenta(2, 3_500, 10_000, 2_700);  // con 3.000 abiertos: espacio -3.800
+        when(accountCopRepository.findAll()).thenReturn(List.of(a, b));
+
+        servicio.asignar(List.of(orden("o1", 3_000, 1), orden("o2", 3_000, 2), orden("nueva", 3_000, null)));
+
+        // Las dos tienen una venta de 3.000 abierta: una venta hay que asignarla, va a la de mas espacio.
+        verify(activeOrderService).upsertPreAsignacion(eq("nueva"), eq(1), any(), any());
+    }
+
+    @Test
+    void rescate_siNingunaCuentaEstaConfirmadaPorMovimientos_quedaSinAsignar() {
+        horaDelDia(19, 0);
+        List<AccountCop> cuentas = cuentasCajero(1_000, 2_000);
+        when(accountCopRepository.findAll()).thenReturn(cuentas);
+        lenient().when(cuentasPendientes.estaPendiente("Cuenta 1")).thenReturn(true);
+        lenient().when(cuentasPendientes.estaPendiente("Cuenta 2")).thenReturn(true);
+
+        servicio.asignar(List.of(orden("grande", 5_000, null)));
+
+        verify(activeOrderService, never()).upsertPreAsignacion(eq("grande"), any(), any(), any());
+    }
+
+    @Test
+    void rescate_noUsaCuentasPendientesDeConfirmacion() {
+        horaDelDia(19, 0);
+        List<AccountCop> cuentas = cuentasCajero(1_000, 2_000, 1_500, 100);
+        when(accountCopRepository.findAll()).thenReturn(cuentas);
+        lenient().when(cuentasPendientes.estaPendiente("Cuenta 4")).thenReturn(true); // la de 100 aun no la abrio Movimientos
+
+        servicio.asignar(List.of(orden("grande", 5_000, null)));
+
+        verify(activeOrderService).upsertPreAsignacion(eq("grande"), eq(1), any(), any()); // la siguiente con mas espacio
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void rescate_noUsaCuentasInactivas_aunqueTenganMasEspacio() {
+        horaDelDia(19, 0);
+        List<AccountCop> activas = new ArrayList<>();
+        for (int i = 1; i <= 7; i++) activas.add(cuenta(i, 2_000, 10_000, 2_700)); // 7 recibiendo: sin reposicion
+        AccountCop vacia = inactiva(30, 0);                                        // la mas vacia, pero inactiva
+        when(accountCopRepository.findAll()).thenReturn(juntas(activas, List.of(vacia)));
+
+        servicio.asignar(List.of(orden("grande", 5_000, null)));
+
+        verify(activeOrderService).upsertPreAsignacion(eq("grande"), eq(1), any(), any());
+        verify(activeOrderService, never()).upsertPreAsignacion(eq("grande"), eq(30), any(), any());
     }
 }

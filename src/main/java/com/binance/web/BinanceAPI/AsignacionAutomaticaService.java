@@ -86,7 +86,14 @@ import lombok.extern.slf4j.Slf4j;
  *     retirar por ese canal (RetiradorService.solicitarRetiroCorteCorresponsal). Se hace ANTES de cerrar cuentas,
  *     para que las que se cierran no se queden sin su retiro, y así las cuentas quedan en cero para cajero.
  *     Se apaga con p2p.retiro-corte-corresponsal.habilitado=false.
- * 12) NO REPETIDAS: una cuenta que ya tiene una venta EN CURSO por el mismo monto exacto no recibe
+ * 12) RESCATE EN CAJERO ("una venta es una venta"): con el canal de trabajo en CAJERO no hay tope práctico.
+ *     Si la venta no cabe en ninguna cuenta (ni con la tolerancia), se asigna igual a la cuenta ACTIVA con MÁS
+ *     espacio libre (la de menor saldo), para poder retirar pronto y dejar las demás libres para ventas chicas.
+ *     Solo entre cuentas activas y ya confirmadas por Movimientos (hay que poder vigilar el depósito). La regla
+ *     de no repetidas se respeta mientras haya otra cuenta posible: se prefiere una sin una venta abierta del
+ *     mismo monto exacto; solo si TODAS las activas ya tienen una igual, se asigna igual a la de más espacio
+ *     (una venta hay que asignarla). Por ahora SOLO en cajero; en corresponsal una venta que no cabe queda sin asignar.
+ * 13) NO REPETIDAS: una cuenta que ya tiene una venta EN CURSO por el mismo monto exacto no recibe
  *     otra igual (el depósito sería indistinguible en Movimientos). Vale mientras la primera no se
  *     cierre: al liberarse sale de la lista de órdenes en curso y el monto vuelve a estar disponible.
  *
@@ -284,6 +291,14 @@ public class AsignacionAutomaticaService {
         for (ActiveP2POrderDto o : pendientes) {
             double monto = val(o.getPesosCop());
             AccountCop elegida = elegirCuenta(todas, comprometido, montosAbiertos, monto, canal);
+            if (elegida == null && canal == Canal.CAJERO) {
+                // Una venta es una venta: en cajero no hay tope práctico, va a la cuenta activa con más espacio.
+                elegida = elegirCuentaDeRescate(todas, comprometido, montosAbiertos, monto, canal);
+                if (elegida != null) {
+                    log.info("[AutoAsign] La orden {} ({} miles) no cabe en ninguna cuenta de {}: se asigna de rescate a {} (espacio {} miles).",
+                            o.getOrderNumber(), monto, canal, elegida.getName(), disponible(elegida, comprometido, canal));
+                }
+            }
             if (elegida == null) {
                 log.info("[AutoAsign] Sin cuenta con cupo de {} (y sin otra orden igual abierta) para la orden {} ({} miles).",
                         canal, o.getOrderNumber(), monto);
@@ -490,6 +505,29 @@ public class AsignacionAutomaticaService {
                 .filter(a -> disponible(a, comprometido, canal) - monto >= -TOLERANCIA) // cabe (hasta 500k de exceso)
                 .min(Comparator.comparingDouble(a -> disponible(a, comprometido, canal)))
                 .orElse(null);
+    }
+
+    /**
+     * Rescate: cuando la venta no cabe en ninguna cuenta, la cuenta ACTIVA con más espacio libre (menor saldo).
+     * Se ignora el cupo. Solo cuentas de Bancolombia, no bloqueadas y ya confirmadas por Movimientos (hay que
+     * poder vigilar el depósito). Primero se intenta con las que NO tienen una venta abierta del mismo monto
+     * exacto; si no queda ninguna (todas tienen una igual), se asigna igual a la de más espacio.
+     */
+    private AccountCop elegirCuentaDeRescate(List<AccountCop> todas, Map<Integer, Double> comprometido,
+                                             Map<Integer, Set<Long>> montosAbiertos, double monto, Canal canal) {
+        long clave = claveMonto(monto);
+        List<AccountCop> vigiladas = todas.stream()
+                .filter(this::esDelGrupo)
+                .filter(a -> !cuentasPendientes.estaPendiente(a.getName()))
+                .collect(Collectors.toList());
+        Comparator<AccountCop> masEspacio = Comparator.<AccountCop>comparingDouble(a -> disponible(a, comprometido, canal))
+                .thenComparing(Comparator.comparingInt((AccountCop a) -> a.getId()).reversed());
+
+        // Primero las que NO tienen una venta abierta del mismo monto; si no queda ninguna, la de más espacio.
+        return vigiladas.stream()
+                .filter(a -> !montosAbiertos.getOrDefault(a.getId(), Set.of()).contains(clave))
+                .max(masEspacio)
+                .orElseGet(() -> vigiladas.stream().max(masEspacio).orElse(null));
     }
 
     /** Activa la siguiente candidata (inactiva, con cupo), la más cercana al límite — igual que la selección de las 7. */
