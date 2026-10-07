@@ -40,7 +40,8 @@ import lombok.extern.slf4j.Slf4j;
  *  1) Se asigna primero a las cuentas COP MÁS CERCANAS a su límite (menor cupo disponible),
  *     siempre que la venta quepa.
  *  2) Una venta "cabe" si tras asignarla la cuenta no se pasa del cupo por más de {@link #TOLERANCIA}
- *     (el cliente permite pasarse "solo un poquito": hasta $50.000).
+ *     (el cliente permite pasarse hasta $500.000: acordado en las llamadas; antes estaba en $50.000 por
+ *     error y por eso las cuentas casi llenas no recibían las ventas que las completaban).
  *  3) Si una cuenta agota su cupo (disponible ≤ −TOLERANCIA), se desactiva de P2P
  *     (avisando al bot vía {@link CuentaP2PSyncService}) y se ACTIVA la siguiente candidata con cupo.
  *  4) El cupo que cuenta depende de la HORA ({@link VentanaCupoP2P}): de 00:00 a 18:29 solo el de
@@ -68,7 +69,7 @@ import lombok.extern.slf4j.Slf4j;
  *     cierre: al liberarse sale de la lista de órdenes en curso y el monto vuelve a estar disponible.
  *
  * Unidades: todos los montos van en MILES de COP (igual que pesosCop y los cupos diarios),
- * por eso la tolerancia de $50.000 es 50.0 aquí.
+ * por eso la tolerancia de $500.000 es 500.0 aquí.
  *
  * El motor corre en el backend (lo dispara el poll de órdenes activas cada 15 s) para que
  * agarre las ventas aunque nadie tenga la vista abierta. Solo actúa si el interruptor está ON.
@@ -77,8 +78,8 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 public class AsignacionAutomaticaService {
 
-    /** Una cuenta puede pasarse del cupo hasta este monto (MILES de COP = $50.000). */
-    private static final double TOLERANCIA = 50.0;
+    /** Una cuenta puede pasarse del cupo hasta este monto (MILES de COP = $500.000). */
+    private static final double TOLERANCIA = 500.0;
     /** Cupo restante mínimo (MILES) para activar una cuenta nueva como reemplazo. */
     private static final double SUBLIMITE_ACTIVAR = 1_000.0;
     private static final Integer CONFIG_ID = 1;
@@ -315,7 +316,7 @@ public class AsignacionAutomaticaService {
                 .filter(a -> a.getBankType() == BankType.BANCOLOMBIA) // solo Bancolombia (lo que Movimientos monitorea)
                 .filter(a -> !cuentasPendientes.estaPendiente(a.getName())) // Movimientos ya confirmó que la abrió
                 .filter(a -> !montosAbiertos.getOrDefault(a.getId(), Set.of()).contains(clave)) // no repetidas
-                .filter(a -> disponible(a, comprometido, canal) - monto >= -TOLERANCIA) // cabe (hasta 50k de exceso)
+                .filter(a -> disponible(a, comprometido, canal) - monto >= -TOLERANCIA) // cabe (hasta 500k de exceso)
                 .min(Comparator.comparingDouble(a -> disponible(a, comprometido, canal)))
                 .orElse(null);
     }
