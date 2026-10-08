@@ -124,6 +124,18 @@ public interface SolicitudRetiroRepository extends JpaRepository<SolicitudRetiro
     """)
     Double sumMontoCorresponsalComprometidoPorCuenta(@Param("cuentaCopId") Integer cuentaCopId);
 
+    /**
+     * Retiros por CORRESPONSAL pedidos y aún sin completar, de todas las cuentas a la vez: filas [cuentaCopId, monto].
+     * La asignación automática lo usa para saber cuánto saldo va a salir de cada cuenta por ese canal.
+     */
+    @Query("""
+        SELECT d.cuentaCop.id, COALESCE(SUM(COALESCE(d.montoCorresponsal, 0)), 0)
+        FROM DetalleRetiro d
+        WHERE d.solicitud.estado IN ('SIN_ASIGNAR', 'PENDIENTE')
+        GROUP BY d.cuentaCop.id
+    """)
+    List<Object[]> sumMontoCorresponsalPendientePorCuenta();
+
     /** Detalle completo de todas las solicitudes pendientes (para armar el desglose por cuenta). */
     @Query("""
         SELECT d FROM DetalleRetiro d

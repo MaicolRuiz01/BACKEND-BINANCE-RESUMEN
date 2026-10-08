@@ -53,6 +53,7 @@ class AsignacionAutomaticaReglasTest {
     @Mock private MovimientosCuentasPendientes cuentasPendientes;
     @Mock private SaldosEnCursoService saldosEnCursoService;
     @Mock private RetiradorService retiradorService;
+    @Mock private com.binance.web.Repository.SolicitudRetiroRepository solicitudRetiroRepository;
 
     @InjectMocks private AsignacionAutomaticaService servicio;
 
@@ -698,7 +699,7 @@ class AsignacionAutomaticaReglasTest {
     @SuppressWarnings("unchecked")
     void casoYeiner_sinCupoConVentaAbierta_seQuedaMonitoreada_perolaReposicionSeAbreYa() {
         // Yeiner: cupo de corresponsal en 0 y 401 en curso. Las otras 6 reciben ventas. Hay una candidata.
-        AccountCop yeiner = cuenta(1, 44, 0, 2_700);
+        AccountCop yeiner = cuenta(1, 44, 0, 0);   // sin cupo de corresponsal NI de cajero
         List<AccountCop> otras = activas(2, 6);
         List<AccountCop> cand = candidatas(20, 1);
         when(accountCopRepository.findAll()).thenReturn(juntas(List.of(yeiner), otras, cand));
@@ -1440,5 +1441,119 @@ class AsignacionAutomaticaReglasTest {
         AccountCop c = cuenta(id, saldo, 0, 2_700);   // sin corresponsal, con cajero
         c.setActivaParaP2P(false);
         return c;
+    }
+
+    // ── Un canal por cuenta: el cajero se adelanta; los retiros pendientes cuentan ──
+
+    private void retirosCorrPendientes(Object[]... filas) {
+        when(solicitudRetiroRepository.sumMontoCorresponsalPendientePorCuenta()).thenReturn(List.of(filas));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void canalPorCuenta_laQueAgotoElCorresponsalPeroTieneCajero_sigueActivaComoCajero() {
+        List<AccountCop> grupo = new ArrayList<>();
+        for (int i = 1; i <= 6; i++) { AccountCop c = cuenta(i, 1_000, 10_000, 2_700); c.setCupoTipoP2P("CORRESPONSAL"); grupo.add(c); }
+        AccountCop gastada = cuenta(7, 500, 600, 2_700);   // corresponsal: le quedan 100; cajero: 2.200
+        gastada.setCupoTipoP2P("CORRESPONSAL");
+        grupo.add(gastada);
+        when(accountCopRepository.findAll()).thenReturn(grupo);
+
+        servicio.asignar(List.of());
+
+        assertEquals(7, cuantasActivas(grupo));                 // sigue abierta: no se cierra ni se reemplaza
+        assertEquals("CAJERO", gastada.getCupoTipoP2P());       // pasa sola a cajero
+        verify(cuentaP2PSyncService, never()).sincronizar(any(), any(Boolean.class)); // sin avisar a Movimientos
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void canalPorCuenta_siSoloQuedanTresConCorresponsal_completaLasSieteConCuentasDeCajero() {
+        List<AccountCop> activas = activasConSaldos(1_000, 1_000, 1_000);
+        List<AccountCop> cand = new ArrayList<>();
+        for (int i = 0; i < 4; i++) cand.add(inactiva2(20 + i, 100));   // sin corresponsal, con cajero
+        when(accountCopRepository.findAll()).thenReturn(juntas(activas, cand));
+
+        servicio.asignar(List.of());
+
+        assertEquals(3, cuantasActivas(activas));
+        assertEquals(4, cuantasActivas(cand));                  // las otras 4, por cajero
+        assertEquals(4, cand.stream().filter(c -> "CAJERO".equals(c.getCupoTipoP2P())).count());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void canalPorCuenta_prefiereCandidatasDeCorresponsalAntesQueLasDeCajero() {
+        List<AccountCop> activas = activasConSaldos(1_000, 1_000, 1_000, 1_000, 1_000, 1_000);
+        AccountCop conCorresponsal = inactiva(30, 500);          // corresponsal: 9.500 libres
+        AccountCop soloCajero = inactiva2(31, 100);
+        when(accountCopRepository.findAll()).thenReturn(juntas(activas, List.of(conCorresponsal, soloCajero)));
+
+        servicio.asignar(List.of());
+
+        assertEquals(true, conCorresponsal.getActivaParaP2P());
+        assertEquals("CORRESPONSAL", conCorresponsal.getCupoTipoP2P());
+        assertEquals(false, soloCajero.getActivaParaP2P());
+    }
+
+    @Test
+    void saldoParaCajero_cuentaConDoceMillonesSinRetiroPedido_noTieneCupo_seCierra() {
+        AccountCop c = cuenta(1, 12_000, 10_000, 2_700);
+        when(accountCopRepository.findAll()).thenReturn(List.of(c));
+
+        servicio.asignar(List.of());
+
+        assertEquals(false, c.getActivaParaP2P());               // sin retiro pedido, el saldo de 12M no deja cupo
+    }
+
+    @Test
+    void saldoParaCajero_conRetiroDeCorresponsalPedido_elSaldoSeDescuentaYLaCuentaSigue() {
+        AccountCop c = cuenta(1, 11_500, 10_000, 2_700);         // 11,5M; ya se pidieron 10M por corresponsal
+        when(accountCopRepository.findAll()).thenReturn(List.of(c));
+        retirosCorrPendientes(new Object[]{1, 10_000.0});          // quedaran 1,5M: 1,2M de espacio de cajero
+
+        servicio.asignar(List.of());
+
+        assertEquals(true, c.getActivaParaP2P());                // sigue: tras el retiro le sirve para cajero
+    }
+
+    @Test
+    void saldoParaCajero_alas1830_conRetiroDeCortePedido_laCuentaDe11Coma5MillonesNoSeDesselecciona() {
+        horaDelDia(18, 31);
+        AccountCop c = cuenta(1, 11_500, 10_000, 2_700);
+        c.setCupoTipoP2P("CORRESPONSAL");
+        when(accountCopRepository.findAll()).thenReturn(List.of(c));
+        retirosCorrPendientes(new Object[]{1, 10_000.0});
+
+        servicio.asignar(List.of());
+
+        assertEquals(true, c.getActivaParaP2P());                // de un solo tiro a cajero, sin cerrarse
+        assertEquals("CAJERO", c.getCupoTipoP2P());
+    }
+
+    @Test
+    void saldoParaCajero_alas1830_sinRetiroPedido_laCuentaDe11Coma5MillonesSiSeCierra() {
+        horaDelDia(18, 31);
+        AccountCop c = cuenta(1, 11_500, 10_000, 2_700);
+        when(accountCopRepository.findAll()).thenReturn(List.of(c));
+
+        servicio.asignar(List.of());
+
+        assertEquals(false, c.getActivaParaP2P());
+    }
+
+    @Test
+    void saldoParaCajero_unRetiroPendienteDeCorresponsalNoDevuelveCupoDeCorresponsal() {
+        // 10M de saldo y 10M pedidos por corresponsal: el cupo de corresponsal sigue gastado (no es "ya hay 10M libres").
+        AccountCop c = cuenta(1, 10_000, 10_000, 2_700);
+        c.setCupoTipoP2P("CORRESPONSAL");
+        when(accountCopRepository.findAll()).thenReturn(List.of(c));
+        retirosCorrPendientes(new Object[]{1, 10_000.0});
+
+        servicio.asignar(List.of());
+
+        // Corresponsal sigue sin espacio (10.000 de saldo contra 10.000 de cupo): pasa a cajero, donde el saldo
+        // efectivo es 0. Si el retiro pendiente devolviera cupo de corresponsal, seguiria marcada CORRESPONSAL.
+        assertEquals("CAJERO", c.getCupoTipoP2P());
     }
 }
