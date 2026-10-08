@@ -1556,4 +1556,37 @@ class AsignacionAutomaticaReglasTest {
         // efectivo es 0. Si el retiro pendiente devolviera cupo de corresponsal, seguiria marcada CORRESPONSAL.
         assertEquals("CAJERO", c.getCupoTipoP2P());
     }
+
+    // ── Cuenta casi llena (9,8M): espera su tope; solo el corte de las 18:30 la retira ──
+
+    @Test
+    void casiLlena_alas4DeLaTarde_siguePorCorresponsalYRecibeLaVentaQueLaCompleta() {
+        horaDelDia(16, 0);
+        AccountCop c = cuenta(1, 9_800, 10_000, 2_700);    // 200 de espacio de corresponsal
+        c.setCupoTipoP2P("CORRESPONSAL");
+        when(accountCopRepository.findAll()).thenReturn(List.of(c));
+
+        servicio.asignar(List.of(orden("completa", 600, null)));   // 200 - 600 = -400: dentro de la tolerancia de 500
+
+        assertEquals(true, c.getActivaParaP2P());
+        assertEquals("CORRESPONSAL", c.getCupoTipoP2P());          // no pasa a cajero con 9,8M encima
+        verify(activeOrderService).upsertPreAsignacion(eq("completa"), eq(1), any(), any());
+    }
+
+    @Test
+    void casiLlena_alas1830_seIncluyeEnElRetiroDeCorteYNoSeCierra() {
+        corteConfigurado(true);
+        AccountCop c = cuenta(1, 9_800, 10_000, 2_700);
+        c.setCupoTipoP2P("CORRESPONSAL");
+        when(accountCopRepository.findAll()).thenReturn(List.of(c));
+        retirosCorrPendientes(new Object[]{1, 9_800.0});            // el corte ya la dejo pedida
+
+        horaDelDia(18, 30);
+        servicio.asignar(List.of());
+
+        verify(retiradorService).solicitarRetiroCorteCorresponsal(
+                org.mockito.ArgumentMatchers.argThat(l -> l.size() == 1 && l.contains(c)), eq(500.0));
+        assertEquals(true, c.getActivaParaP2P());                   // con 9,8M pedidos queda en 0 efectivo: sigue por cajero
+        assertEquals("CAJERO", c.getCupoTipoP2P());
+    }
 }
