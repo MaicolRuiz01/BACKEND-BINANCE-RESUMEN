@@ -308,6 +308,34 @@ public class AccountCopController {
 				"cupoCorresponsalDisponibleHoy", corresponsal));
 	}
 
+	/**
+	 * POST /cuenta-cop/restablecer-cupo-todas
+	 * Lo mismo que restablecer-cupo, pero para TODAS las cuentas COP (bloqueadas incluidas, para
+	 * que al desbloquear una no arrastre un cupo viejo). Uso excepcional. Las cuentas sin banco se
+	 * saltan. Cada cuenta queda en el log con sus valores anteriores.
+	 */
+	@PostMapping("/restablecer-cupo-todas")
+	@org.springframework.transaction.annotation.Transactional
+	public ResponseEntity<?> restablecerCupoTodas() {
+		org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(AccountCopController.class);
+		java.time.LocalDate hoy = java.time.LocalDate.now(java.time.ZoneId.of("America/Bogota"));
+		int restablecidas = 0;
+		int sinBanco = 0;
+		for (AccountCop cuenta : accountCopRepository.findAll()) {
+			if (cuenta.getBankType() == null) { sinBanco++; continue; }
+			double cajero = com.binance.web.util.CupoDiarioRules.maxCajeroPorBanco(cuenta.getBankType());
+			double corresponsal = com.binance.web.util.CupoDiarioRules.maxCorresponsalPorBanco(cuenta.getBankType());
+			log.info("[Cupos] Restablecido a mano (todas) el cupo de '{}' (id {}): cajero {} → {}, corresponsal {} → {}",
+					cuenta.getName(), cuenta.getId(), cuenta.getCupoCajeroDisponibleHoy(), cajero,
+					cuenta.getCupoCorresponsalDisponibleHoy(), corresponsal);
+			accountCopRepository.restablecerCupos(cuenta.getId(), cajero, corresponsal, hoy);
+			restablecidas++;
+		}
+		log.info("[Cupos] Restablecimiento masivo: {} cuenta(s) restablecida(s), {} sin banco (saltadas)",
+				restablecidas, sinBanco);
+		return ResponseEntity.ok(Map.of("restablecidas", restablecidas, "sinBanco", sinBanco));
+	}
+
 	// ══════════════════════════════════════════════════════════════
 	// LLAVES BREBE
 	// ══════════════════════════════════════════════════════════════
