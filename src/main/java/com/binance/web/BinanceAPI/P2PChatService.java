@@ -188,6 +188,9 @@ public class P2PChatService {
             } catch (Exception e) {
                 erroresEnvio.put(orderNumber, e.getMessage() != null ? e.getMessage() : e.toString());
                 log.warn("[P2PChat] Falló el envío automático de la cuenta para {}: {}", orderNumber, e.getMessage());
+            } finally {
+                // Las pantallas actualizan al instante el estado del envío (el aviso sale ~250 ms después, ya terminada la tarea).
+                P2PSseNotificador.chatEnvioActualizado();
             }
         }, esperaAutoEnvioMs, TimeUnit.MILLISECONDS);
         ScheduledFuture<?> previo = enviosProgramados.put(orderNumber, nuevo);
