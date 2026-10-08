@@ -26,6 +26,7 @@ import com.binance.web.service.AccountCopService;
 import com.binance.web.service.RetiradorService;
 import com.binance.web.dto.ActiveP2POrderDto;
 import com.binance.web.util.CupoDiarioRules;
+import com.binance.web.util.LimitesP2P;
 import com.binance.web.util.VentanaCupoP2P;
 import com.binance.web.util.VentanaCupoP2P.Canal;
 
@@ -67,6 +68,10 @@ import lombok.extern.slf4j.Slf4j;
  *     ventas (disponible proyectado > 0, contando lo comprometido) y, si hay menos de {@link #GRUPO_OBJETIVO},
  *     se abren candidatas hasta completar. Una cuenta que se quedó sin cupo del canal deja de contar AL
  *     INSTANTE y su reposición se abre de inmediato, aunque la vieja siga activa.
+ *     TOPE DE HIERRO: la reposición nunca abre cuentas por encima de {@link LimitesP2P#MAX_CUENTAS_ACTIVAS} (8)
+ *     activas EN TOTAL (cuentan también las que ya no reciben ventas pero siguen vigiladas esperando sus ventas
+ *     abiertas), porque el computador de Movimientos no aguanta más sesiones. Si hay que elegir, gana el tope
+ *     sobre el objetivo de 7 que reciben ventas; en cajero el rescate sigue asignando entre las activas.
  *  9) CUENTA LLENA: una cuenta se desactiva (deja de monitorearse) cuando su cupo del canal ya se cumplió con
  *     plata REAL (cupo − saldo ≤ 0) y NO le queda ninguna venta abierta. Mientras tenga ventas abiertas
  *     sigue activa y monitoreada (no recibe más), y si una se cae recupera espacio; cuando se cierran, sale.
@@ -151,6 +156,9 @@ public class AsignacionAutomaticaService {
 
     /** Último canal de trabajo cuyo marcado ya se aplicó a las cuentas activas (null tras un reinicio). */
     private volatile Canal ultimoCanalAplicado;
+
+    /** Evita repetir en cada ciclo el aviso de "se alcanzó el tope de cuentas activas". */
+    private volatile boolean topeAvisado;
 
     /** Evita repetir en cada ciclo el aviso de "no hay candidatas para reponer el grupo". */
     private volatile boolean sinCandidatasAvisado;
@@ -438,7 +446,16 @@ public class AsignacionAutomaticaService {
                 .filter(this::esDelGrupo)
                 .filter(a -> disponible(a, enCurso.comprometido(), canal) > 0)
                 .count();
+        long activas = todas.stream().filter(this::esDelGrupo).count();
         while (recibiendo < GRUPO_OBJETIVO) {
+            if (activas >= LimitesP2P.MAX_CUENTAS_ACTIVAS) {
+                if (!topeAvisado) {
+                    log.warn("[AutoAsign] Tope de {} cuentas activas alcanzado: {} reciben ventas y {} siguen vigiladas esperando sus ventas abiertas. No se abren más.",
+                            LimitesP2P.MAX_CUENTAS_ACTIVAS, recibiendo, activas - recibiendo);
+                    topeAvisado = true;
+                }
+                return;
+            }
             AccountCop siguiente = activarSiguiente(todas, canal);
             if (siguiente == null) {
                 if (!sinCandidatasAvisado) {
@@ -450,7 +467,9 @@ public class AsignacionAutomaticaService {
             }
             cambiadas.add(siguiente);
             recibiendo++;
+            activas++;
         }
+        topeAvisado = false;
         sinCandidatasAvisado = false;
     }
 

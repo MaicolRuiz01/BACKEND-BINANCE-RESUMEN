@@ -1184,4 +1184,66 @@ class AsignacionAutomaticaReglasTest {
         verify(activeOrderService).upsertPreAsignacion(eq("grande"), eq(1), any(), any());
         verify(activeOrderService, never()).upsertPreAsignacion(eq("grande"), eq(30), any(), any());
     }
+
+    // ── Tope de hierro: nunca mas de 8 cuentas activas ────────────
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void tope_conOchoActivasPeroSoloAlgunasRecibiendo_noAbreNingunaMas() {
+        horaDelDia(19, 0);
+        // 5 reciben ventas (espacio de cajero) y 3 ya no reciben pero siguen vigiladas por ventas abiertas.
+        List<AccountCop> recibiendo = new ArrayList<>();
+        for (int i = 1; i <= 5; i++) recibiendo.add(cuenta(i, 500, 10_000, 2_700));
+        List<AccountCop> esperando = new ArrayList<>();
+        for (int i = 6; i <= 8; i++) esperando.add(cuenta(i, 5_000, 10_000, 2_700));   // cajero: -2.300
+        List<AccountCop> cand = candidatas(20, 5);
+        when(accountCopRepository.findAll()).thenReturn(juntas(recibiendo, esperando, cand));
+        when(saldosEnCursoService.calcular()).thenReturn(List.of(
+                enCurso(6, 300, "a"), enCurso(7, 300, "b"), enCurso(8, 300, "c")));
+
+        servicio.asignar(List.of());
+
+        // Recibiendo son 5 (< 7), pero ya hay 8 activas: el tope de hierro gana, no se abre ninguna.
+        verify(cuentaP2PSyncService, never()).sincronizar(any(), eq(false));
+        for (AccountCop c : cand) assertEquals(false, c.getActivaParaP2P());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void tope_conSeisActivas_abreSoloHastaCompletarOcho() {
+        horaDelDia(19, 0);
+        List<AccountCop> recibiendo = new ArrayList<>();
+        for (int i = 1; i <= 4; i++) recibiendo.add(cuenta(i, 500, 10_000, 2_700));
+        List<AccountCop> esperando = new ArrayList<>();
+        for (int i = 5; i <= 6; i++) esperando.add(cuenta(i, 5_000, 10_000, 2_700));
+        List<AccountCop> cand = candidatas(20, 6);
+        when(accountCopRepository.findAll()).thenReturn(juntas(recibiendo, esperando, cand));
+        when(saldosEnCursoService.calcular()).thenReturn(List.of(enCurso(5, 300, "a"), enCurso(6, 300, "b")));
+
+        servicio.asignar(List.of());
+
+        long activasAhora = juntas(recibiendo, esperando, cand).stream()
+                .filter(a -> Boolean.TRUE.equals(a.getActivaParaP2P())).count();
+        assertEquals(8, activasAhora);   // 6 + 2 nuevas; el objetivo de 7 recibiendo no puede pasar del tope
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void tope_lasQueSeCierranLiberanCupoParaAbrirOtras() {
+        horaDelDia(19, 0);
+        // 8 activas, 3 llenas sin ventas abiertas: se cierran y se pueden abrir reemplazos sin pasar de 8.
+        List<AccountCop> sanas = new ArrayList<>();
+        for (int i = 1; i <= 5; i++) sanas.add(cuenta(i, 500, 10_000, 2_700));
+        List<AccountCop> llenas = new ArrayList<>();
+        for (int i = 6; i <= 8; i++) llenas.add(cuenta(i, 5_000, 10_000, 2_700));
+        List<AccountCop> cand = candidatas(20, 6);
+        when(accountCopRepository.findAll()).thenReturn(juntas(sanas, llenas, cand));
+
+        servicio.asignar(List.of());
+
+        long activasAhora = juntas(sanas, llenas, cand).stream()
+                .filter(a -> Boolean.TRUE.equals(a.getActivaParaP2P())).count();
+        assertEquals(7, activasAhora);   // 5 sanas + 2 abiertas hasta 7 recibiendo; nunca mas de 8
+        assertEquals(false, llenas.get(0).getActivaParaP2P());
+    }
 }
