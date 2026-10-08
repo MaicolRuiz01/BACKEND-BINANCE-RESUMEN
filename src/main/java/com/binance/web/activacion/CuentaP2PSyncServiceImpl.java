@@ -38,10 +38,14 @@ public class CuentaP2PSyncServiceImpl implements CuentaP2PSyncService {
     @Override
     public void sincronizar(AccountCop cuenta, boolean estabaActivaAntes) {
         if (cuenta == null) return;
-        if (cuenta.getBankType() != BankType.BANCOLOMBIA) return; // el bot solo monitorea Bancolombia
 
         boolean estaActivaAhora = Boolean.TRUE.equals(cuenta.getActivaParaP2P());
         if (estaActivaAhora == estabaActivaAntes) return; // sin cambio, nada que avisar
+
+        // Las pantallas de P2P recargan solas la lista de cuentas (de cualquier banco) cuando una se activa o se apaga.
+        com.binance.web.BinanceAPI.P2PSseNotificador.cuentasCambiaron();
+
+        if (cuenta.getBankType() != BankType.BANCOLOMBIA) return; // el bot solo monitorea Bancolombia
 
         if (!autoSyncHabilitado) {
             log.info("[CuentaP2PSync] '{}' cambió de estado en P2P ({} → {}), pero autoSyncHabilitado=false "
