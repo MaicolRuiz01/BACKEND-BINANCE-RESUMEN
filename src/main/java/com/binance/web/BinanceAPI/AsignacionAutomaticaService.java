@@ -430,23 +430,26 @@ public class AsignacionAutomaticaService {
      *     pero ya NO cuenta aquí: por eso su reposición se abre de inmediato y no cuando por fin se cierre.
      */
     private void mantenerGrupo(List<AccountCop> todas, EnCurso enCurso, Canal canal, List<AccountCop> cambiadas) {
-        // 1) Fuera las llenas sin ventas abiertas.
-        for (AccountCop a : new ArrayList<>(todas)) {
-            if (!esDelGrupo(a)) continue;
-            if (VentanaCupoP2P.cupoHoy(a, canal) - bal(a) > LIMITE_LLENA) continue; // todavía tiene espacio
-            if (enCurso.conVentas().contains(a.getId())) continue; // espera plata: se queda hasta que se cierre
-
-            log.info("[AutoAsign] {} llegó al límite de {} sin ventas abiertas → deja de monitorearse.", a.getName(), canal);
-            desactivar(a);
-            cambiadas.add(a);
-        }
-
-        // 1c) Tomar el control: si hay MÁS cuentas recibiendo que el objetivo (o más activas que el tope), se cierran
-        //     las que sobran, de a una. Nunca una con ventas abiertas; entre las demás, la de menos espacio libre.
-        //     Es por la memoria del computador de Movimientos: 7 es lo sano, la 8ª es solo margen.
+        // 1) Tomar el control: si hay MÁS cuentas recibiendo que el objetivo (o más activas que el tope), se cierran
+        //    las que sobran, de a una. Nunca una con ventas abiertas; entre las demás, la de menos espacio libre.
+        //    Es por la memoria del computador de Movimientos: 7 es lo sano, la 8ª es solo margen.
         cerrarSobrantes(todas, enCurso, canal, cambiadas);
 
-        // 2) Siempre GRUPO_OBJETIVO cuentas que puedan recibir ventas.
+        // 2) Primero se pide la reposición (Movimientos tarda en abrir una cuenta)...
+        // 3) ...y solo cuando la nueva ya está confirmada se cierran las llenas. Así siempre hay 7 trabajando.
+        //    Se repite mientras algo cambie: al cerrar una llena queda sitio para pedir la siguiente reposición
+        //    (la cuenta nueva sigue "pendiente" hasta que Movimientos la confirme, así que en la práctica el
+        //    cambio avanza de a una por confirmación y nunca pasa del tope de 8).
+        for (int i = 0; i <= LimitesP2P.MAX_CUENTAS_ACTIVAS; i++) {
+            int antes = cambiadas.size();
+            reponerGrupo(todas, enCurso, canal, cambiadas);
+            cerrarLlenas(todas, enCurso, canal, cambiadas);
+            if (cambiadas.size() == antes) break;
+        }
+    }
+
+    /** Abre candidatas hasta tener {@link #GRUPO_OBJETIVO} cuentas que puedan recibir ventas (sin pasar del tope). */
+    private void reponerGrupo(List<AccountCop> todas, EnCurso enCurso, Canal canal, List<AccountCop> cambiadas) {
         long recibiendo = todas.stream()
                 .filter(this::esDelGrupo)
                 .filter(a -> disponible(a, enCurso.comprometido(), canal) > 0)
@@ -476,6 +479,37 @@ public class AsignacionAutomaticaService {
         }
         topeAvisado = false;
         sinCandidatasAvisado = false;
+    }
+
+    /**
+     * Cierra las cuentas llenas (cupo del canal cumplido con plata real) que no esperan ninguna venta, pero NO antes
+     * de que su reemplazo esté listo: mientras haya una reposición pidiéndose a Movimientos y todavía no haya
+     * {@link #GRUPO_OBJETIVO} cuentas confirmadas recibiendo, la llena se queda abierta (es la 8ª, el margen).
+     * Si no hay reposición en camino (no quedan candidatas), se cierra de inmediato como siempre.
+     */
+    private void cerrarLlenas(List<AccountCop> todas, EnCurso enCurso, Canal canal, List<AccountCop> cambiadas) {
+        List<AccountCop> recibiendo = todas.stream()
+                .filter(this::esDelGrupo)
+                .filter(a -> disponible(a, enCurso.comprometido(), canal) > 0)
+                .collect(Collectors.toList());
+        long confirmadas = recibiendo.stream().filter(a -> !cuentasPendientes.estaPendiente(a.getName())).count();
+        boolean reposicionEnCamino = recibiendo.stream().anyMatch(a -> cuentasPendientes.estaPendiente(a.getName()));
+        boolean esperar = reposicionEnCamino && confirmadas < GRUPO_OBJETIVO;
+
+        for (AccountCop a : new ArrayList<>(todas)) {
+            if (!esDelGrupo(a)) continue;
+            if (VentanaCupoP2P.cupoHoy(a, canal) - bal(a) > LIMITE_LLENA) continue; // todavía tiene espacio
+            if (enCurso.conVentas().contains(a.getId())) continue; // espera plata: se queda hasta que se cierre
+            if (esperar) {
+                log.info("[AutoAsign] {} llegó al límite de {} pero su reemplazo aún no está confirmado por Movimientos: sigue abierta.",
+                        a.getName(), canal);
+                continue;
+            }
+
+            log.info("[AutoAsign] {} llegó al límite de {} sin ventas abiertas → deja de monitorearse.", a.getName(), canal);
+            desactivar(a);
+            cambiadas.add(a);
+        }
     }
 
     /**

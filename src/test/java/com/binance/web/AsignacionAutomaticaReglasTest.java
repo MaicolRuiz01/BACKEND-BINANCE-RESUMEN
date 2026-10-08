@@ -1345,4 +1345,61 @@ class AsignacionAutomaticaReglasTest {
         assertEquals(true, cuentas.get(7).getActivaParaP2P());
         assertEquals(false, cuentas.get(6).getActivaParaP2P());
     }
+
+    // ── Reemplazo antes de cerrar: siempre 7 trabajando ───────────
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void reemplazo_laLlenaSeQuedaAbiertaMientrasLaNuevaNoEstaConfirmada() {
+        List<AccountCop> grupo = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 10_000); // la 7 esta llena
+        List<AccountCop> cand = candidatas(20, 2);
+        when(accountCopRepository.findAll()).thenReturn(juntas(grupo, cand));
+        lenient().when(cuentasPendientes.estaPendiente(org.mockito.ArgumentMatchers.anyString())).thenReturn(false);
+        for (String n : List.of("Cuenta 20", "Cuenta 21")) lenient().when(cuentasPendientes.estaPendiente(n)).thenReturn(true); // la que se abra: sin confirmar
+
+        servicio.asignar(List.of());
+
+        assertEquals(1, cuantasActivas(cand));                // la reposicion se pidio ya
+        assertEquals(true, grupo.get(6).getActivaParaP2P());  // la llena sigue abierta (son 8 por un rato)
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void reemplazo_cuandoLaNuevaSeConfirma_seCierraLaLlena() {
+        List<AccountCop> grupo = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 10_000);
+        AccountCop nueva = cuenta(20, 1_000, 10_000, 2_700); // ya activa y confirmada
+        List<AccountCop> todas = new ArrayList<>(grupo);
+        todas.add(nueva);
+        when(accountCopRepository.findAll()).thenReturn(todas);
+
+        servicio.asignar(List.of());
+
+        assertEquals(false, grupo.get(6).getActivaParaP2P());
+        assertEquals(7, cuantasActivas(todas));
+    }
+
+    @Test
+    void reemplazo_sinCandidatas_laLlenaSeCierraDeInmediato() {
+        List<AccountCop> grupo = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 10_000);
+        when(accountCopRepository.findAll()).thenReturn(grupo);
+
+        servicio.asignar(List.of());
+
+        assertEquals(false, grupo.get(6).getActivaParaP2P());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void reemplazo_noPasaDeLaOchavaCuenta() {
+        // Dos llenas a la vez: la reposicion de la segunda espera a que se cierre la primera (tope de 8).
+        List<AccountCop> grupo = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 10_000, 10_000);
+        List<AccountCop> cand = candidatas(20, 3);
+        when(accountCopRepository.findAll()).thenReturn(juntas(grupo, cand));
+        lenient().when(cuentasPendientes.estaPendiente(org.mockito.ArgumentMatchers.anyString())).thenReturn(false);
+        for (String n : List.of("Cuenta 20", "Cuenta 21", "Cuenta 22")) lenient().when(cuentasPendientes.estaPendiente(n)).thenReturn(true);
+
+        servicio.asignar(List.of());
+
+        assertEquals(true, cuantasActivas(juntas(grupo, cand)) <= 8);
+    }
 }
