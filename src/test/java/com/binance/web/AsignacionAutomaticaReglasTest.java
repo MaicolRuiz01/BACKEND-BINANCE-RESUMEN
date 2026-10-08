@@ -1402,4 +1402,43 @@ class AsignacionAutomaticaReglasTest {
 
         assertEquals(true, cuantasActivas(juntas(grupo, cand)) <= 8);
     }
+
+    // ── Corresponsal agotado de día: se trabaja por cajero con las mismas reglas ──
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void unaDeLaTarde_sinCupoDeCorresponsalEnNingunaCuenta_abreCuentasPorCajero() {
+        horaDelDia(13, 0);
+        // 5 activas y 3 candidatas: ninguna tiene cupo de corresponsal (0), todas tienen cajero.
+        List<AccountCop> activas = new ArrayList<>();
+        for (int i = 1; i <= 5; i++) activas.add(cuenta(i, 500 * i, 0, 2_700));
+        List<AccountCop> cand = new ArrayList<>();
+        for (int i = 0; i < 3; i++) cand.add(inactiva2(20 + i, 100 * (i + 1)));
+        when(accountCopRepository.findAll()).thenReturn(juntas(activas, cand));
+
+        servicio.asignar(List.of());
+
+        assertEquals(5, cuantasActivas(activas));              // las activas siguen: tienen espacio de cajero
+        assertEquals(2, cuantasActivas(cand));                 // completa las 7 buscando por cajero
+        verify(cuentaP2PSyncService, org.mockito.Mockito.times(2)).sincronizar(any(), eq(false));
+        assertEquals(2, cand.stream().filter(c -> "CAJERO".equals(c.getCupoTipoP2P())).count()); // las nuevas se marcan para cajero
+    }
+
+    @Test
+    void unaDeLaTarde_sinCupoDeCorresponsal_laVentaSeAsignaPorEspacioDeCajero() {
+        horaDelDia(13, 0);
+        List<AccountCop> activas = new ArrayList<>();
+        for (int i = 1; i <= 7; i++) activas.add(cuenta(i, 1_000, 0, 2_700)); // cajero: 1.700 de espacio
+        when(accountCopRepository.findAll()).thenReturn(activas);
+
+        servicio.asignar(List.of(orden("v1", 1_500, null)));
+
+        verify(activeOrderService).upsertPreAsignacion(eq("v1"), any(), any(), any());
+    }
+
+    private AccountCop inactiva2(int id, double saldo) {
+        AccountCop c = cuenta(id, saldo, 0, 2_700);   // sin corresponsal, con cajero
+        c.setActivaParaP2P(false);
+        return c;
+    }
 }
