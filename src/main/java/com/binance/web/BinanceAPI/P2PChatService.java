@@ -76,9 +76,16 @@ public class P2PChatService {
     private final ObjectMapper mapper = new ObjectMapper();
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
 
-    /** Un solo hilo: los envíos automáticos salen de a uno, nunca dos a la vez para la misma orden. */
-    private final ScheduledExecutorService programador = Executors.newSingleThreadScheduledExecutor(
+    /**
+     * Varios hilos: cada envío abre su propio WebSocket y tarda unos 5 s, así que con un solo hilo las
+     * cuentas salían de a una y se atrasaban respecto a las asignaciones. Nunca dos a la vez para la
+     * MISMA orden (ver {@link #cerrojos}).
+     */
+    private static final int HILOS_ENVIO = 3;
+    private final ScheduledExecutorService programador = Executors.newScheduledThreadPool(HILOS_ENVIO,
             hilo("p2p-chat-envio"));
+    /** Un cerrojo por orden: dos envíos de la misma orden (reasignada) nunca corren en paralelo. */
+    private final Map<String, Object> cerrojos = new ConcurrentHashMap<>();
     /** Para leer en paralelo el chat de varias órdenes (resumen de mensajes nuevos). */
     private final ExecutorService lectores = Executors.newFixedThreadPool(4, hilo("p2p-chat-lector"));
 
@@ -175,7 +182,9 @@ public class P2PChatService {
         erroresEnvio.remove(orderNumber);
         ScheduledFuture<?> nuevo = programador.schedule(() -> {
             try {
-                enviarCuentaSiCorresponde(orderNumber);
+                synchronized (cerrojos.computeIfAbsent(orderNumber, k -> new Object())) {
+                    enviarCuentaSiCorresponde(orderNumber);
+                }
             } catch (Exception e) {
                 erroresEnvio.put(orderNumber, e.getMessage() != null ? e.getMessage() : e.toString());
                 log.warn("[P2PChat] Falló el envío automático de la cuenta para {}: {}", orderNumber, e.getMessage());
@@ -212,13 +221,61 @@ public class P2PChatService {
         String texto = (pre.getChatCopEnviadoId() != null ? "Cambio de cuenta, por favor consigna a esta:\n\n" : "")
                 + mensajeCuenta(cop);
         Map<String, Object> res = enviar(pre.getAccountBinance(), orderNumber, texto, ESCUCHA_AUTO_MS);
-        if (Boolean.TRUE.equals(res.get("ok"))) {
+        boolean enChat = Boolean.TRUE.equals(res.get("ok"))
+                && confirmarEnChat(pre.getAccountBinance(), orderNumber, texto);
+        if (Boolean.TRUE.equals(res.get("ok")) && !enChat) {
+            // El WebSocket aceptó el texto pero el mensaje no aparece en el chat: se reintenta una vez.
+            log.warn("[P2PChat] El mensaje de la cuenta no apareció en el chat de {}: se reintenta el envío.", orderNumber);
+            res = enviar(pre.getAccountBinance(), orderNumber, texto, ESCUCHA_AUTO_MS);
+            enChat = Boolean.TRUE.equals(res.get("ok"))
+                    && confirmarEnChat(pre.getAccountBinance(), orderNumber, texto);
+            if (!enChat && Boolean.TRUE.equals(res.get("ok"))) {
+                res = new LinkedHashMap<>(res);
+                res.put("ok", false);
+                res.put("error", "Binance no mostró el mensaje en el chat. Envíala a mano desde el chat de la orden.");
+            }
+        }
+        if (enChat) {
             preAsignacionRepository.marcarCuentaEnviada(orderNumber, cop.getId(), LocalDateTime.now(ZONA));
             erroresEnvio.remove(orderNumber);
             log.info("[P2PChat] Cuenta {} enviada por chat a la orden {}", cop.getName(), orderNumber);
         } else {
             erroresEnvio.put(orderNumber, String.valueOf(res.getOrDefault("error", "Binance no aceptó el mensaje")));
         }
+    }
+
+    /**
+     * Comprueba, leyendo el chat de la orden, que el mensaje enviado quedó escrito. Antes bastaba con que el
+     * WebSocket aceptara el texto, y la pantalla marcaba "Cuenta enviada" aunque Binance lo hubiera descartado.
+     * Reintenta unos segundos (el chat tarda un instante en reflejarlo). Si NO se puede leer el chat, se da por
+     * enviado (comportamiento anterior): no se reintenta a ciegas ni se duplica el mensaje.
+     */
+    private boolean confirmarEnChat(String accountBinance, String orderNumber, String texto) {
+        long desde = System.currentTimeMillis() - 60_000L;
+        for (int intento = 0; intento < 3; intento++) {
+            try {
+                if (aparecioEnChat(accountBinance, orderNumber, texto, desde)) return true;
+            } catch (Exception e) {
+                log.warn("[P2PChat] No se pudo leer el chat de {} para confirmar el envío ({}): se da por enviado.",
+                        orderNumber, e.getMessage());
+                return true;
+            }
+            try { Thread.sleep(1_000L); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); return false; }
+        }
+        return false;
+    }
+
+    /** Una lectura del chat: ¿hay un mensaje MÍO, reciente, con este texto? (se ignoran espacios y saltos de línea). */
+    public boolean aparecioEnChat(String accountBinance, String orderNumber, String texto, long desdeMs) throws Exception {
+        JsonNode data = mapper.readTree(binanceService.obtenerMensajesChatCrudos(accountBinance, orderNumber, 1, 30))
+                .path("data");
+        String buscado = texto.replaceAll("\\s+", "");
+        for (JsonNode n : data) {
+            if (!n.path("self").asBoolean(false)) continue;
+            if (n.path("createTime").asLong(0) < desdeMs) continue;
+            if (n.path("content").asText("").replaceAll("\\s+", "").equals(buscado)) return true;
+        }
+        return false;
     }
 
     // ── Resumen de los chats de las ventas en curso ───────────────
