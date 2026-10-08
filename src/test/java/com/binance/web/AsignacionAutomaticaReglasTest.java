@@ -728,14 +728,18 @@ class AsignacionAutomaticaReglasTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void conOchoActivas_noQuitaNiAgregaNinguna() {
+    void conOchoActivas_cierraUnaYNoAbreNinguna() {
+        // Antes con 8 no se tocaba nada; ahora el Auto toma el control: 7 es lo sano, la 8ª es solo margen.
         List<AccountCop> act = activas(1, 8);
         List<AccountCop> cand = candidatas(20, 3);
         when(accountCopRepository.findAll()).thenReturn(juntas(act, cand));
 
         servicio.asignar(List.of());
 
-        verify(cuentaP2PSyncService, never()).sincronizar(any(), any(Boolean.class));
+        assertEquals(7, cuantasActivas(act));
+        assertEquals(0, cuantasActivas(cand));
+        verify(cuentaP2PSyncService, org.mockito.Mockito.times(1)).sincronizar(any(), eq(true));
+        verify(cuentaP2PSyncService, never()).sincronizar(any(), eq(false));
     }
 
     @Test
@@ -1245,5 +1249,100 @@ class AsignacionAutomaticaReglasTest {
                 .filter(a -> Boolean.TRUE.equals(a.getActivaParaP2P())).count();
         assertEquals(7, activasAhora);   // 5 sanas + 2 abiertas hasta 7 recibiendo; nunca mas de 8
         assertEquals(false, llenas.get(0).getActivaParaP2P());
+    }
+
+    // ── Tomar el control: cerrar las cuentas que sobran ───────────
+
+    private List<AccountCop> activasConSaldos(double... saldos) {
+        List<AccountCop> l = new ArrayList<>();
+        for (int i = 0; i < saldos.length; i++) l.add(cuenta(i + 1, saldos[i], 10_000, 2_700));
+        return l;
+    }
+
+    private long cuantasActivas(List<AccountCop> l) {
+        return l.stream().filter(c -> Boolean.TRUE.equals(c.getActivaParaP2P())).count();
+    }
+
+    @Test
+    void sobrantes_conOchoRecibiendo_cierraLaDeMenosEspacio_sinVentas() {
+        // Saldos 1.000..8.000: la de 8.000 (id 8) es la de menos espacio libre.
+        List<AccountCop> cuentas = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 7_000, 8_000);
+        when(accountCopRepository.findAll()).thenReturn(cuentas);
+
+        servicio.asignar(List.of());
+
+        assertEquals(false, cuentas.get(7).getActivaParaP2P());
+        assertEquals(7, cuantasActivas(cuentas));
+    }
+
+    @Test
+    void sobrantes_laDeMenosEspacioTieneVentaAbierta_cierraLaSiguienteSinVentas() {
+        List<AccountCop> cuentas = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 7_000, 8_000);
+        when(accountCopRepository.findAll()).thenReturn(cuentas);
+
+        servicio.asignar(List.of(orden("o1", 500, 8)));   // la 8 espera una venta: no se toca
+
+        assertEquals(true, cuentas.get(7).getActivaParaP2P());
+        assertEquals(false, cuentas.get(6).getActivaParaP2P()); // la siguiente de menos espacio
+    }
+
+    @Test
+    void sobrantes_conSieteActivas_noCierraNinguna() {
+        List<AccountCop> cuentas = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 7_000);
+        when(accountCopRepository.findAll()).thenReturn(cuentas);
+
+        servicio.asignar(List.of());
+
+        assertEquals(7, cuantasActivas(cuentas));
+    }
+
+    @Test
+    void sobrantes_conNueveRecibiendo_cierraDos() {
+        List<AccountCop> cuentas = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 7_000, 8_000, 9_000);
+        when(accountCopRepository.findAll()).thenReturn(cuentas);
+
+        servicio.asignar(List.of());
+
+        assertEquals(7, cuantasActivas(cuentas));
+        assertEquals(false, cuentas.get(8).getActivaParaP2P());
+        assertEquals(false, cuentas.get(7).getActivaParaP2P());
+    }
+
+    @Test
+    void sobrantes_siTodasEsperanVentas_noCierraNingunaYNoRevienta() {
+        List<AccountCop> cuentas = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 7_000, 8_000);
+        when(accountCopRepository.findAll()).thenReturn(cuentas);
+        List<ActiveP2POrderDto> ventas = new ArrayList<>();
+        for (int i = 1; i <= 8; i++) ventas.add(orden("o" + i, 100, i));
+
+        servicio.asignar(ventas);
+
+        assertEquals(8, cuantasActivas(cuentas));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void sobrantes_despuesDeCerrar_noReabreOtraCandidata() {
+        List<AccountCop> activas = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 7_000, 8_000);
+        List<AccountCop> cand = candidatas(20, 3);
+        when(accountCopRepository.findAll()).thenReturn(juntas(activas, cand));
+
+        servicio.asignar(List.of());
+
+        assertEquals(7, cuantasActivas(activas));
+        assertEquals(0, cuantasActivas(cand));
+    }
+
+    @Test
+    void sobrantes_laRecienPedidaAMovimientosSeCierraUltima() {
+        List<AccountCop> cuentas = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 7_000, 8_000);
+        when(accountCopRepository.findAll()).thenReturn(cuentas);
+        lenient().when(cuentasPendientes.estaPendiente(org.mockito.ArgumentMatchers.anyString())).thenReturn(false);
+        when(cuentasPendientes.estaPendiente("Cuenta 8")).thenReturn(true); // aun sin confirmar: la de menos espacio
+
+        servicio.asignar(List.of());
+
+        assertEquals(true, cuentas.get(7).getActivaParaP2P());
+        assertEquals(false, cuentas.get(6).getActivaParaP2P());
     }
 }

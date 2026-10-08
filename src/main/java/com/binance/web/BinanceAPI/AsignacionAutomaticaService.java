@@ -441,6 +441,11 @@ public class AsignacionAutomaticaService {
             cambiadas.add(a);
         }
 
+        // 1c) Tomar el control: si hay MÁS cuentas recibiendo que el objetivo (o más activas que el tope), se cierran
+        //     las que sobran, de a una. Nunca una con ventas abiertas; entre las demás, la de menos espacio libre.
+        //     Es por la memoria del computador de Movimientos: 7 es lo sano, la 8ª es solo margen.
+        cerrarSobrantes(todas, enCurso, canal, cambiadas);
+
         // 2) Siempre GRUPO_OBJETIVO cuentas que puedan recibir ventas.
         long recibiendo = todas.stream()
                 .filter(this::esDelGrupo)
@@ -471,6 +476,39 @@ public class AsignacionAutomaticaService {
         }
         topeAvisado = false;
         sinCandidatasAvisado = false;
+    }
+
+    /**
+     * Cierra las cuentas que sobran: mientras haya más de {@link #GRUPO_OBJETIVO} recibiendo ventas, o más de
+     * {@link LimitesP2P#MAX_CUENTAS_ACTIVAS} activas, se desactiva una. Candidatas: solo cuentas SIN ventas abiertas
+     * (una cuenta que espera plata no se toca jamás); primero las que Movimientos ya confirmó (cerrar una recién
+     * pedida desperdicia el trabajo), y entre ellas la de MENOS espacio libre, que es la que antes se va a llenar.
+     * Esto es lo que hace que, al prender el Auto con 8 o más cuentas abiertas a mano, el sistema tome el control.
+     */
+    private void cerrarSobrantes(List<AccountCop> todas, EnCurso enCurso, Canal canal, List<AccountCop> cambiadas) {
+        while (true) {
+            List<AccountCop> grupo = todas.stream().filter(this::esDelGrupo).collect(Collectors.toList());
+            long recibiendo = grupo.stream().filter(a -> disponible(a, enCurso.comprometido(), canal) > 0).count();
+            if (recibiendo <= GRUPO_OBJETIVO && grupo.size() <= LimitesP2P.MAX_CUENTAS_ACTIVAS) return;
+
+            AccountCop sobra = grupo.stream()
+                    .filter(a -> !enCurso.conVentas().contains(a.getId()))
+                    .min(Comparator.<AccountCop, Boolean>comparing(a -> cuentasPendientes.estaPendiente(a.getName()))
+                            .thenComparingDouble(a -> disponible(a, enCurso.comprometido(), canal))
+                            .thenComparing(a -> a.getId()))
+                    .orElse(null);
+            if (sobra == null) {
+                log.debug("[AutoAsign] Hay {} cuentas activas de más, pero todas esperan ventas abiertas: no se cierra ninguna.",
+                        grupo.size());
+                return;
+            }
+            log.info("[AutoAsign] Hay {} activas ({} reciben ventas, objetivo {}): se cierra {} (la de menos espacio, sin ventas abiertas).",
+                    grupo.size(), recibiendo, GRUPO_OBJETIVO, sobra.getName());
+            boolean antes = Boolean.TRUE.equals(sobra.getActivaParaP2P());
+            sobra.setActivaParaP2P(false);
+            cuentaP2PSyncService.sincronizar(sobra, antes);
+            cambiadas.add(sobra);
+        }
     }
 
     /**
