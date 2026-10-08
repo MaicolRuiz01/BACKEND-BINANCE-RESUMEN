@@ -28,6 +28,7 @@ public final class P2PSseNotificador {
 
     private static final AtomicBoolean ordenesPendiente = new AtomicBoolean(false);
     private static final AtomicBoolean cuentasPendiente = new AtomicBoolean(false);
+    private static final AtomicBoolean chatPendiente = new AtomicBoolean(false);
 
     private P2PSseNotificador() {}
 
@@ -44,6 +45,14 @@ public final class P2PSseNotificador {
         trasCommit(() -> agrupar(cuentasPendiente, () -> {
             P2PSseController sse = P2PSseController.INSTANCE;
             if (sse != null) sse.broadcastCuentasP2PCambiaron();
+        }));
+    }
+
+    /** Terminó un envío automático de la cuenta por el chat (salió, falló o no hacía falta). */
+    public static void chatEnvioActualizado() {
+        trasCommit(() -> agrupar(chatPendiente, () -> {
+            P2PSseController sse = P2PSseController.INSTANCE;
+            if (sse != null) sse.broadcastChatEnvioActualizado();
         }));
     }
 

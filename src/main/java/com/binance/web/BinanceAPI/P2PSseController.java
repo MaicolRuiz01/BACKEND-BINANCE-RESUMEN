@@ -168,6 +168,28 @@ public class P2PSseController {
     }
 
     /**
+     * Avisa que terminó (bien o mal) un envío automático de cuenta por el chat: las pantallas actualizan al
+     * instante el "Enviando cuenta…" / "Cuenta enviada" en vez de esperar su consulta periódica.
+     */
+    public void broadcastChatEnvioActualizado() {
+        if (emitters.isEmpty()) return;
+
+        Map<String, Object> payload = Map.of("tipo", "chat-envio-actualizado",
+                "hora", LocalDateTime.now(ZONE).format(FMT));
+
+        List<SseEmitter> dead = new ArrayList<>();
+        for (SseEmitter emitter : emitters) {
+            try {
+                emitter.send(SseEmitter.event().name("chat-envio-actualizado").data(payload));
+            } catch (Exception e) {
+                dead.add(emitter);
+                try { emitter.complete(); } catch (Exception ignored) {}
+            }
+        }
+        emitters.removeAll(dead);
+    }
+
+    /**
      * Heartbeat periódico para mantener la conexión viva
      * (algunos proxies y navegadores cierran conexiones inactivas).
      * Llamado desde P2PSyncScheduler cada 30 segundos.
