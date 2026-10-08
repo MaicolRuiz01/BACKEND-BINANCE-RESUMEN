@@ -106,6 +106,17 @@ public class P2PSyncScheduler {
             var changed = activeOrderService.detectStatusChanges();
             var desaparecidas = activeOrderService.getDesaparecidasUltimoPoll();
 
+            // Asignación automática de cuentas COP a las ventas en curso (solo si el interruptor está
+            // encendido). Va ANTES del import rápido: ese import tarda 4-5 s por cuenta y una venta
+            // nueva esperaba todo ese tiempo para recibir cuenta. No pierde nada: lo comprometido de
+            // las órdenes que acaban de salir lo cubre SaldosEnCursoService hasta que se importen.
+            // Aislada en su propio try/catch para que un fallo suyo no salte el import ni al revés.
+            try {
+                asignacionService.ejecutar(activeOrderService.getOrdenesUltimoPoll());
+            } catch (Exception e) {
+                log.warn("[ActivePoll] Error en la asignación automática: {}", e.getMessage());
+            }
+
             // Si alguna orden salió del listado activo (se completó o canceló), importar YA solo
             // esa cuenta y solo desde un poco antes de que se creó la orden: una página de Binance
             // en vez de 36 h de todas las cuentas. Si hay otra importación corriendo, el pedido
@@ -137,10 +148,6 @@ public class P2PSyncScheduler {
                 sseController.broadcastCambioOrdenesActivas(avisos);
                 log.info("[ActivePoll] {} cambio(s) de estado, {} orden(es) salieron", changed.size(), desaparecidas.size());
             }
-
-            // Asignación automática de cuentas COP a las ventas en curso (solo si el
-            // interruptor está encendido). Reutiliza las órdenes que el poll ya leyó.
-            asignacionService.ejecutar(activeOrderService.getOrdenesUltimoPoll());
         } catch (Exception e) {
             log.warn("[ActivePoll] Error en polling de órdenes activas: {}", e.getMessage());
         }
