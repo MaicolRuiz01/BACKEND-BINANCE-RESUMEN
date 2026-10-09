@@ -198,6 +198,15 @@ public class AsignacionAutomaticaService {
      */
     private volatile boolean cajeroHabilitado = true;
 
+    /** Cuánto se deja de elegir una cuenta que Movimientos no pudo abrir (sin credenciales, error de login...). */
+    private static final long ENFRIAMIENTO_MS = 30 * 60_000L;
+    /** Si una cuenta activada por el Auto se apaga dentro de este plazo, se considera que no pudo abrirse. */
+    private static final long VENTANA_FALLO_MS = 15 * 60_000L;
+    /** Cuentas que el Auto activó y aún no se sabe si Movimientos las abrió (id → cuándo). */
+    private final Map<Integer, Long> activadasPorAuto = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Cuentas que fallaron al abrirse: no se vuelven a elegir hasta esa hora (id → hasta cuándo, en ms). */
+    private final Map<Integer, Long> enfriamiento = new java.util.concurrent.ConcurrentHashMap<>();
+
     /** Último canal con el que se marcó cada cuenta (null tras un reinicio): evita pisar un cambio hecho a mano. */
     private final Map<Integer, Canal> canalAplicado = new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -298,6 +307,7 @@ public class AsignacionAutomaticaService {
         // el de la hora ya no le sirve (ver derivarCanal); ese canal propio se calcula una vez por ciclo.
         Canal porHora = VentanaCupoP2P.canalAhora(reloj);
         Canal canal = prepararCiclo(todas, porHora);
+        detectarActivacionesFallidas(todas);
         List<AccountCop> cambiadas = new ArrayList<>();
 
         // 0) Retiro de corte de las 18:30: antes de cerrar o re-marcar nada, para que las cuentas que se cierran
@@ -422,6 +432,48 @@ public class AsignacionAutomaticaService {
         } catch (Exception e) {
             log.error("[AutoAsign] Falló el retiro de corte de las 18:30: {}", e.getMessage());
         }
+    }
+
+    // ── Cuentas que Movimientos no pudo abrir ─────────────────────
+
+    /**
+     * Si una cuenta que el Auto acaba de activar aparece desactivada sin que el Auto la haya cerrado, Movimientos no
+     * pudo abrirla (por ejemplo "sin credenciales en Bitwarden" o un error de login) y se desactivó sola. Sin esto el
+     * Auto la volvía a elegir en cada ciclo, la reemplazante nunca se confirmaba y las cuentas llenas no se cerraban.
+     * Se aparta {@link #ENFRIAMIENTO_MS} para que se elija otra.
+     */
+    private void detectarActivacionesFallidas(List<AccountCop> todas) {
+        if (activadasPorAuto.isEmpty()) return;
+        long ahora = reloj.millis();
+        Map<Integer, AccountCop> porId = new HashMap<>();
+        for (AccountCop a : todas) if (a.getId() != null) porId.put(a.getId(), a);
+        for (Integer id : new ArrayList<>(activadasPorAuto.keySet())) {
+            AccountCop a = porId.get(id);
+            long desde = ahora - activadasPorAuto.getOrDefault(id, ahora);
+            boolean dentroDeLaVentana = desde >= 0 && desde <= VENTANA_FALLO_MS;
+            if (a == null || !Boolean.TRUE.equals(a.getActivaParaP2P())) {
+                activadasPorAuto.remove(id);
+                if (!dentroDeLaVentana) continue; // se apagó mucho después (p. ej. el reinicio de medianoche): no es un fallo al abrir
+                enfriamiento.put(id, ahora + ENFRIAMIENTO_MS);
+                log.warn("[AutoAsign] {} se desactivó sola después de que el Auto la activó (Movimientos no pudo abrirla): "
+                        + "no se vuelve a elegir por {} min. Revisa sus credenciales.",
+                        a != null ? a.getName() : id, ENFRIAMIENTO_MS / 60_000L);
+            } else if (!cuentasPendientes.estaPendiente(a.getName())) {
+                activadasPorAuto.remove(id); // ya confirmada: todo bien
+            }
+        }
+    }
+
+    /** ¿Esta cuenta fallo hace poco al abrirse y hay que saltarla? */
+    private boolean enEnfriamiento(AccountCop a) {
+        if (a.getId() == null) return false;
+        Long hasta = enfriamiento.get(a.getId());
+        if (hasta == null) return false;
+        if (reloj.millis() >= hasta) {
+            enfriamiento.remove(a.getId());
+            return false;
+        }
+        return true;
     }
 
     // ── Canal de cada cuenta ──────────────────────────────────────
@@ -760,6 +812,7 @@ public class AsignacionAutomaticaService {
                 .filter(a -> !Boolean.TRUE.equals(a.getActivaParaP2P()))
                 .filter(a -> !Boolean.TRUE.equals(a.getBloqueada()))
                 .filter(a -> a.getBankType() == BankType.BANCOLOMBIA)
+                .filter(a -> !enEnfriamiento(a))
                 .collect(Collectors.toList());
         // De día se busca primero por corresponsal; si no queda ninguna con cupo, por cajero (se adelanta el cajero).
         // De noche solo cajero.
@@ -795,12 +848,14 @@ public class AsignacionAutomaticaService {
         next.setActivaParaP2P(true);
         next.setCupoTipoP2P(marca(elegido));
         canalesCiclo.put(next.getId(), elegido); // en este mismo ciclo ya cuenta con su canal
+        activadasPorAuto.put(next.getId(), reloj.millis());
         cuentaP2PSyncService.sincronizar(next, antes);
         log.info("[AutoAsign] Activada la siguiente cuenta COP: {} (por {}).", next.getName(), elegido);
         return next;
     }
 
     private void desactivar(AccountCop acc) {
+        if (acc.getId() != null) activadasPorAuto.remove(acc.getId());
         boolean antes = Boolean.TRUE.equals(acc.getActivaParaP2P());
         acc.setActivaParaP2P(false);
         cuentaP2PSyncService.sincronizar(acc, antes);

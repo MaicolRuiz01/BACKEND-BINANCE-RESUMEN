@@ -1837,4 +1837,44 @@ class AsignacionAutomaticaReglasTest {
         assertEquals(true, victor.getActivaParaP2P());           // ya no queda corresponsal en ninguna: sigue como cajero
         assertEquals("CAJERO", victor.getCupoTipoP2P());
     }
+
+    // ── Una cuenta que Movimientos no pudo abrir no se vuelve a elegir (caso David Gonzalez) ──
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void enfriamiento_laCuentaQueMovimientosNoPudoAbrirNoSeVuelveAElegir() {
+        horaDelDia(12, 0);
+        List<AccountCop> activas = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 6_000);
+        AccountCop david = inactiva(31, 100);            // la mas cercana al limite entre las candidatas... pero no abre
+        AccountCop otra = inactiva(32, 50);
+        when(accountCopRepository.findAll()).thenReturn(juntas(activas, List.of(david, otra)));
+        lenient().when(cuentasPendientes.estaPendiente(org.mockito.ArgumentMatchers.anyString())).thenReturn(false);
+        lenient().when(cuentasPendientes.estaPendiente("Cuenta 31")).thenReturn(true);   // sigue sin confirmarse
+
+        servicio.asignar(List.of());
+        assertEquals(true, david.getActivaParaP2P());     // el Auto la activo
+        assertEquals(false, otra.getActivaParaP2P());
+
+        // El bot no pudo abrirla (sin credenciales) y la desactivo sola.
+        david.setActivaParaP2P(false);
+        servicio.asignar(List.of());
+
+        assertEquals(false, david.getActivaParaP2P());    // no se la vuelve a elegir
+        assertEquals(true, otra.getActivaParaP2P());      // se elige otra en su lugar
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void enfriamiento_unaCuentaQueSiAbrioSigueSiendoElegible() {
+        horaDelDia(12, 0);
+        List<AccountCop> activas = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 6_000);
+        AccountCop nueva = inactiva(31, 100);
+        when(accountCopRepository.findAll()).thenReturn(juntas(activas, List.of(nueva)));
+
+        servicio.asignar(List.of());       // se activa y queda confirmada (el mock no la deja pendiente)
+        servicio.asignar(List.of());
+
+        assertEquals(true, nueva.getActivaParaP2P());
+        assertEquals(7, cuantasActivas(juntas(activas, List.of(nueva))));
+    }
 }
