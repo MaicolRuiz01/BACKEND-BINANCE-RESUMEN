@@ -76,10 +76,11 @@ import lombok.extern.slf4j.Slf4j;
  *     eligen y reciben ventas del Auto (por ahora).
  *  7) CONFIRMADAS: una cuenta recién activada no recibe ventas hasta que Movimientos confirme que la
  *     abrió (evento "conexion_exitosa", ver {@link MovimientosCuentasPendientes}).
- *  8) SIEMPRE 7 QUE RECIBAN VENTAS: en cada ciclo se cuenta cuántas cuentas activas todavía pueden recibir
- *     ventas (disponible proyectado > 0, contando lo comprometido) y, si hay menos de {@link #GRUPO_OBJETIVO},
- *     se abren candidatas hasta completar. Una cuenta que se quedó sin cupo del canal deja de contar AL
- *     INSTANTE y su reposición se abre de inmediato, aunque la vieja siga activa.
+ *  8) SIEMPRE 7 CUENTAS: en cada ciclo se cuentan las cuentas que ocupan un lugar (las que todavía pueden recibir
+ *     ventas, disponible proyectado > 0, MÁS las llenas que esperan sus ventas abiertas) y, si hay menos de
+ *     {@link #GRUPO_OBJETIVO}, se abren candidatas hasta completar. Una llena CON ventas abiertas sigue ocupando su
+ *     lugar (no se abre una octava por ella). La octava solo aparece en el instante en que una cuenta llena y SIN
+ *     ventas está por cerrarse: se abre su reemplazo y, ya confirmado, esa se cierra.
  *     TOPE DE HIERRO: la reposición nunca abre cuentas por encima de {@link LimitesP2P#MAX_CUENTAS_ACTIVAS} (8)
  *     activas EN TOTAL (cuentan también las que ya no reciben ventas pero siguen vigiladas esperando sus ventas
  *     abiertas), porque el computador de Movimientos no aguanta más sesiones. Si hay que elegir, gana el tope
@@ -189,6 +190,12 @@ public class AsignacionAutomaticaService {
     private volatile Map<Integer, Double> retiroCajPendCiclo = new HashMap<>();
     /** true cuando ya no hay NINGUNA candidata con cupo de hoy: se puede usar el cupo de corresponsal de mañana. */
     private volatile boolean mananaHabilitado;
+    /**
+     * De día, el cajero solo se usa cuando ya NO queda ninguna candidata con cupo de corresponsal (ninguna cuenta
+     * inactiva y utilizable de todas las Bancolombia). Mientras haya una, una cuenta con el corresponsal agotado se
+     * cierra y se reemplaza por esa, en vez de seguir como cajero. De noche el cajero siempre está habilitado.
+     */
+    private volatile boolean cajeroHabilitado = true;
 
     /** Último canal con el que se marcó cada cuenta (null tras un reinicio): evita pisar un cambio hecho a mano. */
     private final Map<Integer, Canal> canalAplicado = new java.util.concurrent.ConcurrentHashMap<>();
@@ -423,6 +430,7 @@ public class AsignacionAutomaticaService {
         // Primero los retiros pendientes: espacio() y saldoParaCanal() los leen.
         retiroCorrPendCiclo = retirosPendientes(false);
         retiroCajPendCiclo = retirosPendientes(true);
+        cajeroHabilitado = porHora == Canal.CAJERO || !hayCandidataDeCorresponsal(todas);
         mananaHabilitado = !hayCandidataConCupoDeHoy(todas, porHora);
         Map<Integer, Canal> canales = new HashMap<>();
         for (AccountCop a : todas) {
@@ -431,6 +439,16 @@ public class AsignacionAutomaticaService {
         }
         canalesCiclo = canales;
         return porHora;
+    }
+
+    /** ¿Hay alguna cuenta inactiva (no bloqueada, Bancolombia) con cupo de CORRESPONSAL de hoy para abrir? */
+    private boolean hayCandidataDeCorresponsal(List<AccountCop> todas) {
+        return todas.stream()
+                .filter(a -> a.getId() != null)
+                .filter(a -> !Boolean.TRUE.equals(a.getActivaParaP2P()))
+                .filter(a -> !Boolean.TRUE.equals(a.getBloqueada()))
+                .filter(a -> a.getBankType() == BankType.BANCOLOMBIA)
+                .anyMatch(a -> espacio(a, Canal.CORRESPONSAL) >= SUBLIMITE_ACTIVAR);
     }
 
     /** ¿Hay alguna cuenta inactiva (no bloqueada, Bancolombia) con cupo de hoy para abrir? Si la hay, mañana no se toca. */
@@ -465,7 +483,7 @@ public class AsignacionAutomaticaService {
      */
     private Canal derivarCanal(AccountCop a, Canal porHora) {
         if (porHora == Canal.CORRESPONSAL && espacio(a, Canal.CORRESPONSAL) >= SUBLIMITE_ACTIVAR) return Canal.CORRESPONSAL;
-        if (espacio(a, Canal.CAJERO) > LIMITE_LLENA) return Canal.CAJERO;
+        if (cajeroHabilitado && espacio(a, Canal.CAJERO) > LIMITE_LLENA) return Canal.CAJERO;
         if (mananaHabilitado && espacio(a, Canal.CORRESPONSAL_MANANA) > LIMITE_LLENA) return Canal.CORRESPONSAL_MANANA;
         return porHora;
     }
@@ -561,15 +579,21 @@ public class AsignacionAutomaticaService {
     }
 
     /**
-     * Cuántas cuentas del grupo cuentan como "recibiendo ventas": las que tienen espacio proyectado. Las que trabajan
-     * con el cupo de MAÑANA solo cuentan para completar el objetivo: si ya hay 7 con cupo de hoy, no suman (el cupo de
-     * hoy siempre se prefiere y no deben sobrar cuentas por culpa de mañana).
+     * Cuántas cuentas ocupan un lugar de las {@link #GRUPO_OBJETIVO}: las que tienen espacio proyectado (reciben
+     * ventas) Y las llenas que todavía esperan sus ventas abiertas. Una llena que espera plata sigue ocupando su
+     * lugar: NO se abre una octava por ella, y la octava solo se abre en el momento en que una cuenta llena y SIN
+     * ventas está por cerrarse (ver cerrarLlenas). Una llena sin ventas no cuenta: ya se va.
+     * Las que trabajan con el cupo de MAÑANA solo cuentan para completar el objetivo: si ya hay 7 con cupo de hoy,
+     * no suman (el cupo de hoy siempre se prefiere y no deben sobrar cuentas por culpa de mañana).
      */
     private long contarRecibiendo(List<AccountCop> cuentas, EnCurso enCurso, Canal canal) {
         long hoy = 0, manana = 0;
         for (AccountCop a : cuentas) {
-            if (!esDelGrupo(a) || disponible(a, enCurso.comprometido(), canal) <= 0) continue;
-            if (canalDe(a, canal) == Canal.CORRESPONSAL_MANANA) manana++; else hoy++;
+            if (!esDelGrupo(a)) continue;
+            boolean recibe = disponible(a, enCurso.comprometido(), canal) > 0;
+            boolean esperaVentas = enCurso.conVentas().contains(a.getId());
+            if (!recibe && !esperaVentas) continue; // llena y sin ventas: ya se va, no ocupa lugar
+            if (recibe && canalDe(a, canal) == Canal.CORRESPONSAL_MANANA) manana++; else hoy++;
         }
         return hoy + Math.min(manana, Math.max(0, GRUPO_OBJETIVO - hoy));
     }
