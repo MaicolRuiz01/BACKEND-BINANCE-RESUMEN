@@ -79,9 +79,10 @@ import lombok.extern.slf4j.Slf4j;
  *  8) SIEMPRE 7 CUENTAS: en cada ciclo se cuentan las cuentas que ocupan un lugar (las que todavía pueden recibir
  *     ventas, disponible proyectado > 0, MÁS las llenas que esperan sus ventas abiertas) y, si hay menos de
  *     {@link #GRUPO_OBJETIVO}, se abren candidatas hasta completar. Una llena CON ventas abiertas sigue ocupando su
- *     lugar (no se abre una octava por ella). La octava solo aparece en el instante en que una cuenta llena y SIN
- *     ventas está por cerrarse: se abre su reemplazo y, ya confirmado, esa se cierra.
- *     TOPE DE HIERRO: la reposición nunca abre cuentas por encima de {@link LimitesP2P#MAX_CUENTAS_ACTIVAS} (8)
+ *     lugar. NUNCA hay más de 7 cuentas activas: una llena SIN ventas se CIERRA PRIMERO (se manda la orden de
+ *     detenerla a Movimientos) y solo DESPUÉS se abre la siguiente candidata, en ese orden, para que jamás queden
+ *     dos abiertas a la vez.
+ *     TOPE DE HIERRO: la reposición nunca abre cuentas por encima de {@link LimitesP2P#MAX_CUENTAS_ACTIVAS} (7)
  *     activas EN TOTAL (cuentan también las que ya no reciben ventas pero siguen vigiladas esperando sus ventas
  *     abiertas), porque el computador de Movimientos no aguanta más sesiones. Si hay que elegir, gana el tope
  *     sobre el objetivo de 7 que reciben ventas; en cajero el rescate sigue asignando entre las activas.
@@ -552,37 +553,30 @@ public class AsignacionAutomaticaService {
     }
 
     /**
-     * Mantiene el grupo en dos pasos:
-     *  1) Desactiva (deja de monitorear) las cuentas cuyo cupo del canal ya se cumplió con plata real y que no
-     *     esperan ninguna venta.
-     *  2) Cuenta las activas que todavía pueden recibir ventas y, si hay menos de {@link #GRUPO_OBJETIVO}, abre
-     *     candidatas hasta completar. Una cuenta sin cupo pero con ventas abiertas sigue activa y monitoreada,
-     *     pero ya NO cuenta aquí: por eso su reposición se abre de inmediato y no cuando por fin se cierre.
+     * Mantiene el grupo SIEMPRE en {@link #GRUPO_OBJETIVO} cuentas como máximo, en este orden:
+     *  1) Cierra las que sobran (más de 7).
+     *  2) Cierra las cuentas llenas (cupo del canal cumplido con plata real) que no esperan ninguna venta.
+     *  3) Solo después abre candidatas hasta completar. Una cuenta llena con ventas abiertas sigue activa y
+     *     monitoreada, ocupando su lugar, hasta que sus ventas se cierren.
      */
     private void mantenerGrupo(List<AccountCop> todas, EnCurso enCurso, Canal canal, List<AccountCop> cambiadas) {
         // 1) Tomar el control: si hay MÁS cuentas recibiendo que el objetivo (o más activas que el tope), se cierran
         //    las que sobran, de a una. Nunca una con ventas abiertas; entre las demás, la de menos espacio libre.
-        //    Es por la memoria del computador de Movimientos: 7 es lo sano, la 8ª es solo margen.
+        //    Es por la memoria del computador de Movimientos: 7 es el máximo.
         cerrarSobrantes(todas, enCurso, canal, cambiadas);
 
-        // 2) Primero se pide la reposición (Movimientos tarda en abrir una cuenta)...
-        // 3) ...y solo cuando la nueva ya está confirmada se cierran las llenas. Así siempre hay 7 trabajando.
-        //    Se repite mientras algo cambie: al cerrar una llena queda sitio para pedir la siguiente reposición
-        //    (la cuenta nueva sigue "pendiente" hasta que Movimientos la confirme, así que en la práctica el
-        //    cambio avanza de a una por confirmación y nunca pasa del tope de 8).
-        for (int i = 0; i <= LimitesP2P.MAX_CUENTAS_ACTIVAS; i++) {
-            int antes = cambiadas.size();
-            reponerGrupo(todas, enCurso, canal, cambiadas);
-            cerrarLlenas(todas, enCurso, canal, cambiadas);
-            if (cambiadas.size() == antes) break;
-        }
+        // 2) Primero se CIERRAN las llenas sin ventas (se manda la orden de detenerlas)...
+        cerrarLlenas(todas, enCurso, canal, cambiadas);
+
+        // 3) ...y solo DESPUÉS se abre la siguiente candidata, nunca antes: así jamás hay dos abiertas a la vez
+        //    y no se pasa de {@link LimitesP2P#MAX_CUENTAS_ACTIVAS}.
+        reponerGrupo(todas, enCurso, canal, cambiadas);
     }
 
     /**
      * Cuántas cuentas ocupan un lugar de las {@link #GRUPO_OBJETIVO}: las que tienen espacio proyectado (reciben
      * ventas) Y las llenas que todavía esperan sus ventas abiertas. Una llena que espera plata sigue ocupando su
-     * lugar: NO se abre una octava por ella, y la octava solo se abre en el momento en que una cuenta llena y SIN
-     * ventas está por cerrarse (ver cerrarLlenas). Una llena sin ventas no cuenta: ya se va.
+     * lugar (no se abre otra por ella). Una llena sin ventas no cuenta: ya se cerró (ver cerrarLlenas).
      * Las que trabajan con el cupo de MAÑANA solo cuentan para completar el objetivo: si ya hay 7 con cupo de hoy,
      * no suman (el cupo de hoy siempre se prefiere y no deben sobrar cuentas por culpa de mañana).
      */
@@ -629,31 +623,18 @@ public class AsignacionAutomaticaService {
     }
 
     /**
-     * Cierra las cuentas llenas (cupo del canal cumplido con plata real) que no esperan ninguna venta, pero NO antes
-     * de que su reemplazo esté listo: mientras haya una reposición pidiéndose a Movimientos y todavía no haya
-     * {@link #GRUPO_OBJETIVO} cuentas confirmadas recibiendo, la llena se queda abierta (es la 8ª, el margen).
-     * Si no hay reposición en camino (no quedan candidatas), se cierra de inmediato como siempre.
+     * Cierra las cuentas llenas (cupo del canal cumplido con plata real) que no esperan ninguna venta: se desactivan
+     * en el acto (la orden de detenerlas sale ANTES que la de abrir la siguiente). Una llena con ventas abiertas se
+     * queda monitoreada, ocupando su lugar, hasta que sus ventas se cierren.
      */
     private void cerrarLlenas(List<AccountCop> todas, EnCurso enCurso, Canal canal, List<AccountCop> cambiadas) {
-        List<AccountCop> recibiendo = todas.stream()
-                .filter(this::esDelGrupo)
-                .filter(a -> disponible(a, enCurso.comprometido(), canal) > 0)
-                .collect(Collectors.toList());
-        long confirmadas = recibiendo.stream().filter(a -> !cuentasPendientes.estaPendiente(a.getName())).count();
-        boolean reposicionEnCamino = recibiendo.stream().anyMatch(a -> cuentasPendientes.estaPendiente(a.getName()));
-        boolean esperar = reposicionEnCamino && confirmadas < GRUPO_OBJETIVO;
-
         for (AccountCop a : new ArrayList<>(todas)) {
             if (!esDelGrupo(a)) continue;
             if (espacio(a, canalDe(a, canal)) > LIMITE_LLENA) continue; // todavía tiene espacio (en su canal)
             if (enCurso.conVentas().contains(a.getId())) continue; // espera plata: se queda hasta que se cierre
-            if (esperar) {
-                log.info("[AutoAsign] {} llegó al límite de {} pero su reemplazo aún no está confirmado por Movimientos: sigue abierta.",
-                        a.getName(), canal);
-                continue;
-            }
 
-            log.info("[AutoAsign] {} llegó al límite de {} sin ventas abiertas → deja de monitorearse.", a.getName(), canal);
+            log.info("[AutoAsign] {} llegó al límite de {} sin ventas abiertas → se cierra primero, luego se abre la siguiente.",
+                    a.getName(), canal);
             desactivar(a);
             cambiadas.add(a);
         }

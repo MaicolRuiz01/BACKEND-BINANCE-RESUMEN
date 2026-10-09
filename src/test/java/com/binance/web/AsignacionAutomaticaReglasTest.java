@@ -938,6 +938,7 @@ class AsignacionAutomaticaReglasTest {
     @Test
     void alas1830_laCuentaQueNoSirveParaCajero_peroTieneVentaAbierta_noCambiaDeMarca() {
         List<AccountCop> grupo = siete(1_500, "CORRESPONSAL");
+        grupo.remove(6);   // el maximo es 7 en total: 6 + la que espera su venta
         AccountCop sinEspacio = cuenta(8, 5_000, 10_000, 2_700);   // cajero: -2.300
         sinEspacio.setCupoTipoP2P("CORRESPONSAL");
         List<AccountCop> todas = new ArrayList<>(grupo);
@@ -1350,17 +1351,21 @@ class AsignacionAutomaticaReglasTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void reemplazo_laLlenaSeQuedaAbiertaMientrasLaNuevaNoEstaConfirmada() {
+    void siete_laLlenaSeCierraPrimeroYDespuesSeAbreLaSiguiente_nuncaHayOcho() {
         List<AccountCop> grupo = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 10_000); // la 7 esta llena
         List<AccountCop> cand = candidatas(20, 2);
         when(accountCopRepository.findAll()).thenReturn(juntas(grupo, cand));
-        lenient().when(cuentasPendientes.estaPendiente(org.mockito.ArgumentMatchers.anyString())).thenReturn(false);
-        for (String n : List.of("Cuenta 20", "Cuenta 21")) lenient().when(cuentasPendientes.estaPendiente(n)).thenReturn(true); // la que se abra: sin confirmar
+        // La nueva queda "pendiente" de Movimientos: aun asi la vieja ya se cerro (no se espera la confirmacion).
+        for (String n : List.of("Cuenta 20", "Cuenta 21")) lenient().when(cuentasPendientes.estaPendiente(n)).thenReturn(true);
 
         servicio.asignar(List.of());
 
-        assertEquals(1, cuantasActivas(cand));                // la reposicion se pidio ya
-        assertEquals(true, grupo.get(6).getActivaParaP2P());  // la llena sigue abierta (son 8 por un rato)
+        assertEquals(false, grupo.get(6).getActivaParaP2P());   // primero se cerro la llena
+        assertEquals(1, cuantasActivas(cand));                  // y despues se abrio la siguiente
+        assertEquals(7, cuantasActivas(juntas(grupo, cand)));   // siempre 7
+        org.mockito.InOrder orden = org.mockito.Mockito.inOrder(cuentaP2PSyncService);
+        orden.verify(cuentaP2PSyncService).sincronizar(grupo.get(6), true);   // la orden de cerrar sale primero
+        orden.verify(cuentaP2PSyncService).sincronizar(any(AccountCop.class), eq(false));   // y luego la de abrir
     }
 
     @Test
@@ -1749,7 +1754,7 @@ class AsignacionAutomaticaReglasTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void octava_unaLlenaConVentasNoAbreOctava_peroUnaLlenaSinVentasSiLaAbreAntesDeCerrar() {
+    void siete_unaLlenaConVentasNoAbreOtra_yUnaLlenaSinVentasSeCierraYLuegoSeAbre() {
         // 6 cuentas con espacio + 1 llena (10.100 de saldo) con una venta abierta: son 7 lugares ocupados.
         List<AccountCop> sanas = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 6_000);
         AccountCop llena = cuenta(7, 10_100, 10_000, 2_700);
