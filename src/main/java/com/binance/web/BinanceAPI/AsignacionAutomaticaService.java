@@ -108,6 +108,11 @@ import lombok.extern.slf4j.Slf4j;
  * 13) NO REPETIDAS: una cuenta que ya tiene una venta EN CURSO por el mismo monto exacto no recibe
  *     otra igual (el depósito sería indistinguible en Movimientos). Vale mientras la primera no se
  *     cierre: al liberarse sale de la lista de órdenes en curso y el monto vuelve a estar disponible.
+ * 14) VENTAS GRANDES: una venta de MÁS de {@link #maxVentaMiles} (por defecto $10M) NUNCA se asigna sola: queda
+ *     sin cuenta, con un aviso flotante en las pantallas para que el operador decida. Una venta desde
+ *     {@link #avisoVentaMiles} (por defecto $5M) sí se asigna como siempre, pero también avisa (son las peligrosas,
+ *     hay que estar pendiente). Cada venta avisa una sola vez. Se cambian con p2p.auto.max-venta-miles y
+ *     p2p.auto.aviso-venta-miles.
  *
  * Unidades: todos los montos van en MILES de COP (igual que pesosCop y los cupos diarios),
  * por eso la tolerancia de $500.000 es 500.0 aquí.
@@ -153,6 +158,15 @@ public class AsignacionAutomaticaService {
     private double corteMinimoMiles;
     /** Día en que ya se hizo el retiro de corte (en memoria: tras un reinicio dentro de la ventana se repite, y no duplica). */
     private volatile java.time.LocalDate fechaCorteEjecutado;
+
+    /** Una venta de más de esto (MILES) no se asigna sola. */
+    @org.springframework.beans.factory.annotation.Value("${p2p.auto.max-venta-miles:10000}")
+    private double maxVentaMiles = 10_000.0;
+    /** Desde este monto (MILES) cada venta avisa con una notificación flotante. */
+    @org.springframework.beans.factory.annotation.Value("${p2p.auto.aviso-venta-miles:5000}")
+    private double avisoVentaMiles = 5_000.0;
+    /** Ventas grandes ya avisadas (orden + tipo): un aviso por venta, no uno por ciclo. */
+    private final Set<String> ventasAvisadas = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     /** @Lazy: evita un ciclo de dependencias; solo se usa para elegir las cuentas iniciales. */
     @Autowired @Lazy private AccountCopService accountCopService;
@@ -312,6 +326,13 @@ public class AsignacionAutomaticaService {
 
         for (ActiveP2POrderDto o : pendientes) {
             double monto = val(o.getPesosCop());
+            if (monto > maxVentaMiles) {
+                // Demasiado grande para asignarla sola: la decide una persona.
+                log.warn("[AutoAsign] La orden {} es de {} miles, más del máximo de {}: no se asigna sola.",
+                        o.getOrderNumber(), monto, maxVentaMiles);
+                avisarVentaGrande(o, monto, "SIN_ASIGNAR_TOPE", null);
+                continue;
+            }
             AccountCop elegida = elegirCuenta(todas, comprometido, montosAbiertos, monto, canal);
             if (elegida == null) {
                 // Una venta es una venta: en cajero no hay tope práctico, va a la cuenta de cajero activa con más espacio.
@@ -325,6 +346,7 @@ public class AsignacionAutomaticaService {
             if (elegida == null) {
                 log.info("[AutoAsign] Sin cuenta con cupo de {} (y sin otra orden igual abierta) para la orden {} ({} miles).",
                         canal, o.getOrderNumber(), monto);
+                if (monto >= avisoVentaMiles) avisarVentaGrande(o, monto, "SIN_CUENTA", null);
                 continue;
             }
 
@@ -342,11 +364,28 @@ public class AsignacionAutomaticaService {
             montosAbiertos.computeIfAbsent(elegida.getId(), k -> new HashSet<>()).add(claveMonto(monto));
             log.info("[AutoAsign] Orden {} → {} (cupo {} restante {} miles).",
                     o.getOrderNumber(), elegida.getName(), canal, disponible(elegida, comprometido, canal));
+            if (monto >= avisoVentaMiles) avisarVentaGrande(o, monto, "ASIGNADA", elegida.getName());
             // OJO: aunque esta venta la deje sin espacio, la cuenta NO se desactiva acá: tiene una venta
             // abierta y su plata todavía no llega. mantenerGrupo la saca cuando esa venta se cierre.
         }
 
         if (!cambiadas.isEmpty()) accountCopRepository.saveAll(cambiadas);
+    }
+
+    // ── Ventas grandes ────────────────────────────────────────────
+
+    /** Aviso flotante en las pantallas de una venta grande. Una sola vez por venta y por tipo de aviso. */
+    private void avisarVentaGrande(ActiveP2POrderDto o, double montoMiles, String tipo, String cuenta) {
+        if (ventasAvisadas.size() > 500) ventasAvisadas.clear(); // no crece sin fin; tras el vaciado, a lo sumo se repite un aviso
+        if (!ventasAvisadas.add(o.getOrderNumber() + "|" + tipo)) return;
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("tipo", "venta-grande");
+        payload.put("estado", tipo);
+        payload.put("orderNumber", o.getOrderNumber());
+        payload.put("montoMiles", montoMiles);
+        payload.put("cuentaBinance", o.getAccountBinance());
+        payload.put("cuentaCop", cuenta);
+        P2PSseNotificador.ventaGrande(payload);
     }
 
     // ── Retiro de corte de las 18:30 ──────────────────────────────

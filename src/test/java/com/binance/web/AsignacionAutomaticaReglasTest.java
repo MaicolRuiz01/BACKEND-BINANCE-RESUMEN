@@ -1589,4 +1589,68 @@ class AsignacionAutomaticaReglasTest {
         assertEquals(true, c.getActivaParaP2P());                   // con 9,8M pedidos queda en 0 efectivo: sigue por cajero
         assertEquals("CAJERO", c.getCupoTipoP2P());
     }
+
+    // ── Ventas grandes: no se asignan solas por encima del maximo y avisan desde $5M ──
+
+    private com.binance.web.BinanceAPI.P2PSseController sseSimulado() {
+        com.binance.web.BinanceAPI.P2PSseController sse = org.mockito.Mockito.mock(com.binance.web.BinanceAPI.P2PSseController.class);
+        com.binance.web.BinanceAPI.P2PSseController.INSTANCE = sse;
+        return sse;
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void limpiarSse() {
+        com.binance.web.BinanceAPI.P2PSseController.INSTANCE = null;
+    }
+
+    @Test
+    void ventaGrande_deDoceMillones_noSeAsignaSolaYAvisa() {
+        horaDelDia(19, 0);
+        com.binance.web.BinanceAPI.P2PSseController sse = sseSimulado();
+        List<AccountCop> cuentas = cuentasCajero(100, 200, 300);
+        when(accountCopRepository.findAll()).thenReturn(cuentas);
+
+        servicio.asignar(List.of(orden("enorme", 12_000, null)));
+
+        verify(activeOrderService, never()).upsertPreAsignacion(eq("enorme"), any(), any(), any());
+        verify(sse).broadcastVentaGrande(org.mockito.ArgumentMatchers.argThat(p ->
+                "SIN_ASIGNAR_TOPE".equals(p.get("estado")) && "enorme".equals(p.get("orderNumber"))));
+    }
+
+    @Test
+    void ventaGrande_deDiezMillonesExactos_siSeAsigna_yAvisa() {
+        horaDelDia(19, 0);
+        com.binance.web.BinanceAPI.P2PSseController sse = sseSimulado();
+        List<AccountCop> cuentas = cuentasCajero(100, 200, 300);
+        when(accountCopRepository.findAll()).thenReturn(cuentas);
+
+        servicio.asignar(List.of(orden("diez", 10_000, null)));
+
+        verify(activeOrderService).upsertPreAsignacion(eq("diez"), any(), any(), any());   // rescate de cajero
+        verify(sse).broadcastVentaGrande(org.mockito.ArgumentMatchers.argThat(p -> "ASIGNADA".equals(p.get("estado"))));
+    }
+
+    @Test
+    void ventaGrande_porDebajoDelAviso_noAvisa() {
+        horaDelDia(19, 0);
+        com.binance.web.BinanceAPI.P2PSseController sse = sseSimulado();
+        when(accountCopRepository.findAll()).thenReturn(cuentasCajero(100, 200, 300));
+
+        servicio.asignar(List.of(orden("normal", 1_000, null)));
+
+        verify(sse, never()).broadcastVentaGrande(any());
+    }
+
+    @Test
+    void ventaGrande_cadaVentaAvisaUnaSolaVez_aunqueElCicloSeRepita() {
+        horaDelDia(19, 0);
+        com.binance.web.BinanceAPI.P2PSseController sse = sseSimulado();
+        when(accountCopRepository.findAll()).thenReturn(cuentasCajero(100, 200, 300));
+
+        servicio.asignar(List.of(orden("enorme", 12_000, null)));
+        servicio.asignar(List.of(orden("enorme", 12_000, null)));
+        servicio.asignar(List.of(orden("enorme", 12_000, null)));
+
+        verify(sse, org.mockito.Mockito.times(1)).broadcastVentaGrande(any());
+    }
 }
