@@ -190,6 +190,12 @@ public class AsignacionAutomaticaService {
     private volatile Map<Integer, Double> retiroCajPendCiclo = new HashMap<>();
     /** true cuando ya no hay NINGUNA candidata con cupo de hoy: se puede usar el cupo de corresponsal de mañana. */
     private volatile boolean mananaHabilitado;
+    /**
+     * De día, el cajero solo se usa cuando ya NO queda ninguna candidata con cupo de corresponsal (ninguna cuenta
+     * inactiva y utilizable de todas las Bancolombia). Mientras haya una, una cuenta con el corresponsal agotado se
+     * cierra y se reemplaza por esa, en vez de seguir como cajero. De noche el cajero siempre está habilitado.
+     */
+    private volatile boolean cajeroHabilitado = true;
 
     /** Último canal con el que se marcó cada cuenta (null tras un reinicio): evita pisar un cambio hecho a mano. */
     private final Map<Integer, Canal> canalAplicado = new java.util.concurrent.ConcurrentHashMap<>();
@@ -424,6 +430,7 @@ public class AsignacionAutomaticaService {
         // Primero los retiros pendientes: espacio() y saldoParaCanal() los leen.
         retiroCorrPendCiclo = retirosPendientes(false);
         retiroCajPendCiclo = retirosPendientes(true);
+        cajeroHabilitado = porHora == Canal.CAJERO || !hayCandidataDeCorresponsal(todas);
         mananaHabilitado = !hayCandidataConCupoDeHoy(todas, porHora);
         Map<Integer, Canal> canales = new HashMap<>();
         for (AccountCop a : todas) {
@@ -432,6 +439,16 @@ public class AsignacionAutomaticaService {
         }
         canalesCiclo = canales;
         return porHora;
+    }
+
+    /** ¿Hay alguna cuenta inactiva (no bloqueada, Bancolombia) con cupo de CORRESPONSAL de hoy para abrir? */
+    private boolean hayCandidataDeCorresponsal(List<AccountCop> todas) {
+        return todas.stream()
+                .filter(a -> a.getId() != null)
+                .filter(a -> !Boolean.TRUE.equals(a.getActivaParaP2P()))
+                .filter(a -> !Boolean.TRUE.equals(a.getBloqueada()))
+                .filter(a -> a.getBankType() == BankType.BANCOLOMBIA)
+                .anyMatch(a -> espacio(a, Canal.CORRESPONSAL) >= SUBLIMITE_ACTIVAR);
     }
 
     /** ¿Hay alguna cuenta inactiva (no bloqueada, Bancolombia) con cupo de hoy para abrir? Si la hay, mañana no se toca. */
@@ -466,7 +483,7 @@ public class AsignacionAutomaticaService {
      */
     private Canal derivarCanal(AccountCop a, Canal porHora) {
         if (porHora == Canal.CORRESPONSAL && espacio(a, Canal.CORRESPONSAL) >= SUBLIMITE_ACTIVAR) return Canal.CORRESPONSAL;
-        if (espacio(a, Canal.CAJERO) > LIMITE_LLENA) return Canal.CAJERO;
+        if (cajeroHabilitado && espacio(a, Canal.CAJERO) > LIMITE_LLENA) return Canal.CAJERO;
         if (mananaHabilitado && espacio(a, Canal.CORRESPONSAL_MANANA) > LIMITE_LLENA) return Canal.CORRESPONSAL_MANANA;
         return porHora;
     }
