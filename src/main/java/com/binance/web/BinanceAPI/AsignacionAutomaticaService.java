@@ -52,19 +52,21 @@ import lombok.extern.slf4j.Slf4j;
  *  4) El cupo que cuenta depende de la HORA ({@link VentanaCupoP2P}): de 00:00 a 18:29 solo el de
  *     CORRESPONSAL y de 18:30 a 23:59 solo el de CAJERO. El otro canal se ignora. A las 18:30 el cambio
  *     es inmediato (en el siguiente ciclo): las cuentas sin espacio de cajero se cierran y se abren otras.
- *     CANAL POR CUENTA (de día): cada cuenta trabaja por CORRESPONSAL mientras le quede cupo (>= 1.000); cuando
- *     el de corresponsal se agota pasa SOLA a CAJERO si le sirve (la marca cambia, no se cierra ni se avisa a
- *     Movimientos). Al reponer el grupo se buscan primero candidatas con cupo de corresponsal y, si no quedan,
- *     de cajero: el grupo siempre son 7 y mezcla canales, así se adelanta el cajero antes de que se acabe todo
- *     el corresponsal. De noche (desde las 18:30) todas trabajan por cajero. Al día siguiente, con los cupos
- *     nuevos, vuelve solo a corresponsal.
- *     SIN CUPO DE HOY: cuando ya no queda cupo de hoy en NINGUNA cuenta (ni corresponsal ni cajero), se trabaja con
- *     el cupo de corresponsal del DÍA SIGUIENTE ({@link Canal#CORRESPONSAL_MANANA}): las cuentas reciben ventas
- *     hasta llenar su cupo de corresponsal completo de mañana, descontando del saldo todo lo ya pedido para retirar
- *     (esos retiros gastan el cupo de hoy, no el de mañana). Solo se usa mientras no haya ninguna candidata con
- *     cupo de hoy: siempre se prefiere hoy sobre mañana. La cuenta queda marcada CORRESPONSAL.
- *     SALDO PARA CAJERO: al medir el espacio de cajero se resta del saldo lo ya pedido para retirar por
- *     CORRESPONSAL y aún sin completar (11,5M con 10M pedidos = 1,5M). Al revés NO: un retiro pendiente del mismo
+ *     REGLA DE ORO (de día): el objetivo es tener siempre 7 cuentas, y se completan en este orden de preferencia:
+ *     corresponsal de hoy → cajero de hoy → corresponsal de mañana. El sistema NO pasa a cajero porque una cuenta
+ *     llene su corresponsal: cuando una se llena (retiro pedido, sin ventas abiertas) se cierra y se BUSCA otra cuenta
+ *     con corresponsal para reponerla. Solo cuando ya NO queda ninguna cuenta con corresponsal de hoy para traer (las
+ *     bloqueadas y las que Movimientos no puede abrir no cuentan) se completa con cajero: la reposición se busca por
+ *     cajero y la cuenta que acaba de llenar su corresponsal puede seguir como cajero. Las demás con corresponsal
+ *     siguen por corresponsal hasta llenarse. De noche (desde las 18:30) TODAS pasan a cajero (con el retiro de corte
+ *     de lo que no se llenó). Al día siguiente, con los cupos nuevos, vuelve solo a corresponsal.
+ *     SIN CUPO DE HOY: igual un escalón más: cuando ya no queda ninguna cuenta con cupo de hoy (corresponsal de día ni
+ *     cajero) para traer, se completa con el cupo de corresponsal del DÍA SIGUIENTE ({@link Canal#CORRESPONSAL_MANANA}):
+ *     las cuentas reciben ventas hasta llenar su cupo de corresponsal completo de mañana, descontando del saldo todo lo
+ *     ya pedido para retirar (esos retiros gastan el cupo de hoy, no el de mañana). La cuenta queda marcada CORRESPONSAL.
+ *     SALDO PARA CAJERO: DE NOCHE (desde las 18:30) al medir el espacio de cajero se resta del saldo lo ya pedido
+ *     para retirar por CORRESPONSAL y aún sin completar (11,5M con 10M pedidos = 1,5M). DE DÍA no se resta: una
+ *     cuenta que llenó su corresponsal no recibe más ventas hasta que el retiro se complete. Al revés NO: un retiro pendiente del mismo
  *     canal no devuelve cupo, el cupo de corresponsal sigue gastado hasta que se complete. Y una cuenta con 12M
  *     que aún no se retiró NO tiene cupo de corresponsal (cupo − saldo ya es negativo).
  *  5) SELECCIÓN DE CUENTAS: si NO hay ninguna cuenta activa en P2P, el Auto elige y activa las 7 más
@@ -79,9 +81,10 @@ import lombok.extern.slf4j.Slf4j;
  *  8) SIEMPRE 7 CUENTAS: en cada ciclo se cuentan las cuentas que ocupan un lugar (las que todavía pueden recibir
  *     ventas, disponible proyectado > 0, MÁS las llenas que esperan sus ventas abiertas) y, si hay menos de
  *     {@link #GRUPO_OBJETIVO}, se abren candidatas hasta completar. Una llena CON ventas abiertas sigue ocupando su
- *     lugar (no se abre una octava por ella). La octava solo aparece en el instante en que una cuenta llena y SIN
- *     ventas está por cerrarse: se abre su reemplazo y, ya confirmado, esa se cierra.
- *     TOPE DE HIERRO: la reposición nunca abre cuentas por encima de {@link LimitesP2P#MAX_CUENTAS_ACTIVAS} (8)
+ *     lugar. NUNCA hay más de 7 cuentas activas: una llena SIN ventas se CIERRA PRIMERO (se manda la orden de
+ *     detenerla a Movimientos) y solo DESPUÉS se abre la siguiente candidata, en ese orden, para que jamás queden
+ *     dos abiertas a la vez.
+ *     TOPE DE HIERRO: la reposición nunca abre cuentas por encima de {@link LimitesP2P#MAX_CUENTAS_ACTIVAS} (7)
  *     activas EN TOTAL (cuentan también las que ya no reciben ventas pero siguen vigiladas esperando sus ventas
  *     abiertas), porque el computador de Movimientos no aguanta más sesiones. Si hay que elegir, gana el tope
  *     sobre el objetivo de 7 que reciben ventas; en cajero el rescate sigue asignando entre las activas.
@@ -188,6 +191,8 @@ public class AsignacionAutomaticaService {
     private volatile Map<Integer, Canal> canalesCiclo = new HashMap<>();
     private volatile Map<Integer, Double> retiroCorrPendCiclo = new HashMap<>();
     private volatile Map<Integer, Double> retiroCajPendCiclo = new HashMap<>();
+    /** Canal de la hora del ciclo en curso (corresponsal de día, cajero desde las 18:30). */
+    private volatile Canal porHoraCiclo = Canal.CORRESPONSAL;
     /** true cuando ya no hay NINGUNA candidata con cupo de hoy: se puede usar el cupo de corresponsal de mañana. */
     private volatile boolean mananaHabilitado;
     /**
@@ -196,6 +201,15 @@ public class AsignacionAutomaticaService {
      * cierra y se reemplaza por esa, en vez de seguir como cajero. De noche el cajero siempre está habilitado.
      */
     private volatile boolean cajeroHabilitado = true;
+
+    /** Cuánto se deja de elegir una cuenta que Movimientos no pudo abrir (sin credenciales, error de login...). */
+    private static final long ENFRIAMIENTO_MS = 30 * 60_000L;
+    /** Si una cuenta activada por el Auto se apaga dentro de este plazo, se considera que no pudo abrirse. */
+    private static final long VENTANA_FALLO_MS = 15 * 60_000L;
+    /** Cuentas que el Auto activó y aún no se sabe si Movimientos las abrió (id → cuándo). */
+    private final Map<Integer, Long> activadasPorAuto = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Cuentas que fallaron al abrirse: no se vuelven a elegir hasta esa hora (id → hasta cuándo, en ms). */
+    private final Map<Integer, Long> enfriamiento = new java.util.concurrent.ConcurrentHashMap<>();
 
     /** Último canal con el que se marcó cada cuenta (null tras un reinicio): evita pisar un cambio hecho a mano. */
     private final Map<Integer, Canal> canalAplicado = new java.util.concurrent.ConcurrentHashMap<>();
@@ -296,6 +310,7 @@ public class AsignacionAutomaticaService {
         // Canal de la hora (corresponsal de día, cajero desde 18:30). Cada cuenta puede trabajar por el otro canal si
         // el de la hora ya no le sirve (ver derivarCanal); ese canal propio se calcula una vez por ciclo.
         Canal porHora = VentanaCupoP2P.canalAhora(reloj);
+        detectarActivacionesFallidas(todas); // antes de calcular canales: una cuenta apartada no cuenta como candidata
         Canal canal = prepararCiclo(todas, porHora);
         List<AccountCop> cambiadas = new ArrayList<>();
 
@@ -423,11 +438,54 @@ public class AsignacionAutomaticaService {
         }
     }
 
+    // ── Cuentas que Movimientos no pudo abrir ─────────────────────
+
+    /**
+     * Si una cuenta que el Auto acaba de activar aparece desactivada sin que el Auto la haya cerrado, Movimientos no
+     * pudo abrirla (por ejemplo "sin credenciales en Bitwarden" o un error de login) y se desactivó sola. Sin esto el
+     * Auto la volvía a elegir en cada ciclo, la reemplazante nunca se confirmaba y las cuentas llenas no se cerraban.
+     * Se aparta {@link #ENFRIAMIENTO_MS} para que se elija otra.
+     */
+    private void detectarActivacionesFallidas(List<AccountCop> todas) {
+        if (activadasPorAuto.isEmpty()) return;
+        long ahora = reloj.millis();
+        Map<Integer, AccountCop> porId = new HashMap<>();
+        for (AccountCop a : todas) if (a.getId() != null) porId.put(a.getId(), a);
+        for (Integer id : new ArrayList<>(activadasPorAuto.keySet())) {
+            AccountCop a = porId.get(id);
+            long desde = ahora - activadasPorAuto.getOrDefault(id, ahora);
+            boolean dentroDeLaVentana = desde >= 0 && desde <= VENTANA_FALLO_MS;
+            if (a == null || !Boolean.TRUE.equals(a.getActivaParaP2P())) {
+                activadasPorAuto.remove(id);
+                if (!dentroDeLaVentana) continue; // se apagó mucho después (p. ej. el reinicio de medianoche): no es un fallo al abrir
+                enfriamiento.put(id, ahora + ENFRIAMIENTO_MS);
+                log.warn("[AutoAsign] {} se desactivó sola después de que el Auto la activó (Movimientos no pudo abrirla): "
+                        + "no se vuelve a elegir por {} min. Revisa sus credenciales.",
+                        a != null ? a.getName() : id, ENFRIAMIENTO_MS / 60_000L);
+            } else if (!cuentasPendientes.estaPendiente(a.getName())) {
+                activadasPorAuto.remove(id); // ya confirmada: todo bien
+            }
+        }
+    }
+
+    /** ¿Esta cuenta fallo hace poco al abrirse y hay que saltarla? */
+    private boolean enEnfriamiento(AccountCop a) {
+        if (a.getId() == null) return false;
+        Long hasta = enfriamiento.get(a.getId());
+        if (hasta == null) return false;
+        if (reloj.millis() >= hasta) {
+            enfriamiento.remove(a.getId());
+            return false;
+        }
+        return true;
+    }
+
     // ── Canal de cada cuenta ──────────────────────────────────────
 
     /** Rehace, para este ciclo, los retiros de corresponsal pendientes y el canal con el que trabaja cada cuenta. */
     private Canal prepararCiclo(List<AccountCop> todas, Canal porHora) {
-        // Primero los retiros pendientes: espacio() y saldoParaCanal() los leen.
+        // Primero los retiros pendientes y la hora: espacio() y saldoParaCanal() los leen.
+        porHoraCiclo = porHora;
         retiroCorrPendCiclo = retirosPendientes(false);
         retiroCajPendCiclo = retirosPendientes(true);
         cajeroHabilitado = porHora == Canal.CAJERO || !hayCandidataDeCorresponsal(todas);
@@ -441,23 +499,28 @@ public class AsignacionAutomaticaService {
         return porHora;
     }
 
-    /** ¿Hay alguna cuenta inactiva (no bloqueada, Bancolombia) con cupo de CORRESPONSAL de hoy para abrir? */
+    /**
+     * Base de la regla de oro: ¿hay alguna cuenta INACTIVA (no bloqueada, Bancolombia, que Movimientos sí pueda abrir)
+     * con cupo de CORRESPONSAL de hoy para traer? Mientras la haya, el cajero NO se usa: se repone con corresponsal.
+     */
     private boolean hayCandidataDeCorresponsal(List<AccountCop> todas) {
         return todas.stream()
                 .filter(a -> a.getId() != null)
                 .filter(a -> !Boolean.TRUE.equals(a.getActivaParaP2P()))
                 .filter(a -> !Boolean.TRUE.equals(a.getBloqueada()))
                 .filter(a -> a.getBankType() == BankType.BANCOLOMBIA)
+                .filter(a -> !enEnfriamiento(a)) // una que Movimientos no puede abrir no es una candidata real
                 .anyMatch(a -> espacio(a, Canal.CORRESPONSAL) >= SUBLIMITE_ACTIVAR);
     }
 
-    /** ¿Hay alguna cuenta inactiva (no bloqueada, Bancolombia) con cupo de hoy para abrir? Si la hay, mañana no se toca. */
+    /** ¿Hay alguna cuenta inactiva utilizable con cupo de HOY (corresponsal de día o cajero) para traer? Si la hay, mañana no se toca. */
     private boolean hayCandidataConCupoDeHoy(List<AccountCop> todas, Canal porHora) {
         return todas.stream()
                 .filter(a -> a.getId() != null)
                 .filter(a -> !Boolean.TRUE.equals(a.getActivaParaP2P()))
                 .filter(a -> !Boolean.TRUE.equals(a.getBloqueada()))
                 .filter(a -> a.getBankType() == BankType.BANCOLOMBIA)
+                .filter(a -> !enEnfriamiento(a))
                 .anyMatch(a -> (porHora == Canal.CORRESPONSAL && espacio(a, Canal.CORRESPONSAL) >= SUBLIMITE_ACTIVAR)
                         || espacio(a, Canal.CAJERO) >= SUBLIMITE_ACTIVAR);
     }
@@ -483,8 +546,23 @@ public class AsignacionAutomaticaService {
      */
     private Canal derivarCanal(AccountCop a, Canal porHora) {
         if (porHora == Canal.CORRESPONSAL && espacio(a, Canal.CORRESPONSAL) >= SUBLIMITE_ACTIVAR) return Canal.CORRESPONSAL;
-        if (cajeroHabilitado && espacio(a, Canal.CAJERO) > LIMITE_LLENA) return Canal.CAJERO;
-        if (mananaHabilitado && espacio(a, Canal.CORRESPONSAL_MANANA) > LIMITE_LLENA) return Canal.CORRESPONSAL_MANANA;
+        // PASAR a cajero (o a mañana) exige el mismo espacio mínimo que traer una cuenta nueva: una cuenta que acaba de
+        // llenar su corresponsal NO se queda "de cajero" por tener unos pesos de sobra; si no cumple, se da de baja y
+        // se trae la mejor candidata (la más cerca de su límite que sí tenga espacio). Una cuenta que YA trabaja por
+        // ese canal sigue mientras le quede algo (no se cierra a mitad de camino).
+        Canal previo = a.getId() != null ? canalAplicado.get(a.getId()) : null;
+        boolean yaEsCajero = previo == Canal.CAJERO || "CAJERO".equals(a.getCupoTipoP2P());
+        double espacioCajero = espacio(a, Canal.CAJERO);
+        // De noche el cajero es el canal de base (no se pasa de uno a otro): basta con que le quede algo.
+        boolean sigueOEsDeBase = yaEsCajero || porHora == Canal.CAJERO;
+        if (cajeroHabilitado && (sigueOEsDeBase ? espacioCajero > LIMITE_LLENA : espacioCajero >= SUBLIMITE_ACTIVAR)) {
+            return Canal.CAJERO;
+        }
+        boolean yaEsManana = previo == Canal.CORRESPONSAL_MANANA;
+        double espacioManana = espacio(a, Canal.CORRESPONSAL_MANANA);
+        if (mananaHabilitado && (yaEsManana ? espacioManana > LIMITE_LLENA : espacioManana >= SUBLIMITE_ACTIVAR)) {
+            return Canal.CORRESPONSAL_MANANA;
+        }
         return porHora;
     }
 
@@ -506,7 +584,11 @@ public class AsignacionAutomaticaService {
         double caj = retiroCajPendCiclo.getOrDefault(a.getId(), 0.0);
         return switch (c) {
             case CORRESPONSAL -> bal(a);                       // un retiro pendiente de este canal NO devuelve cupo
-            case CAJERO -> bal(a) - corr;                      // lo pedido por corresponsal ya tiene dueño
+            // Lo pedido por corresponsal ya tiene dueño, pero SOLO se descuenta del saldo de cajero DE NOCHE (desde las
+            // 18:30, cuando todo pasa a cajero). De día NO: una cuenta que llenó su corresponsal y ya tiene el retiro
+            // pedido NO puede recibir más ventas "por cajero" mientras el retiro no se confirma (incidente de Ana y
+            // Jose del 9/10: cruzaron 10M, se pidió su retiro y siguieron recibiendo hasta ~12,7M).
+            case CAJERO -> porHoraCiclo == Canal.CAJERO ? bal(a) - corr : bal(a);
             case CORRESPONSAL_MANANA -> bal(a) - corr - caj;   // los retiros de hoy no gastan el cupo de mañana
         };
     }
@@ -552,37 +634,30 @@ public class AsignacionAutomaticaService {
     }
 
     /**
-     * Mantiene el grupo en dos pasos:
-     *  1) Desactiva (deja de monitorear) las cuentas cuyo cupo del canal ya se cumplió con plata real y que no
-     *     esperan ninguna venta.
-     *  2) Cuenta las activas que todavía pueden recibir ventas y, si hay menos de {@link #GRUPO_OBJETIVO}, abre
-     *     candidatas hasta completar. Una cuenta sin cupo pero con ventas abiertas sigue activa y monitoreada,
-     *     pero ya NO cuenta aquí: por eso su reposición se abre de inmediato y no cuando por fin se cierre.
+     * Mantiene el grupo SIEMPRE en {@link #GRUPO_OBJETIVO} cuentas como máximo, en este orden:
+     *  1) Cierra las que sobran (más de 7).
+     *  2) Cierra las cuentas llenas (cupo del canal cumplido con plata real) que no esperan ninguna venta.
+     *  3) Solo después abre candidatas hasta completar. Una cuenta llena con ventas abiertas sigue activa y
+     *     monitoreada, ocupando su lugar, hasta que sus ventas se cierren.
      */
     private void mantenerGrupo(List<AccountCop> todas, EnCurso enCurso, Canal canal, List<AccountCop> cambiadas) {
         // 1) Tomar el control: si hay MÁS cuentas recibiendo que el objetivo (o más activas que el tope), se cierran
         //    las que sobran, de a una. Nunca una con ventas abiertas; entre las demás, la de menos espacio libre.
-        //    Es por la memoria del computador de Movimientos: 7 es lo sano, la 8ª es solo margen.
+        //    Es por la memoria del computador de Movimientos: 7 es el máximo.
         cerrarSobrantes(todas, enCurso, canal, cambiadas);
 
-        // 2) Primero se pide la reposición (Movimientos tarda en abrir una cuenta)...
-        // 3) ...y solo cuando la nueva ya está confirmada se cierran las llenas. Así siempre hay 7 trabajando.
-        //    Se repite mientras algo cambie: al cerrar una llena queda sitio para pedir la siguiente reposición
-        //    (la cuenta nueva sigue "pendiente" hasta que Movimientos la confirme, así que en la práctica el
-        //    cambio avanza de a una por confirmación y nunca pasa del tope de 8).
-        for (int i = 0; i <= LimitesP2P.MAX_CUENTAS_ACTIVAS; i++) {
-            int antes = cambiadas.size();
-            reponerGrupo(todas, enCurso, canal, cambiadas);
-            cerrarLlenas(todas, enCurso, canal, cambiadas);
-            if (cambiadas.size() == antes) break;
-        }
+        // 2) Primero se CIERRAN las llenas sin ventas (se manda la orden de detenerlas)...
+        cerrarLlenas(todas, enCurso, canal, cambiadas);
+
+        // 3) ...y solo DESPUÉS se abre la siguiente candidata, nunca antes: así jamás hay dos abiertas a la vez
+        //    y no se pasa de {@link LimitesP2P#MAX_CUENTAS_ACTIVAS}.
+        reponerGrupo(todas, enCurso, canal, cambiadas);
     }
 
     /**
      * Cuántas cuentas ocupan un lugar de las {@link #GRUPO_OBJETIVO}: las que tienen espacio proyectado (reciben
      * ventas) Y las llenas que todavía esperan sus ventas abiertas. Una llena que espera plata sigue ocupando su
-     * lugar: NO se abre una octava por ella, y la octava solo se abre en el momento en que una cuenta llena y SIN
-     * ventas está por cerrarse (ver cerrarLlenas). Una llena sin ventas no cuenta: ya se va.
+     * lugar (no se abre otra por ella). Una llena sin ventas no cuenta: ya se cerró (ver cerrarLlenas).
      * Las que trabajan con el cupo de MAÑANA solo cuentan para completar el objetivo: si ya hay 7 con cupo de hoy,
      * no suman (el cupo de hoy siempre se prefiere y no deben sobrar cuentas por culpa de mañana).
      */
@@ -629,31 +704,21 @@ public class AsignacionAutomaticaService {
     }
 
     /**
-     * Cierra las cuentas llenas (cupo del canal cumplido con plata real) que no esperan ninguna venta, pero NO antes
-     * de que su reemplazo esté listo: mientras haya una reposición pidiéndose a Movimientos y todavía no haya
-     * {@link #GRUPO_OBJETIVO} cuentas confirmadas recibiendo, la llena se queda abierta (es la 8ª, el margen).
-     * Si no hay reposición en camino (no quedan candidatas), se cierra de inmediato como siempre.
+     * Cierra las cuentas llenas (cupo del canal cumplido con plata real) que no esperan ninguna venta: se desactivan
+     * en el acto (la orden de detenerlas sale ANTES que la de abrir la siguiente). Una llena con ventas abiertas se
+     * queda monitoreada, ocupando su lugar, hasta que sus ventas se cierren.
      */
     private void cerrarLlenas(List<AccountCop> todas, EnCurso enCurso, Canal canal, List<AccountCop> cambiadas) {
-        List<AccountCop> recibiendo = todas.stream()
-                .filter(this::esDelGrupo)
-                .filter(a -> disponible(a, enCurso.comprometido(), canal) > 0)
-                .collect(Collectors.toList());
-        long confirmadas = recibiendo.stream().filter(a -> !cuentasPendientes.estaPendiente(a.getName())).count();
-        boolean reposicionEnCamino = recibiendo.stream().anyMatch(a -> cuentasPendientes.estaPendiente(a.getName()));
-        boolean esperar = reposicionEnCamino && confirmadas < GRUPO_OBJETIVO;
-
         for (AccountCop a : new ArrayList<>(todas)) {
             if (!esDelGrupo(a)) continue;
             if (espacio(a, canalDe(a, canal)) > LIMITE_LLENA) continue; // todavía tiene espacio (en su canal)
             if (enCurso.conVentas().contains(a.getId())) continue; // espera plata: se queda hasta que se cierre
-            if (esperar) {
-                log.info("[AutoAsign] {} llegó al límite de {} pero su reemplazo aún no está confirmado por Movimientos: sigue abierta.",
-                        a.getName(), canal);
-                continue;
-            }
 
-            log.info("[AutoAsign] {} llegó al límite de {} sin ventas abiertas → deja de monitorearse.", a.getName(), canal);
+            Canal propio = canalDe(a, canal);
+            log.info("[AutoAsign] {} llegó al límite de {} sin ventas abiertas → se cierra primero, luego se abre la siguiente. "
+                            + "(cupo restante {}, saldo {}, retiros pedidos sin confirmar: corresponsal {} / cajero {}; el cierre NO depende de que se confirmen)",
+                    a.getName(), propio, VentanaCupoP2P.cupoHoy(a, propio), bal(a),
+                    retiroCorrPendCiclo.getOrDefault(a.getId(), 0.0), retiroCajPendCiclo.getOrDefault(a.getId(), 0.0));
             desactivar(a);
             cambiadas.add(a);
         }
@@ -779,6 +844,7 @@ public class AsignacionAutomaticaService {
                 .filter(a -> !Boolean.TRUE.equals(a.getActivaParaP2P()))
                 .filter(a -> !Boolean.TRUE.equals(a.getBloqueada()))
                 .filter(a -> a.getBankType() == BankType.BANCOLOMBIA)
+                .filter(a -> !enEnfriamiento(a))
                 .collect(Collectors.toList());
         // De día se busca primero por corresponsal; si no queda ninguna con cupo, por cajero (se adelanta el cajero).
         // De noche solo cajero.
@@ -791,7 +857,7 @@ public class AsignacionAutomaticaService {
                     .orElse(null);
             elegido = Canal.CORRESPONSAL;
         }
-        if (next == null) {
+        if (next == null && cajeroHabilitado) {
             next = candidatas.stream()
                     .filter(a -> espacio(a, Canal.CAJERO) >= SUBLIMITE_ACTIVAR)
                     .min(Comparator.comparingDouble(a -> espacio(a, Canal.CAJERO)))
@@ -814,12 +880,14 @@ public class AsignacionAutomaticaService {
         next.setActivaParaP2P(true);
         next.setCupoTipoP2P(marca(elegido));
         canalesCiclo.put(next.getId(), elegido); // en este mismo ciclo ya cuenta con su canal
+        activadasPorAuto.put(next.getId(), reloj.millis());
         cuentaP2PSyncService.sincronizar(next, antes);
         log.info("[AutoAsign] Activada la siguiente cuenta COP: {} (por {}).", next.getName(), elegido);
         return next;
     }
 
     private void desactivar(AccountCop acc) {
+        if (acc.getId() != null) activadasPorAuto.remove(acc.getId());
         boolean antes = Boolean.TRUE.equals(acc.getActivaParaP2P());
         acc.setActivaParaP2P(false);
         cuentaP2PSyncService.sincronizar(acc, antes);

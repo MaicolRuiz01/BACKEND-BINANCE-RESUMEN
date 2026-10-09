@@ -8,6 +8,7 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+@org.hibernate.annotations.DynamicUpdate // solo se escriben las columnas que cambiaron (ver AccountCop)
 @Data
 @Entity
 @AllArgsConstructor

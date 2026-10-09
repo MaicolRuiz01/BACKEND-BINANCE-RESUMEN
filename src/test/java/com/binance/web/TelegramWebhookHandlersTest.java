@@ -159,7 +159,8 @@ public class TelegramWebhookHandlersTest {
 
         handleCompletedTodo.invoke(webhookService, "cb1", "completed_todo:42", 555L, 900);
 
-        verify(telegramService).answerCallbackQuery(eq("cb1"), contains("Cupo diario de CAJERO agotado"));
+        // Desde el 25/09 el callback se responde de inmediato (el boton no queda cargando) y el error se manda como mensaje.
+        verify(telegramService).sendMessage(eq("555"), contains("Cupo diario de CAJERO agotado"));
         verify(telegramService, never()).editMessageTextOnly(any(), any(), any());
         verify(retiradorService, never()).enviarRecordatorioCaja(any());
     }

@@ -58,10 +58,10 @@ class TopeCuentasActivasControllerTest {
     }
 
     @Test
-    void conOchoActivas_noDejaActivarUnaBancolombiaMas() {
+    void conSieteActivas_noDejaActivarUnaBancolombiaMas() {
         AccountCop nueva = cuenta(30, BankType.BANCOLOMBIA, false);
         when(accountCopService.findByIdAccountCop(30)).thenReturn(nueva);
-        when(accountCopRepository.findByBankType(BankType.BANCOLOMBIA)).thenReturn(activas(8));
+        when(accountCopRepository.findByBankType(BankType.BANCOLOMBIA)).thenReturn(activas(7));
 
         ResponseEntity<?> r = controller.toggleActivaParaP2P(30);
 
@@ -72,10 +72,10 @@ class TopeCuentasActivasControllerTest {
     }
 
     @Test
-    void conSieteActivas_siDejaActivarLaOctava() {
+    void conSeisActivas_siDejaActivarLaSeptima() {
         AccountCop nueva = cuenta(30, BankType.BANCOLOMBIA, false);
         when(accountCopService.findByIdAccountCop(30)).thenReturn(nueva);
-        when(accountCopRepository.findByBankType(BankType.BANCOLOMBIA)).thenReturn(activas(7));
+        when(accountCopRepository.findByBankType(BankType.BANCOLOMBIA)).thenReturn(activas(6));
 
         ResponseEntity<?> r = controller.toggleActivaParaP2P(30);
 
@@ -85,7 +85,7 @@ class TopeCuentasActivasControllerTest {
     }
 
     @Test
-    void desactivar_conOchoActivas_siempreSePermite() {
+    void desactivar_conSieteActivas_siempreSePermite() {
         AccountCop activa = cuenta(1, BankType.BANCOLOMBIA, true);
         when(accountCopService.findByIdAccountCop(1)).thenReturn(activa);
 
