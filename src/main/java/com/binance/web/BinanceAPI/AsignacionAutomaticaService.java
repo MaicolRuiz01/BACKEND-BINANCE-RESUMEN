@@ -63,8 +63,9 @@ import lombok.extern.slf4j.Slf4j;
  *     hasta llenar su cupo de corresponsal completo de mañana, descontando del saldo todo lo ya pedido para retirar
  *     (esos retiros gastan el cupo de hoy, no el de mañana). Solo se usa mientras no haya ninguna candidata con
  *     cupo de hoy: siempre se prefiere hoy sobre mañana. La cuenta queda marcada CORRESPONSAL.
- *     SALDO PARA CAJERO: al medir el espacio de cajero se resta del saldo lo ya pedido para retirar por
- *     CORRESPONSAL y aún sin completar (11,5M con 10M pedidos = 1,5M). Al revés NO: un retiro pendiente del mismo
+ *     SALDO PARA CAJERO: DE NOCHE (desde las 18:30) al medir el espacio de cajero se resta del saldo lo ya pedido
+ *     para retirar por CORRESPONSAL y aún sin completar (11,5M con 10M pedidos = 1,5M). DE DÍA no se resta: una
+ *     cuenta que llenó su corresponsal no recibe más ventas hasta que el retiro se complete. Al revés NO: un retiro pendiente del mismo
  *     canal no devuelve cupo, el cupo de corresponsal sigue gastado hasta que se complete. Y una cuenta con 12M
  *     que aún no se retiró NO tiene cupo de corresponsal (cupo − saldo ya es negativo).
  *  5) SELECCIÓN DE CUENTAS: si NO hay ninguna cuenta activa en P2P, el Auto elige y activa las 7 más
@@ -189,6 +190,8 @@ public class AsignacionAutomaticaService {
     private volatile Map<Integer, Canal> canalesCiclo = new HashMap<>();
     private volatile Map<Integer, Double> retiroCorrPendCiclo = new HashMap<>();
     private volatile Map<Integer, Double> retiroCajPendCiclo = new HashMap<>();
+    /** Canal de la hora del ciclo en curso (corresponsal de día, cajero desde las 18:30). */
+    private volatile Canal porHoraCiclo = Canal.CORRESPONSAL;
     /** true cuando ya no hay NINGUNA candidata con cupo de hoy: se puede usar el cupo de corresponsal de mañana. */
     private volatile boolean mananaHabilitado;
     /**
@@ -480,7 +483,8 @@ public class AsignacionAutomaticaService {
 
     /** Rehace, para este ciclo, los retiros de corresponsal pendientes y el canal con el que trabaja cada cuenta. */
     private Canal prepararCiclo(List<AccountCop> todas, Canal porHora) {
-        // Primero los retiros pendientes: espacio() y saldoParaCanal() los leen.
+        // Primero los retiros pendientes y la hora: espacio() y saldoParaCanal() los leen.
+        porHoraCiclo = porHora;
         retiroCorrPendCiclo = retirosPendientes(false);
         retiroCajPendCiclo = retirosPendientes(true);
         cajeroHabilitado = porHora == Canal.CAJERO || !hayCandidataDeCorresponsal(todas);
@@ -561,7 +565,11 @@ public class AsignacionAutomaticaService {
         double caj = retiroCajPendCiclo.getOrDefault(a.getId(), 0.0);
         return switch (c) {
             case CORRESPONSAL -> bal(a);                       // un retiro pendiente de este canal NO devuelve cupo
-            case CAJERO -> bal(a) - corr;                      // lo pedido por corresponsal ya tiene dueño
+            // Lo pedido por corresponsal ya tiene dueño, pero SOLO se descuenta del saldo de cajero DE NOCHE (desde las
+            // 18:30, cuando todo pasa a cajero). De día NO: una cuenta que llenó su corresponsal y ya tiene el retiro
+            // pedido NO puede recibir más ventas "por cajero" mientras el retiro no se confirma (incidente de Ana y
+            // Jose del 9/10: cruzaron 10M, se pidió su retiro y siguieron recibiendo hasta ~12,7M).
+            case CAJERO -> porHoraCiclo == Canal.CAJERO ? bal(a) - corr : bal(a);
             case CORRESPONSAL_MANANA -> bal(a) - corr - caj;   // los retiros de hoy no gastan el cupo de mañana
         };
     }

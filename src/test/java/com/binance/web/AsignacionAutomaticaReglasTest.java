@@ -1549,6 +1549,7 @@ class AsignacionAutomaticaReglasTest {
     @Test
     void saldoParaCajero_unRetiroPendienteDeCorresponsalNoDevuelveCupoDeCorresponsal() {
         // 10M de saldo y 10M pedidos por corresponsal: el cupo de corresponsal sigue gastado (no es "ya hay 10M libres").
+        horaDelDia(19, 0);   // de noche todo es cajero y ahi si se descuenta lo pedido por corresponsal
         AccountCop c = cuenta(1, 10_000, 10_000, 2_700);
         c.setCupoTipoP2P("CORRESPONSAL");
         when(accountCopRepository.findAll()).thenReturn(List.of(c));
@@ -1919,5 +1920,37 @@ class AsignacionAutomaticaReglasTest {
 
         assertEquals(false, david.getActivaParaP2P());
         assertEquals(true, ana.getActivaParaP2P());            // sin otra candidata real, Ana sigue (por cajero)
+    }
+
+    // ── El retiro pedido NO convierte de dia a una cuenta llena en una de cajero (incidente Ana y Jose, 9/10) ──
+
+    @Test
+    void deDia_unaCuentaConElCorresponsalLlenoYElRetiroPedido_noSePasaACajeroNiRecibeVentas() {
+        horaDelDia(17, 11);
+        AccountCop jose = cuenta(28, 10_322, 10_000, 2_700);   // 10M y pico, retiro de 10.000 ya pedido, sin ventas abiertas
+        jose.setCupoTipoP2P("CORRESPONSAL");
+        List<AccountCop> todas = new ArrayList<>(activasConSaldos(100, 200, 300, 400, 500, 600));
+        todas.add(jose);
+        when(accountCopRepository.findAll()).thenReturn(todas);   // ninguna candidata
+        retirosCorrPendientes(new Object[]{28, 10_000.0});
+
+        servicio.asignar(List.of(orden("nueva", 100, null)));
+
+        verify(activeOrderService, never()).upsertPreAsignacion(eq("nueva"), eq(28), any(), any());
+        org.junit.jupiter.api.Assertions.assertNotEquals("CAJERO", jose.getCupoTipoP2P());   // antes se re-marcaba CAJERO y recibia otros 2,7M
+    }
+
+    @Test
+    void deNoche_laMismaCuentaSiSigueComoCajeroConElSaldoDescontado() {
+        horaDelDia(19, 0);
+        AccountCop c = cuenta(28, 10_322, 10_000, 2_700);
+        c.setCupoTipoP2P("CORRESPONSAL");
+        when(accountCopRepository.findAll()).thenReturn(List.of(c));
+        retirosCorrPendientes(new Object[]{28, 10_000.0});
+
+        servicio.asignar(List.of());
+
+        assertEquals(true, c.getActivaParaP2P());       // 322 de saldo efectivo: le sobran 2.378 de cajero
+        assertEquals("CAJERO", c.getCupoTipoP2P());
     }
 }
