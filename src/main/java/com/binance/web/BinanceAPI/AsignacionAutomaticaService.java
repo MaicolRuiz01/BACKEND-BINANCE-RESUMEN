@@ -76,10 +76,11 @@ import lombok.extern.slf4j.Slf4j;
  *     eligen y reciben ventas del Auto (por ahora).
  *  7) CONFIRMADAS: una cuenta recién activada no recibe ventas hasta que Movimientos confirme que la
  *     abrió (evento "conexion_exitosa", ver {@link MovimientosCuentasPendientes}).
- *  8) SIEMPRE 7 QUE RECIBAN VENTAS: en cada ciclo se cuenta cuántas cuentas activas todavía pueden recibir
- *     ventas (disponible proyectado > 0, contando lo comprometido) y, si hay menos de {@link #GRUPO_OBJETIVO},
- *     se abren candidatas hasta completar. Una cuenta que se quedó sin cupo del canal deja de contar AL
- *     INSTANTE y su reposición se abre de inmediato, aunque la vieja siga activa.
+ *  8) SIEMPRE 7 CUENTAS: en cada ciclo se cuentan las cuentas que ocupan un lugar (las que todavía pueden recibir
+ *     ventas, disponible proyectado > 0, MÁS las llenas que esperan sus ventas abiertas) y, si hay menos de
+ *     {@link #GRUPO_OBJETIVO}, se abren candidatas hasta completar. Una llena CON ventas abiertas sigue ocupando su
+ *     lugar (no se abre una octava por ella). La octava solo aparece en el instante en que una cuenta llena y SIN
+ *     ventas está por cerrarse: se abre su reemplazo y, ya confirmado, esa se cierra.
  *     TOPE DE HIERRO: la reposición nunca abre cuentas por encima de {@link LimitesP2P#MAX_CUENTAS_ACTIVAS} (8)
  *     activas EN TOTAL (cuentan también las que ya no reciben ventas pero siguen vigiladas esperando sus ventas
  *     abiertas), porque el computador de Movimientos no aguanta más sesiones. Si hay que elegir, gana el tope
@@ -561,15 +562,21 @@ public class AsignacionAutomaticaService {
     }
 
     /**
-     * Cuántas cuentas del grupo cuentan como "recibiendo ventas": las que tienen espacio proyectado. Las que trabajan
-     * con el cupo de MAÑANA solo cuentan para completar el objetivo: si ya hay 7 con cupo de hoy, no suman (el cupo de
-     * hoy siempre se prefiere y no deben sobrar cuentas por culpa de mañana).
+     * Cuántas cuentas ocupan un lugar de las {@link #GRUPO_OBJETIVO}: las que tienen espacio proyectado (reciben
+     * ventas) Y las llenas que todavía esperan sus ventas abiertas. Una llena que espera plata sigue ocupando su
+     * lugar: NO se abre una octava por ella, y la octava solo se abre en el momento en que una cuenta llena y SIN
+     * ventas está por cerrarse (ver cerrarLlenas). Una llena sin ventas no cuenta: ya se va.
+     * Las que trabajan con el cupo de MAÑANA solo cuentan para completar el objetivo: si ya hay 7 con cupo de hoy,
+     * no suman (el cupo de hoy siempre se prefiere y no deben sobrar cuentas por culpa de mañana).
      */
     private long contarRecibiendo(List<AccountCop> cuentas, EnCurso enCurso, Canal canal) {
         long hoy = 0, manana = 0;
         for (AccountCop a : cuentas) {
-            if (!esDelGrupo(a) || disponible(a, enCurso.comprometido(), canal) <= 0) continue;
-            if (canalDe(a, canal) == Canal.CORRESPONSAL_MANANA) manana++; else hoy++;
+            if (!esDelGrupo(a)) continue;
+            boolean recibe = disponible(a, enCurso.comprometido(), canal) > 0;
+            boolean esperaVentas = enCurso.conVentas().contains(a.getId());
+            if (!recibe && !esperaVentas) continue; // llena y sin ventas: ya se va, no ocupa lugar
+            if (recibe && canalDe(a, canal) == Canal.CORRESPONSAL_MANANA) manana++; else hoy++;
         }
         return hoy + Math.min(manana, Math.max(0, GRUPO_OBJETIVO - hoy));
     }

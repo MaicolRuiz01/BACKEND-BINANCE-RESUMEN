@@ -697,7 +697,7 @@ class AsignacionAutomaticaReglasTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void casoYeiner_sinCupoConVentaAbierta_seQuedaMonitoreada_perolaReposicionSeAbreYa() {
+    void casoYeiner_sinCupoConVentaAbierta_seQuedaMonitoreadaYOcupaSuLugar_sinAbrirOctava() {
         // Yeiner: cupo de corresponsal en 0 y 401 en curso. Las otras 6 reciben ventas. Hay una candidata.
         AccountCop yeiner = cuenta(1, 44, 0, 0);   // sin cupo de corresponsal NI de cajero
         List<AccountCop> otras = activas(2, 6);
@@ -708,9 +708,8 @@ class AsignacionAutomaticaReglasTest {
         servicio.asignar(List.of());
 
         assertEquals(true, yeiner.getActivaParaP2P());                    // sigue monitoreada
-        assertEquals(true, cand.get(0).getActivaParaP2P());               // la reposicion ya esta abierta
-        verify(cuentaP2PSyncService).sincronizar(cand.get(0), false);
-        verify(cuentaP2PSyncService, never()).sincronizar(eq(yeiner), eq(true));
+        assertEquals(false, cand.get(0).getActivaParaP2P());              // espera su plata: no se abre una octava por ella
+        verify(cuentaP2PSyncService, never()).sincronizar(any(), any(Boolean.class));
     }
 
     @Test
@@ -763,7 +762,7 @@ class AsignacionAutomaticaReglasTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void cuentaConCupoProyectadoAgotadoPorVentasAbiertas_noCuentaEntreLasSiete_yseRepone() {
+    void cuentaConCupoProyectadoAgotadoPorVentasAbiertas_ocupaUnLugarDeLasSiete_noSeRepone() {
         // 9.500 de saldo con 600 en curso: proyectado -100, ya no recibe, aunque su cupo real aun no se cumplio.
         AccountCop casi = cuenta(1, 9_500, 10_000, 2_700);
         List<AccountCop> otras = activas(2, 6);
@@ -773,7 +772,7 @@ class AsignacionAutomaticaReglasTest {
 
         servicio.asignar(List.of());
 
-        assertEquals(true, cand.get(0).getActivaParaP2P());
+        assertEquals(false, cand.get(0).getActivaParaP2P());   // la de las ventas abiertas ocupa su lugar
         assertEquals(true, casi.getActivaParaP2P());
     }
 
@@ -889,7 +888,7 @@ class AsignacionAutomaticaReglasTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void alas1830_unaCuentaConVentaAbierta_seQuedaMonitoreadaPeroYaNoCuenta() {
+    void alas1830_unaCuentaConVentaAbierta_seQuedaMonitoreadaYOcupaSuLugar_noSeAbreOctava() {
         AccountCop conVenta = cuenta(1, 5_000, 10_000, 2_700);
         List<AccountCop> resto = new ArrayList<>();
         for (int i = 2; i <= 7; i++) resto.add(cuenta(i, 500, 10_000, 2_700)); // cajero: espacio 2.200
@@ -901,7 +900,7 @@ class AsignacionAutomaticaReglasTest {
         servicio.asignar(List.of());
 
         assertEquals(true, conVenta.getActivaParaP2P());          // sigue vigilada (espera su venta)
-        assertEquals(1, nuevas.stream().filter(a -> Boolean.TRUE.equals(a.getActivaParaP2P())).count()); // y su reemplazo ya esta abierto (la mas cercana al limite)
+        assertEquals(0, nuevas.stream().filter(a -> Boolean.TRUE.equals(a.getActivaParaP2P())).count()); // y ocupa su lugar: no se abre una octava por ella
     }
 
     // ── Cambio de canal: las cuentas que siguen sirviendo cambian de marca SIN avisar a Movimientos ──
@@ -1215,7 +1214,7 @@ class AsignacionAutomaticaReglasTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void tope_conSeisActivas_abreSoloHastaCompletarOcho() {
+    void tope_conSeisActivas_dosEsperandoVentas_abreSoloUnaParaLlegarASiete() {
         horaDelDia(19, 0);
         List<AccountCop> recibiendo = new ArrayList<>();
         for (int i = 1; i <= 4; i++) recibiendo.add(cuenta(i, 500, 10_000, 2_700));
@@ -1229,7 +1228,7 @@ class AsignacionAutomaticaReglasTest {
 
         long activasAhora = juntas(recibiendo, esperando, cand).stream()
                 .filter(a -> Boolean.TRUE.equals(a.getActivaParaP2P())).count();
-        assertEquals(8, activasAhora);   // 6 + 2 nuevas; el objetivo de 7 recibiendo no puede pasar del tope
+        assertEquals(7, activasAhora);   // 4 recibiendo + 2 esperando ventas ya ocupan 6 lugares: falta uno, no se llega a 8
     }
 
     @Test
@@ -1744,5 +1743,34 @@ class AsignacionAutomaticaReglasTest {
 
         assertEquals(7, cuantasActivas(cuentas));
         verify(activeOrderService).upsertPreAsignacion(eq("v1"), any(), any(), any());
+    }
+
+    // ── La octava cuenta solo existe en el instante en que una llena SIN ventas esta por cerrarse ──
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void octava_unaLlenaConVentasNoAbreOctava_peroUnaLlenaSinVentasSiLaAbreAntesDeCerrar() {
+        // 6 cuentas con espacio + 1 llena (10.100 de saldo) con una venta abierta: son 7 lugares ocupados.
+        List<AccountCop> sanas = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 6_000);
+        AccountCop llena = cuenta(7, 10_100, 10_000, 2_700);
+        List<AccountCop> todas = new ArrayList<>(sanas);
+        todas.add(llena);
+        List<AccountCop> cand = candidatas(20, 2);
+        when(accountCopRepository.findAll()).thenReturn(juntas(todas, cand));
+        when(saldosEnCursoService.calcular()).thenReturn(List.of(enCurso(7, 300, "venta")));
+
+        servicio.asignar(List.of());
+
+        assertEquals(0, cuantasActivas(cand));          // con la venta abierta: sin octava
+        assertEquals(7, cuantasActivas(todas));
+
+        // La venta se cierra: la llena ya no tiene ventas -> se abre el reemplazo (la 8a) y, confirmado, se cierra.
+        when(saldosEnCursoService.calcular()).thenReturn(List.of());
+        lenient().when(cuentasPendientes.estaPendiente(org.mockito.ArgumentMatchers.anyString())).thenReturn(false);
+        servicio.asignar(List.of());
+
+        assertEquals(1, cuantasActivas(cand));          // se abrio el reemplazo
+        assertEquals(false, llena.getActivaParaP2P());  // y la llena se cerro
+        assertEquals(7, cuantasActivas(juntas(todas, cand)));
     }
 }
