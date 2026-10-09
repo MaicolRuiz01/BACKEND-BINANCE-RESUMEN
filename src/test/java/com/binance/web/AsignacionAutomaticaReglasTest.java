@@ -2105,4 +2105,39 @@ class AsignacionAutomaticaReglasTest {
 
         assertEquals(7, cuantasActivas(todas));                  // ya eran cajero: no se cierran a mitad de camino
     }
+
+    // ── La regla del cajero es UNA sola: igual de dia (sin corresponsal para traer) que de noche ──
+
+    private java.util.Set<Integer> elegidasComoCajeroA(int hora, int minuto) {
+        horaDelDia(hora, minuto);
+        List<AccountCop> activas = new ArrayList<>();
+        for (int i = 1; i <= 6; i++) activas.add(cuenta(i, 300, 0, 2_700));     // 6 activas sin corresponsal
+        activas.set(0, cuenta(1, 3_000, 0, 2_700));                             // una se llena (cajero: sin espacio) y se da de baja
+        AccountCop a = cuenta(50, 700, 0, 2_700);   a.setActivaParaP2P(false);  // cajero: 2.000 de espacio
+        AccountCop b = cuenta(51, 100, 0, 2_700);   b.setActivaParaP2P(false);  // 2.600
+        AccountCop c = cuenta(52, 1_200, 0, 2_700); c.setActivaParaP2P(false);  // 1.500: la mas cerca de cumplir con espacio
+        AccountCop sinEspacio = cuenta(53, 2_000, 0, 2_700); sinEspacio.setActivaParaP2P(false);   // 700: no alcanza el minimo
+        AccountCop bloqueada = cuenta(54, 1_200, 0, 2_700);  bloqueada.setActivaParaP2P(false); bloqueada.setBloqueada(true);
+        when(accountCopRepository.findAll()).thenReturn(juntas(activas, List.of(a, b, c, sinEspacio, bloqueada)));
+
+        servicio.asignar(List.of());
+
+        java.util.Set<Integer> abiertas = new java.util.TreeSet<>();
+        for (AccountCop x : List.of(a, b, c, sinEspacio, bloqueada)) {
+            if (Boolean.TRUE.equals(x.getActivaParaP2P())) abiertas.add(x.getId());
+        }
+        return abiertas;
+    }
+
+    @Test
+    void reglaDelCajero_esLaMismaDeDiaSinCorresponsalQueDeNoche() {
+        java.util.Set<Integer> deDia = elegidasComoCajeroA(13, 0);
+        org.springframework.test.util.ReflectionTestUtils.setField(servicio, "canalAplicado", new java.util.concurrent.ConcurrentHashMap<Integer, Canal>());
+        java.util.Set<Integer> deNoche = elegidasComoCajeroA(19, 0);
+
+        // Faltan 2 cuentas: entran las 2 mas cerca de su limite que cumplen el espacio minimo (la de 1.500 y la de 2.000).
+        // No entra la de 700 (sin espacio minimo), ni la bloqueada, ni la de 2.600 (mas lejos del limite).
+        assertEquals(java.util.Set.of(50, 52), deDia);
+        assertEquals(deDia, deNoche);   // exactamente la misma regla de dia (sin corresponsal) que de noche
+    }
 }
