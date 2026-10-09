@@ -48,6 +48,16 @@ public final class P2PSseNotificador {
         }));
     }
 
+    /** Llegó una venta grande: aviso flotante en las pantallas (sin agrupar: cada venta cuenta). */
+    public static void ventaGrande(java.util.Map<String, Object> payload) {
+        trasCommit(() -> {
+            P2PSseController sse = P2PSseController.INSTANCE;
+            if (sse != null) {
+                try { sse.broadcastVentaGrande(payload); } catch (Exception ignored) {}
+            }
+        });
+    }
+
     /** Terminó un envío automático de la cuenta por el chat (salió, falló o no hacía falta). */
     public static void chatEnvioActualizado() {
         trasCommit(() -> agrupar(chatPendiente, () -> {

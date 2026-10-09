@@ -168,6 +168,26 @@ public class P2PSseController {
     }
 
     /**
+     * Avisa a todas las pantallas que llegó una venta GRANDE (por ejemplo, más de $5M): las pantallas muestran una
+     * notificación flotante que no se quita sola. El payload dice el monto, la orden y si se asignó o quedó sin asignar.
+     */
+    public void broadcastVentaGrande(Map<String, Object> payload) {
+        if (emitters.isEmpty()) return;
+
+        List<SseEmitter> dead = new ArrayList<>();
+        for (SseEmitter emitter : emitters) {
+            try {
+                emitter.send(SseEmitter.event().name("venta-grande").data(payload));
+            } catch (Exception e) {
+                dead.add(emitter);
+                try { emitter.complete(); } catch (Exception ignored) {}
+            }
+        }
+        emitters.removeAll(dead);
+        log.info("[SSE] Aviso de venta grande: {}", payload);
+    }
+
+    /**
      * Avisa que terminó (bien o mal) un envío automático de cuenta por el chat: las pantallas actualizan al
      * instante el "Enviando cuenta…" / "Cuenta enviada" en vez de esperar su consulta periódica.
      */
