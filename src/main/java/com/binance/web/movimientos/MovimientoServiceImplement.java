@@ -35,6 +35,8 @@ import jakarta.transaction.Transactional;
 @Service
 public class MovimientoServiceImplement implements MovimientoService {
 
+	@jakarta.persistence.PersistenceContext
+	private jakarta.persistence.EntityManager entityManager;
 	@Autowired
 	private MovimientoRepository movimientoRepository;
 	@Autowired
@@ -67,6 +69,44 @@ public class MovimientoServiceImplement implements MovimientoService {
 	 * null — retiros manuales viejos, u otros tipos de movimiento), o si esa
 	 * solicitud nunca tuvo mensaje privado de Telegram.
 	 */
+	/**
+	 * Si al eliminar este movimiento la solicitud ya no tiene NINGUNO vivo, el retiro no ocurrio: la solicitud pasa de
+	 * COMPLETADO a CANCELADO (antes quedaba "completada" sin movimientos, y sus botones y su historial mentian).
+	 */
+	private void cancelarSolicitudSiSeQuedoSinMovimientos(Long solicitudRetiroId) {
+		if (solicitudRetiroId == null) return;
+		SolicitudRetiro solicitud = solicitudRetiroRepository.findById(solicitudRetiroId).orElse(null);
+		if (solicitud == null) return;
+		if (!movimientoRepository.findBySolicitudRetiroId(solicitudRetiroId).isEmpty()) return;
+		if (solicitud.getEstado() == com.binance.web.Entity.EstadoSolicitud.COMPLETADO) {
+			solicitud.setEstado(com.binance.web.Entity.EstadoSolicitud.CANCELADO);
+			solicitudRetiroRepository.save(solicitud);
+		}
+	}
+
+	/** Ejecuta la accion cuando la transaccion confirma (o ya, si no hay transaccion). Los errores solo se registran. */
+	private void despuesDelCommit(Runnable accion) {
+		Runnable segura = () -> {
+			try {
+				accion.run();
+			} catch (Exception e) {
+				org.slf4j.LoggerFactory.getLogger(MovimientoServiceImplement.class)
+						.error("[Movimientos] Fallo una accion posterior al commit (Telegram): {}", e.getMessage());
+			}
+		};
+		if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+			org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+					new org.springframework.transaction.support.TransactionSynchronization() {
+						@Override
+						public void afterCommit() {
+							segura.run();
+						}
+					});
+		} else {
+			segura.run();
+		}
+	}
+
 	private void sincronizarMensajeTelegramRetiro(Long solicitudRetiroId) {
 		if (solicitudRetiroId == null) return;
 
@@ -1539,6 +1579,14 @@ public class MovimientoServiceImplement implements MovimientoService {
 	    if (tipo.startsWith("RETIRO")) {
 	        // Revertir EXACTO lo que hizo RegistrarRetiro:
 	        AccountCop cuenta = m.getCuentaOrigen();
+	        if (cuenta != null && cuenta.getId() != null) {
+	            // Bloqueo de fila y lectura fresca, igual que al confirmar el retiro (RetiradorServiceImpl.confirmarInterno):
+	            // sin esto, el saldo que se devuelve se calculaba sobre un valor viejo y otra operacion casi simultanea
+	            // sobre la misma cuenta podia pisarlo (incidente del retiro de Sebastian eliminado el 9/10/2026).
+	            AccountCop bloqueada = accountCopRepository.findByIdForUpdate(cuenta.getId()).orElse(cuenta);
+	            entityManager.refresh(bloqueada);
+	            cuenta = bloqueada;
+	        }
 	        Efectivo caja = m.getCaja();
 	        double comision = m.getComision() != null ? m.getComision() : 0.0;
 	        // Solo devolver el 4x1000 si REALMENTE se descontó (Bancolombia pendiente = aún no).
@@ -1584,7 +1632,9 @@ public class MovimientoServiceImplement implements MovimientoService {
 
 	        Long solicitudRetiroId = m.getSolicitudRetiroId();
 	        movimientoRepository.delete(m);
-	        sincronizarMensajeTelegramRetiro(solicitudRetiroId);
+	        cancelarSolicitudSiSeQuedoSinMovimientos(solicitudRetiroId);
+	        // Telegram es una llamada HTTP lenta y puede fallar: va DESPUES del commit y nunca puede tumbar la reversa.
+	        despuesDelCommit(() -> sincronizarMensajeTelegramRetiro(solicitudRetiroId));
 	        return;
 	    }
 

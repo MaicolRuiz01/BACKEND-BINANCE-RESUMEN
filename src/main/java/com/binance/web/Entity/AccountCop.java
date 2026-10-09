@@ -20,6 +20,13 @@ import jakarta.persistence.EntityListeners;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
 
+/**
+ * @DynamicUpdate: el UPDATE incluye SOLO las columnas que cambiaron. Sin esto, cualquier save() de un objeto leído
+ * hace unos segundos (la asignación automática, una edición, la conciliación) reescribía TODAS las columnas, incluido
+ * el saldo y los cupos, con el valor viejo y deshacía en silencio un retiro, una venta o una reversa que se acababa
+ * de aplicar en paralelo.
+ */
+@org.hibernate.annotations.DynamicUpdate
 @Entity
 @Table(name = "account_cop")
 @EntityListeners(com.binance.web.BinanceAPI.AccountCopSaldoListener.class)

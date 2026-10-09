@@ -138,7 +138,18 @@ public class TelegramWebhookService {
         // 1. Botón inline presionado
         if (update.containsKey("callback_query")) {
             Map<String, Object> callbackQuery = (Map<String, Object>) update.get("callback_query");
-            handleCallbackQuery(callbackQuery);
+            try {
+                handleCallbackQuery(callbackQuery);
+            } catch (Exception e) {
+                // Si algo falla, el boton NO puede quedarse cargando: se responde el callback con un aviso.
+                log.error("[Webhook] Fallo el boton '{}': {}", callbackQuery.get("data"), e.getMessage(), e);
+                try {
+                    telegramService.answerCallbackQuery((String) callbackQuery.get("id"),
+                            "⚠️ No se pudo procesar. Intenta de nuevo en unos segundos.");
+                } catch (Exception ignored) {
+                    // answerCallbackQuery ya registra sus propios errores
+                }
+            }
             return;
         }
 
