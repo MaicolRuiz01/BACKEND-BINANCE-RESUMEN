@@ -685,8 +685,11 @@ public class AsignacionAutomaticaService {
             if (espacio(a, canalDe(a, canal)) > LIMITE_LLENA) continue; // todavía tiene espacio (en su canal)
             if (enCurso.conVentas().contains(a.getId())) continue; // espera plata: se queda hasta que se cierre
 
-            log.info("[AutoAsign] {} llegó al límite de {} sin ventas abiertas → se cierra primero, luego se abre la siguiente.",
-                    a.getName(), canal);
+            Canal propio = canalDe(a, canal);
+            log.info("[AutoAsign] {} llegó al límite de {} sin ventas abiertas → se cierra primero, luego se abre la siguiente. "
+                            + "(cupo restante {}, saldo {}, retiros pedidos sin confirmar: corresponsal {} / cajero {}; el cierre NO depende de que se confirmen)",
+                    a.getName(), propio, VentanaCupoP2P.cupoHoy(a, propio), bal(a),
+                    retiroCorrPendCiclo.getOrDefault(a.getId(), 0.0), retiroCajPendCiclo.getOrDefault(a.getId(), 0.0));
             desactivar(a);
             cambiadas.add(a);
         }
