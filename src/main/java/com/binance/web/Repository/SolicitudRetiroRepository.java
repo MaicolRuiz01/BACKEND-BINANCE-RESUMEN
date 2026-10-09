@@ -136,6 +136,15 @@ public interface SolicitudRetiroRepository extends JpaRepository<SolicitudRetiro
     """)
     List<Object[]> sumMontoCorresponsalPendientePorCuenta();
 
+    /** Igual que sumMontoCorresponsalPendientePorCuenta pero para los retiros por CAJERO. */
+    @Query("""
+        SELECT d.cuentaCop.id, COALESCE(SUM(COALESCE(d.montoCajero, 0)), 0)
+        FROM DetalleRetiro d
+        WHERE d.solicitud.estado IN ('SIN_ASIGNAR', 'PENDIENTE')
+        GROUP BY d.cuentaCop.id
+    """)
+    List<Object[]> sumMontoCajeroPendientePorCuenta();
+
     /** Detalle completo de todas las solicitudes pendientes (para armar el desglose por cuenta). */
     @Query("""
         SELECT d FROM DetalleRetiro d

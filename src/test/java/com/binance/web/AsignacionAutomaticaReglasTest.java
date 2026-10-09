@@ -1653,4 +1653,96 @@ class AsignacionAutomaticaReglasTest {
 
         verify(sse, org.mockito.Mockito.times(1)).broadcastVentaGrande(any());
     }
+
+    // ── Sin cupo de hoy: se usa el cupo de corresponsal de manana ──
+
+    private AccountCop sinCupoHoy(int id, double saldo) {
+        return cuenta(id, saldo, 0, 0);   // corresponsal y cajero de hoy en 0
+    }
+
+    private void retirosCajPendientes(Object[]... filas) {
+        when(solicitudRetiroRepository.sumMontoCajeroPendientePorCuenta()).thenReturn(List.of(filas));
+    }
+
+    @Test
+    void manana_conTodosLosCuposDeHoyAgotados_laCuentaSigueYRecibeVentasContraManana() {
+        horaDelDia(21, 0);
+        List<AccountCop> cuentas = new ArrayList<>();
+        for (int i = 1; i <= 7; i++) { AccountCop c = sinCupoHoy(i, 500); c.setCupoTipoP2P("CAJERO"); cuentas.add(c); }
+        when(accountCopRepository.findAll()).thenReturn(cuentas);
+
+        servicio.asignar(List.of(orden("v1", 3_000, null)));
+
+        assertEquals(7, cuantasActivas(cuentas));                        // ninguna se cierra
+        verify(activeOrderService).upsertPreAsignacion(eq("v1"), any(), any(), any());
+        assertEquals("CORRESPONSAL", cuentas.get(0).getCupoTipoP2P());   // el cupo de manana se marca como corresponsal
+    }
+
+    @Test
+    void manana_siHayUnaCandidataConCupoDeHoy_noSeUsaManana() {
+        horaDelDia(21, 0);
+        List<AccountCop> activas = new ArrayList<>();
+        for (int i = 1; i <= 6; i++) activas.add(sinCupoHoy(i, 500));
+        AccountCop conCajero = cuenta(20, 100, 0, 2_700);
+        conCajero.setActivaParaP2P(false);
+        when(accountCopRepository.findAll()).thenReturn(juntas(activas, List.of(conCajero)));
+
+        servicio.asignar(List.of());
+
+        // Hay una con cajero de hoy: se abre esa y las sin cupo de hoy NO cuentan como recibiendo (mañana apagado).
+        assertEquals(true, conCajero.getActivaParaP2P());
+        assertEquals("CAJERO", conCajero.getCupoTipoP2P());
+    }
+
+    @Test
+    void manana_siNoHayCandidatas_seAbrenCuentasPorElCupoDeManana() {
+        horaDelDia(21, 0);
+        List<AccountCop> activas = new ArrayList<>();
+        for (int i = 1; i <= 4; i++) activas.add(sinCupoHoy(i, 500));
+        List<AccountCop> cand = new ArrayList<>();
+        for (int i = 0; i < 5; i++) { AccountCop c = sinCupoHoy(20 + i, 200); c.setActivaParaP2P(false); cand.add(c); }
+        when(accountCopRepository.findAll()).thenReturn(juntas(activas, cand));
+
+        servicio.asignar(List.of());
+
+        assertEquals(3, cuantasActivas(cand));                  // completa las 7
+        assertEquals(3, cand.stream().filter(c -> "CORRESPONSAL".equals(c.getCupoTipoP2P())).count());
+    }
+
+    @Test
+    void manana_losRetirosPendientesDeHoySeDescuentanDelSaldo() {
+        horaDelDia(21, 0);
+        AccountCop c = cuenta(1, 12_000, 0, 2_700);              // 12M de saldo
+        when(accountCopRepository.findAll()).thenReturn(List.of(c));
+        retirosCajPendientes(new Object[]{1, 2_700.0});
+        retirosCorrPendientes(new Object[]{1, 9_000.0});         // 11,7M ya pedidos: quedan 300 de saldo contra manana
+
+        servicio.asignar(List.of());
+
+        assertEquals(true, c.getActivaParaP2P());
+    }
+
+    @Test
+    void manana_cuentaConElCupoDeMananaLleno_seCierra() {
+        horaDelDia(21, 0);
+        AccountCop c = sinCupoHoy(1, 10_200);                    // ya pasa los 10M de manana y sin retiros pedidos
+        when(accountCopRepository.findAll()).thenReturn(List.of(c));
+
+        servicio.asignar(List.of());
+
+        assertEquals(false, c.getActivaParaP2P());
+    }
+
+    @Test
+    void manana_deDiaTambien_conCorresponsalYCajeroAgotados() {
+        horaDelDia(14, 0);
+        List<AccountCop> cuentas = new ArrayList<>();
+        for (int i = 1; i <= 7; i++) cuentas.add(sinCupoHoy(i, 300));
+        when(accountCopRepository.findAll()).thenReturn(cuentas);
+
+        servicio.asignar(List.of(orden("v1", 2_000, null)));
+
+        assertEquals(7, cuantasActivas(cuentas));
+        verify(activeOrderService).upsertPreAsignacion(eq("v1"), any(), any(), any());
+    }
 }
