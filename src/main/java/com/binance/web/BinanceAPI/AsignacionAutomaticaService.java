@@ -546,8 +546,23 @@ public class AsignacionAutomaticaService {
      */
     private Canal derivarCanal(AccountCop a, Canal porHora) {
         if (porHora == Canal.CORRESPONSAL && espacio(a, Canal.CORRESPONSAL) >= SUBLIMITE_ACTIVAR) return Canal.CORRESPONSAL;
-        if (cajeroHabilitado && espacio(a, Canal.CAJERO) > LIMITE_LLENA) return Canal.CAJERO;
-        if (mananaHabilitado && espacio(a, Canal.CORRESPONSAL_MANANA) > LIMITE_LLENA) return Canal.CORRESPONSAL_MANANA;
+        // PASAR a cajero (o a mañana) exige el mismo espacio mínimo que traer una cuenta nueva: una cuenta que acaba de
+        // llenar su corresponsal NO se queda "de cajero" por tener unos pesos de sobra; si no cumple, se da de baja y
+        // se trae la mejor candidata (la más cerca de su límite que sí tenga espacio). Una cuenta que YA trabaja por
+        // ese canal sigue mientras le quede algo (no se cierra a mitad de camino).
+        Canal previo = a.getId() != null ? canalAplicado.get(a.getId()) : null;
+        boolean yaEsCajero = previo == Canal.CAJERO || "CAJERO".equals(a.getCupoTipoP2P());
+        double espacioCajero = espacio(a, Canal.CAJERO);
+        // De noche el cajero es el canal de base (no se pasa de uno a otro): basta con que le quede algo.
+        boolean sigueOEsDeBase = yaEsCajero || porHora == Canal.CAJERO;
+        if (cajeroHabilitado && (sigueOEsDeBase ? espacioCajero > LIMITE_LLENA : espacioCajero >= SUBLIMITE_ACTIVAR)) {
+            return Canal.CAJERO;
+        }
+        boolean yaEsManana = previo == Canal.CORRESPONSAL_MANANA;
+        double espacioManana = espacio(a, Canal.CORRESPONSAL_MANANA);
+        if (mananaHabilitado && (yaEsManana ? espacioManana > LIMITE_LLENA : espacioManana >= SUBLIMITE_ACTIVAR)) {
+            return Canal.CORRESPONSAL_MANANA;
+        }
         return porHora;
     }
 

@@ -1416,7 +1416,7 @@ class AsignacionAutomaticaReglasTest {
         horaDelDia(13, 0);
         // 5 activas y 3 candidatas: ninguna tiene cupo de corresponsal (0), todas tienen cajero.
         List<AccountCop> activas = new ArrayList<>();
-        for (int i = 1; i <= 5; i++) activas.add(cuenta(i, 500 * i, 0, 2_700));
+        for (int i = 1; i <= 5; i++) activas.add(cuenta(i, 100 * i, 0, 2_700));
         List<AccountCop> cand = new ArrayList<>();
         for (int i = 0; i < 3; i++) cand.add(inactiva2(20 + i, 100 * (i + 1)));
         when(accountCopRepository.findAll()).thenReturn(juntas(activas, cand));
@@ -1827,7 +1827,7 @@ class AsignacionAutomaticaReglasTest {
     @SuppressWarnings("unchecked")
     void cajeroDeDia_sinCorresponsalEnNingunaCuenta_laQueAgotoElCorresponsalSiPasaACajero() {
         horaDelDia(13, 30);
-        AccountCop victor = cuenta(40, 2_459, 0, 2_700);          // sin corresponsal, con cajero
+        AccountCop victor = cuenta(40, 1_000, 0, 2_700);          // sin corresponsal, con 1.700 de cajero
         victor.setCupoTipoP2P("CORRESPONSAL");
         List<AccountCop> todas = new ArrayList<>();
         for (int i = 1; i <= 6; i++) todas.add(cuenta(i, 100 * i, 0, 2_700));   // ninguna tiene corresponsal
@@ -1976,7 +1976,7 @@ class AsignacionAutomaticaReglasTest {
     @SuppressWarnings("unchecked")
     void reglaDeOro_laSeptimaQueLlenaSuCorresponsal_sinMasCandidatasDeCorresponsal_sigueComoCajero() {
         horaDelDia(13, 0);
-        AccountCop septima = cuenta(40, 2_459, 0, 2_700);        // llena su corresponsal; le queda cajero
+        AccountCop septima = cuenta(40, 1_000, 0, 2_700);        // llena su corresponsal; le quedan 1.700 de cajero
         septima.setCupoTipoP2P("CORRESPONSAL");
         List<AccountCop> todas = new ArrayList<>(activasConSaldos(100, 200, 300, 400, 500, 600));  // las otras 6, con corresponsal
         todas.add(septima);
@@ -2065,5 +2065,44 @@ class AsignacionAutomaticaReglasTest {
         servicio.asignar(List.of());
 
         assertEquals(4, cuantasActivas(todas));                                   // las 3 sin cupo de hoy siguen contra el de manana
+    }
+
+    // ── Matiz: la cuenta que se llena no se queda "de cajero" solo por ser la que estaba; se trae la mejor candidata ──
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void matiz_laQueSeLlenaNoSeQuedaComoCajero_seTraeLaMasCercanaAlLimiteConEspacio() {
+        horaDelDia(13, 0);
+        // Lady: 10M exactos, su retiro ya pedido; sin cajero que ofrecer (saldo 10.000 contra 2.700).
+        AccountCop lady = cuenta(30, 10_000, 10_000, 2_700);
+        lady.setCupoTipoP2P("CORRESPONSAL");
+        List<AccountCop> todas = new ArrayList<>();
+        for (int i = 1; i <= 6; i++) todas.add(cuenta(i, 300, 0, 2_700));   // las otras 6 ya sin corresponsal
+        todas.add(lady);
+        AccountCop dosMillones = cuenta(50, 700, 0, 2_700);   // cajero: 2.000 de espacio, a punto de cumplir
+        dosMillones.setActivaParaP2P(false);
+        AccountCop casiVacia = cuenta(51, 100, 0, 2_700);     // cajero: 2.600 de espacio
+        casiVacia.setActivaParaP2P(false);
+        when(accountCopRepository.findAll()).thenReturn(juntas(todas, List.of(dosMillones, casiVacia)));
+        retirosCorrPendientes(new Object[]{30, 10_000.0});
+
+        servicio.asignar(List.of());
+
+        assertEquals(false, lady.getActivaParaP2P());            // Lady no se queda: esta en cero
+        assertEquals(true, dosMillones.getActivaParaP2P());      // se trae la que esta mas cerca de cumplir
+        assertEquals("CAJERO", dosMillones.getCupoTipoP2P());
+        assertEquals(false, casiVacia.getActivaParaP2P());       // y no se abre otra de mas
+    }
+
+    @Test
+    void matiz_unaCuentaQueSiYaTrabajaPorCajeroSigueMientrasLeQuedeAlgo() {
+        horaDelDia(13, 0);
+        List<AccountCop> todas = new ArrayList<>();
+        for (int i = 1; i <= 7; i++) { AccountCop c = cuenta(i, 2_100, 0, 2_700); c.setCupoTipoP2P("CAJERO"); todas.add(c); }   // 600 de espacio
+        when(accountCopRepository.findAll()).thenReturn(todas);
+
+        servicio.asignar(List.of());
+
+        assertEquals(7, cuantasActivas(todas));                  // ya eran cajero: no se cierran a mitad de camino
     }
 }
