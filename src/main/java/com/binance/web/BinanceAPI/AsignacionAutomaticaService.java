@@ -52,18 +52,18 @@ import lombok.extern.slf4j.Slf4j;
  *  4) El cupo que cuenta depende de la HORA ({@link VentanaCupoP2P}): de 00:00 a 18:29 solo el de
  *     CORRESPONSAL y de 18:30 a 23:59 solo el de CAJERO. El otro canal se ignora. A las 18:30 el cambio
  *     es inmediato (en el siguiente ciclo): las cuentas sin espacio de cajero se cierran y se abren otras.
- *     REGLA DE ORO (de día): el CAJERO solo se usa cuando el cupo de CORRESPONSAL ya se agotó en TODAS las cuentas
- *     Bancolombia utilizables (activas o no; las bloqueadas y las que Movimientos no puede abrir no cuentan). Que UNA
- *     cuenta llene su corresponsal NO la pasa a cajero: se cierra y entra otra con corresponsal. Solo cuando no
- *     queda corresponsal en NINGUNA cuenta empieza el cajero (las mismas cuentas pasan a trabajar por cajero y se
- *     eligen las nuevas por cajero, con las reglas de siempre). Mientras quede corresponsal en alguna cuenta, el grupo
- *     se llena solo con cuentas de corresponsal, aunque queden menos de 7. De noche (desde las 18:30) TODAS pasan a
- *     cajero. Al día siguiente, con los cupos nuevos, vuelve solo a corresponsal.
- *     SIN CUPO DE HOY: cuando ya no queda cupo de hoy en NINGUNA cuenta (ni corresponsal ni cajero), se trabaja con
- *     el cupo de corresponsal del DÍA SIGUIENTE ({@link Canal#CORRESPONSAL_MANANA}): las cuentas reciben ventas
- *     hasta llenar su cupo de corresponsal completo de mañana, descontando del saldo todo lo ya pedido para retirar
- *     (esos retiros gastan el cupo de hoy, no el de mañana). Solo se usa cuando el cupo de hoy (corresponsal de día y
- *     cajero) se acabó en TODAS las cuentas: siempre se prefiere hoy sobre mañana. La cuenta queda marcada CORRESPONSAL.
+ *     REGLA DE ORO (de día): el objetivo es tener siempre 7 cuentas, y se completan en este orden de preferencia:
+ *     corresponsal de hoy → cajero de hoy → corresponsal de mañana. El sistema NO pasa a cajero porque una cuenta
+ *     llene su corresponsal: cuando una se llena (retiro pedido, sin ventas abiertas) se cierra y se BUSCA otra cuenta
+ *     con corresponsal para reponerla. Solo cuando ya NO queda ninguna cuenta con corresponsal de hoy para traer (las
+ *     bloqueadas y las que Movimientos no puede abrir no cuentan) se completa con cajero: la reposición se busca por
+ *     cajero y la cuenta que acaba de llenar su corresponsal puede seguir como cajero. Las demás con corresponsal
+ *     siguen por corresponsal hasta llenarse. De noche (desde las 18:30) TODAS pasan a cajero (con el retiro de corte
+ *     de lo que no se llenó). Al día siguiente, con los cupos nuevos, vuelve solo a corresponsal.
+ *     SIN CUPO DE HOY: igual un escalón más: cuando ya no queda ninguna cuenta con cupo de hoy (corresponsal de día ni
+ *     cajero) para traer, se completa con el cupo de corresponsal del DÍA SIGUIENTE ({@link Canal#CORRESPONSAL_MANANA}):
+ *     las cuentas reciben ventas hasta llenar su cupo de corresponsal completo de mañana, descontando del saldo todo lo
+ *     ya pedido para retirar (esos retiros gastan el cupo de hoy, no el de mañana). La cuenta queda marcada CORRESPONSAL.
  *     SALDO PARA CAJERO: DE NOCHE (desde las 18:30) al medir el espacio de cajero se resta del saldo lo ya pedido
  *     para retirar por CORRESPONSAL y aún sin completar (11,5M con 10M pedidos = 1,5M). DE DÍA no se resta: una
  *     cuenta que llenó su corresponsal no recibe más ventas hasta que el retiro se complete. Al revés NO: un retiro pendiente del mismo
@@ -488,9 +488,8 @@ public class AsignacionAutomaticaService {
         porHoraCiclo = porHora;
         retiroCorrPendCiclo = retirosPendientes(false);
         retiroCajPendCiclo = retirosPendientes(true);
-        boolean corresponsalEnAlgunaCuenta = porHora == Canal.CORRESPONSAL && hayCupoEnAlgunaCuenta(todas, Canal.CORRESPONSAL);
-        cajeroHabilitado = porHora == Canal.CAJERO || !corresponsalEnAlgunaCuenta;
-        mananaHabilitado = !corresponsalEnAlgunaCuenta && !hayCupoEnAlgunaCuenta(todas, Canal.CAJERO);
+        cajeroHabilitado = porHora == Canal.CAJERO || !hayCandidataDeCorresponsal(todas);
+        mananaHabilitado = !hayCandidataConCupoDeHoy(todas, porHora);
         Map<Integer, Canal> canales = new HashMap<>();
         for (AccountCop a : todas) {
             if (a.getId() == null || a.getBankType() != BankType.BANCOLOMBIA) continue;
@@ -501,17 +500,29 @@ public class AsignacionAutomaticaService {
     }
 
     /**
-     * ¿Queda cupo de ese canal en ALGUNA cuenta Bancolombia utilizable, activa o no? Cuentan todas menos las bloqueadas
-     * y las que Movimientos no puede abrir (en enfriamiento). Es la base de la regla de oro: el cajero de día solo
-     * empieza cuando aquí ya no queda corresponsal, y mañana solo cuando ya no queda ni corresponsal ni cajero.
+     * Base de la regla de oro: ¿hay alguna cuenta INACTIVA (no bloqueada, Bancolombia, que Movimientos sí pueda abrir)
+     * con cupo de CORRESPONSAL de hoy para traer? Mientras la haya, el cajero NO se usa: se repone con corresponsal.
      */
-    private boolean hayCupoEnAlgunaCuenta(List<AccountCop> todas, Canal canal) {
+    private boolean hayCandidataDeCorresponsal(List<AccountCop> todas) {
         return todas.stream()
                 .filter(a -> a.getId() != null)
+                .filter(a -> !Boolean.TRUE.equals(a.getActivaParaP2P()))
+                .filter(a -> !Boolean.TRUE.equals(a.getBloqueada()))
+                .filter(a -> a.getBankType() == BankType.BANCOLOMBIA)
+                .filter(a -> !enEnfriamiento(a)) // una que Movimientos no puede abrir no es una candidata real
+                .anyMatch(a -> espacio(a, Canal.CORRESPONSAL) >= SUBLIMITE_ACTIVAR);
+    }
+
+    /** ¿Hay alguna cuenta inactiva utilizable con cupo de HOY (corresponsal de día o cajero) para traer? Si la hay, mañana no se toca. */
+    private boolean hayCandidataConCupoDeHoy(List<AccountCop> todas, Canal porHora) {
+        return todas.stream()
+                .filter(a -> a.getId() != null)
+                .filter(a -> !Boolean.TRUE.equals(a.getActivaParaP2P()))
                 .filter(a -> !Boolean.TRUE.equals(a.getBloqueada()))
                 .filter(a -> a.getBankType() == BankType.BANCOLOMBIA)
                 .filter(a -> !enEnfriamiento(a))
-                .anyMatch(a -> espacio(a, canal) >= SUBLIMITE_ACTIVAR);
+                .anyMatch(a -> (porHora == Canal.CORRESPONSAL && espacio(a, Canal.CORRESPONSAL) >= SUBLIMITE_ACTIVAR)
+                        || espacio(a, Canal.CAJERO) >= SUBLIMITE_ACTIVAR);
     }
 
     /** Retiros pedidos y sin completar, por cuenta (MILES), por cajero o por corresponsal. Si falla la lectura, ninguno. */

@@ -1473,17 +1473,17 @@ class AsignacionAutomaticaReglasTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void canalPorCuenta_siSoloQuedanTresConCorresponsal_NOSeCompletaConCajero() {
+    void canalPorCuenta_siSoloQuedanTresConCorresponsal_sinMasQueTraer_seCompletaConCajero() {
         horaDelDia(13, 0);
         List<AccountCop> activas = activasConSaldos(1_000, 1_000, 1_000);   // aun con corresponsal
         List<AccountCop> cand = new ArrayList<>();
-        for (int i = 0; i < 4; i++) cand.add(inactiva2(20 + i, 100));
+        for (int i = 0; i < 4; i++) cand.add(inactiva2(20 + i, 100));      // no hay mas con corresponsal; si con cajero
         when(accountCopRepository.findAll()).thenReturn(juntas(activas, cand));
 
         servicio.asignar(List.of());
 
         assertEquals(3, cuantasActivas(activas));
-        assertEquals(0, cuantasActivas(cand));   // regla de oro: no hay cajero mientras quede corresponsal en alguna cuenta
+        assertEquals(4, cuantasActivas(cand));   // "no hay mas cuentas de corresponsal: toca completar con cajeros"
     }
 
     @Test
@@ -1957,9 +1957,9 @@ class AsignacionAutomaticaReglasTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void reglaDeOro_siUnaActivaTodaviaTieneCorresponsal_noSeAbreNingunaDeCajero() {
+    void reglaDeOro_siNoQuedanMasCandidatasDeCorresponsal_seCompletaConCajero() {
         horaDelDia(13, 0);
-        // 3 activas con corresponsal; 4 candidatas SIN corresponsal pero con cajero. Aun queda corresponsal en las activas.
+        // 3 activas todavia con corresponsal; no hay mas cuentas con corresponsal para traer; hay 4 con cajero.
         List<AccountCop> activas = activasConSaldos(1_000, 1_000, 1_000);
         List<AccountCop> cand = new ArrayList<>();
         for (int i = 0; i < 4; i++) cand.add(inactiva2(20 + i, 100));
@@ -1967,22 +1967,44 @@ class AsignacionAutomaticaReglasTest {
 
         servicio.asignar(List.of());
 
-        assertEquals(0, cuantasActivas(cand));   // el grupo se queda en 3 hasta que se llenen: no se adelanta el cajero
+        assertEquals(3, cuantasActivas(activas));                 // las 3 siguen por corresponsal
+        assertEquals(4, cuantasActivas(cand));                    // y se completan las 7 con cajero
+        assertEquals(4, cand.stream().filter(c -> "CAJERO".equals(c.getCupoTipoP2P())).count());
     }
 
     @Test
     @SuppressWarnings("unchecked")
-    void reglaDeOro_unaCuentaQueLlenoSuCorresponsalNoPasaACajeroMientrasOtraTengaCorresponsal() {
+    void reglaDeOro_laSeptimaQueLlenaSuCorresponsal_sinMasCandidatasDeCorresponsal_sigueComoCajero() {
         horaDelDia(13, 0);
-        AccountCop llena = cuenta(40, 2_459, 0, 2_700);          // su corresponsal de hoy se gasto; le queda cajero
-        llena.setCupoTipoP2P("CORRESPONSAL");
-        List<AccountCop> todas = new ArrayList<>(activasConSaldos(100, 200, 300, 400, 500));  // estas siguen con corresponsal
-        todas.add(llena);
-        when(accountCopRepository.findAll()).thenReturn(todas);
+        AccountCop septima = cuenta(40, 2_459, 0, 2_700);        // llena su corresponsal; le queda cajero
+        septima.setCupoTipoP2P("CORRESPONSAL");
+        List<AccountCop> todas = new ArrayList<>(activasConSaldos(100, 200, 300, 400, 500, 600));  // las otras 6, con corresponsal
+        todas.add(septima);
+        when(accountCopRepository.findAll()).thenReturn(todas);   // no hay mas cuentas con corresponsal para traer
 
         servicio.asignar(List.of());
 
-        assertEquals(false, llena.getActivaParaP2P());           // se cierra: NO se vuelve cajero
+        assertEquals(true, septima.getActivaParaP2P());          // "la septima cuenta se vuelve cajero"
+        assertEquals("CAJERO", septima.getCupoTipoP2P());
+        assertEquals(7, cuantasActivas(todas));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void reglaDeOro_siHayOtraCuentaConCorresponsal_laQueSeLlenaSeCierraYNoPasaACajero() {
+        horaDelDia(13, 0);
+        AccountCop llena = cuenta(40, 2_459, 0, 2_700);
+        llena.setCupoTipoP2P("CORRESPONSAL");
+        List<AccountCop> todas = new ArrayList<>(activasConSaldos(100, 200, 300, 400, 500, 600));
+        todas.add(llena);
+        AccountCop candidata = inactiva(30, 100);                // corresponsal completo para traer
+        when(accountCopRepository.findAll()).thenReturn(juntas(todas, List.of(candidata)));
+
+        servicio.asignar(List.of());
+
+        assertEquals(false, llena.getActivaParaP2P());           // se da de baja
+        assertEquals(true, candidata.getActivaParaP2P());        // y entra otra con corresponsal, no una de cajero
+        assertEquals("CORRESPONSAL", candidata.getCupoTipoP2P());
     }
 
     @Test
@@ -2016,18 +2038,32 @@ class AsignacionAutomaticaReglasTest {
     }
 
     @Test
-    void reglaDeOro_manana_soloCuandoSeAgotoTodoLoDeHoy_tambienEnLasActivas() {
+    void reglaDeOro_manana_soloCuandoNoQuedaNingunaCandidataConCupoDeHoy() {
         horaDelDia(21, 0);
-        // Una activa aun con cajero de hoy: aunque las otras no tengan, NO se pasa a manana.
         List<AccountCop> todas = new ArrayList<>();
-        todas.add(cuenta(1, 100, 0, 2_700));                                     // cajero de hoy disponible
-        for (int i = 2; i <= 4; i++) todas.add(cuenta(i, 300, 0, 0));            // sin nada de hoy
-        when(accountCopRepository.findAll()).thenReturn(todas);
+        AccountCop viva = cuenta(1, 100, 0, 2_700);                               // activa con cajero de hoy
+        for (int i = 2; i <= 4; i++) todas.add(cuenta(i, 300, 0, 0));            // activas sin nada de hoy
+        AccountCop candidata = inactiva2(30, 100);                                // inactiva CON cajero de hoy para traer
+        todas.add(0, viva);
+        when(accountCopRepository.findAll()).thenReturn(juntas(todas, List.of(candidata)));
 
         servicio.asignar(List.of());
 
-        // las 3 sin cupo de hoy no se vuelven "de manana" mientras la 1 tenga cajero de hoy: sin ventas, se cierran
-        assertEquals(1, cuantasActivas(todas));
-        assertEquals(true, todas.get(0).getActivaParaP2P());
+        // Hay una candidata con cupo de hoy: se trae esa y las sin nada de hoy NO usan manana (se cierran sin ventas).
+        assertEquals(true, candidata.getActivaParaP2P());
+        assertEquals(2, cuantasActivas(juntas(todas, List.of(candidata))));
+    }
+
+    @Test
+    void reglaDeOro_manana_seCompletaCuandoNoQuedaCandidataConCupoDeHoy() {
+        horaDelDia(21, 0);
+        List<AccountCop> todas = new ArrayList<>();
+        todas.add(cuenta(1, 100, 0, 2_700));                                      // activa con cajero de hoy
+        for (int i = 2; i <= 4; i++) todas.add(cuenta(i, 300, 0, 0));            // activas sin nada de hoy
+        when(accountCopRepository.findAll()).thenReturn(todas);                   // no hay nadie para traer
+
+        servicio.asignar(List.of());
+
+        assertEquals(4, cuantasActivas(todas));                                   // las 3 sin cupo de hoy siguen contra el de manana
     }
 }
