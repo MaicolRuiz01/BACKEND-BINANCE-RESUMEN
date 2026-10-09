@@ -306,8 +306,8 @@ public class AsignacionAutomaticaService {
         // Canal de la hora (corresponsal de día, cajero desde 18:30). Cada cuenta puede trabajar por el otro canal si
         // el de la hora ya no le sirve (ver derivarCanal); ese canal propio se calcula una vez por ciclo.
         Canal porHora = VentanaCupoP2P.canalAhora(reloj);
+        detectarActivacionesFallidas(todas); // antes de calcular canales: una cuenta apartada no cuenta como candidata
         Canal canal = prepararCiclo(todas, porHora);
-        detectarActivacionesFallidas(todas);
         List<AccountCop> cambiadas = new ArrayList<>();
 
         // 0) Retiro de corte de las 18:30: antes de cerrar o re-marcar nada, para que las cuentas que se cierran
@@ -501,6 +501,7 @@ public class AsignacionAutomaticaService {
                 .filter(a -> !Boolean.TRUE.equals(a.getActivaParaP2P()))
                 .filter(a -> !Boolean.TRUE.equals(a.getBloqueada()))
                 .filter(a -> a.getBankType() == BankType.BANCOLOMBIA)
+                .filter(a -> !enEnfriamiento(a)) // una que Movimientos no puede abrir no es una candidata real
                 .anyMatch(a -> espacio(a, Canal.CORRESPONSAL) >= SUBLIMITE_ACTIVAR);
     }
 
@@ -511,6 +512,7 @@ public class AsignacionAutomaticaService {
                 .filter(a -> !Boolean.TRUE.equals(a.getActivaParaP2P()))
                 .filter(a -> !Boolean.TRUE.equals(a.getBloqueada()))
                 .filter(a -> a.getBankType() == BankType.BANCOLOMBIA)
+                .filter(a -> !enEnfriamiento(a))
                 .anyMatch(a -> (porHora == Canal.CORRESPONSAL && espacio(a, Canal.CORRESPONSAL) >= SUBLIMITE_ACTIVAR)
                         || espacio(a, Canal.CAJERO) >= SUBLIMITE_ACTIVAR);
     }

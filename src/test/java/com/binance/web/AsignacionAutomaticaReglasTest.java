@@ -1877,4 +1877,47 @@ class AsignacionAutomaticaReglasTest {
         assertEquals(true, nueva.getActivaParaP2P());
         assertEquals(7, cuantasActivas(juntas(activas, List.of(nueva))));
     }
+
+    // ── Una cuenta con el corresponsal lleno y su retiro pedido NO recibe mas ventas de dia mientras haya otra con corresponsal ──
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void tras10MillonesYRetiroPedido_noSeLeAsignanMasVentas_mientrasHayaCandidatasDeCorresponsal() {
+        horaDelDia(17, 11);
+        // Caso Ana: 10.013 de saldo (10.000 ya pedidos para retirar), corresponsal lleno. Hay una candidata con corresponsal.
+        AccountCop ana = cuenta(17, 10_013, 10_000, 2_700);
+        ana.setCupoTipoP2P("CORRESPONSAL");
+        List<AccountCop> todas = new ArrayList<>(activasConSaldos(100, 200, 300, 400, 500, 600));
+        todas.add(ana);
+        AccountCop candidata = inactiva(30, 100);
+        when(accountCopRepository.findAll()).thenReturn(juntas(todas, List.of(candidata)));
+        retirosCorrPendientes(new Object[]{17, 10_000.0});
+
+        servicio.asignar(List.of(orden("nueva", 700, null)));
+
+        verify(activeOrderService, never()).upsertPreAsignacion(eq("nueva"), eq(17), any(), any());
+        assertEquals(false, ana.getActivaParaP2P());          // sin ventas abiertas: se cierra
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void unaCandidataEnEnfriamientoNoCuentaComoCandidata_asiLaLlenaPuedeSeguirPorCajero() {
+        horaDelDia(17, 11);
+        AccountCop ana = cuenta(17, 10_013, 10_000, 2_700);
+        ana.setCupoTipoP2P("CORRESPONSAL");
+        List<AccountCop> todas = new ArrayList<>(activasConSaldos(100, 200, 300, 400, 500, 600));
+        todas.add(ana);
+        AccountCop david = inactiva(31, 100);                 // la unica con corresponsal... pero Movimientos no la abre
+        when(accountCopRepository.findAll()).thenReturn(juntas(todas, List.of(david)));
+        retirosCorrPendientes(new Object[]{17, 10_000.0});
+        lenient().when(cuentasPendientes.estaPendiente(org.mockito.ArgumentMatchers.anyString())).thenReturn(false);
+        lenient().when(cuentasPendientes.estaPendiente("Cuenta 31")).thenReturn(true);
+
+        servicio.asignar(List.of());                           // se activa David (queda pendiente)
+        david.setActivaParaP2P(false);                         // y el bot la desactiva: sin credenciales
+        servicio.asignar(List.of());                           // ahora David esta apartada
+
+        assertEquals(false, david.getActivaParaP2P());
+        assertEquals(true, ana.getActivaParaP2P());            // sin otra candidata real, Ana sigue (por cajero)
+    }
 }
