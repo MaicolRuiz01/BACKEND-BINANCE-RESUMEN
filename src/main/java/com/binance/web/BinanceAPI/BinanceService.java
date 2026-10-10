@@ -315,6 +315,36 @@ public class BinanceService {
 				+ query + "&signature=" + hmacSha256(creds[1], query), creds[0]);
 	}
 
+	/**
+	 * POST firmado a un endpoint C2C de órdenes (orderMatch) con los datos en un cuerpo JSON.
+	 * Como piden esos endpoints: timestamp y firma van en la URL, los datos SOLO en el JSON
+	 * (mandarlos en los dos lados hace que Binance responda -1000), y el header clientType=WEB.
+	 *
+	 * Si Binance responde 4xx se devuelve igual el cuerpo, porque trae el código y el motivo
+	 * del rechazo (p. ej. código 2FA inválido o endpoint no habilitado para la cuenta).
+	 */
+	public String c2cPostJson(String account, String path, Map<String, Object> cuerpo) throws Exception {
+		String[] creds = getApiCredentials(account);
+		if (creds == null) throw new IllegalArgumentException("Cuenta Binance no válida o sin API key: " + account);
+		long ts = getServerTime();
+		String query = "recvWindow=60000&timestamp=" + ts;
+		String url = "https://api.binance.com" + path + "?" + query + "&signature=" + hmacSha256(creds[1], query);
+
+		HttpHeaders headers = new HttpHeaders();
+		headers.set("X-MBX-APIKEY", creds[0]);
+		headers.set("clientType", "WEB");
+		headers.setContentType(MediaType.APPLICATION_JSON);
+		try {
+			return restTemplate.exchange(url, HttpMethod.POST,
+					new HttpEntity<>(mapper.writeValueAsString(cuerpo), headers), String.class).getBody();
+		} catch (HttpClientErrorException ex) {
+			String body = ex.getResponseBodyAsString();
+			return (body != null && !body.isBlank())
+					? body
+					: "{\"code\":\"HTTP_" + ex.getStatusCode().value() + "\",\"message\":\"" + ex.getStatusText() + "\"}";
+		}
+	}
+
 	public String obtenerCredencialChatCruda(String account) throws Exception {
 		String[] creds = getApiCredentials(account);
 		if (creds == null) throw new IllegalArgumentException("Cuenta Binance no válida o sin API key: " + account);
