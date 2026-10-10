@@ -776,6 +776,9 @@ public class RetiradorServiceImpl implements RetiradorService {
      * SIN_ASIGNAR/PENDIENTE de ese mismo canal para esta cuenta.
      */
     private void intentarDispararAutomaticoP2P(AccountCop cuenta, TipoRetiro tipo, double balance) {
+        if (tipo == TipoRetiro.CORRESPONSAL && !com.binance.web.util.VentanaCupoP2P.corresponsalAbierto(reloj)) {
+            return; // fin de semana (sábado desde las 14:00 y domingo): los corresponsales están cerrados, no se pide retiro
+        }
         double disponible = tipo == TipoRetiro.CAJERO
                 ? (cuenta.getCupoCajeroDisponibleHoy() != null ? cuenta.getCupoCajeroDisponibleHoy() : 0.0)
                 : (cuenta.getCupoCorresponsalDisponibleHoy() != null ? cuenta.getCupoCorresponsalDisponibleHoy() : 0.0);
@@ -826,6 +829,9 @@ public class RetiradorServiceImpl implements RetiradorService {
                     cuenta.getId(), tipo, e.getMessage());
         }
     }
+
+    /** Reloj para saber si los corresponsales están abiertos (se reemplaza en las pruebas). */
+    private java.time.Clock reloj = java.time.Clock.system(com.binance.web.util.VentanaCupoP2P.ZONA);
 
     private static double nz(Double d) {
         return d != null ? d : 0.0;
