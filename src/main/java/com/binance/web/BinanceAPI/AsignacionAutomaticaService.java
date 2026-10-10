@@ -63,7 +63,9 @@ import lombok.extern.slf4j.Slf4j;
  *     SIN CUPO DE HOY: igual un escalón más: cuando ya no queda ninguna cuenta con cupo de hoy (corresponsal de día ni
  *     cajero) para traer, se completa con el cupo de corresponsal del DÍA SIGUIENTE ({@link Canal#CORRESPONSAL_MANANA}):
  *     las cuentas reciben ventas hasta llenar su cupo de corresponsal completo de mañana, descontando del saldo todo lo
- *     ya pedido para retirar (esos retiros gastan el cupo de hoy, no el de mañana). La cuenta queda marcada CORRESPONSAL.
+ *     contra su saldo REAL: un retiro pedido y sin confirmar no se descuenta (si no se hace, el dinero sigue ahí).
+ *     La cuenta queda marcada CORRESPONSAL, salvo que ya estuviera marcada CAJERO: entonces sigue CAJERO para que se
+ *     retire también lo que le quedó del cajero de hoy (retiro automático).
  *     SALDO PARA CAJERO: DE NOCHE (desde las 18:30) al medir el espacio de cajero se resta del saldo lo ya pedido
  *     para retirar por CORRESPONSAL y aún sin completar (11,5M con 10M pedidos = 1,5M). DE DÍA no se resta: una
  *     cuenta que llenó su corresponsal no recibe más ventas hasta que el retiro se complete. Al revés NO: un retiro pendiente del mismo
@@ -567,8 +569,22 @@ public class AsignacionAutomaticaService {
     }
 
     /** Marca (cupoTipoP2P) que corresponde a un canal: el cupo de mañana se retira por corresponsal. */
-    private static String marca(Canal c) {
-        return c == Canal.CORRESPONSAL_MANANA ? Canal.CORRESPONSAL.name() : c.name();
+    private static String marca(Canal c, String marcaActual) {
+        if (c == Canal.CORRESPONSAL_MANANA) {
+            // Una cuenta que ya trabajó por cajero sigue marcada CAJERO: su retiro de cajero de hoy se pide igual.
+            return "CAJERO".equals(marcaActual) ? "CAJERO" : Canal.CORRESPONSAL.name();
+        }
+        return c.name();
+    }
+
+    /**
+     * Canal con el que está trabajando CADA cuenta en este momento (CORRESPONSAL, CAJERO o CORRESPONSAL_MANANA), según
+     * el último ciclo del Auto. La pantalla lo usa para mostrar el icono real (azul solo si de verdad se usa cupo de mañana).
+     */
+    public Map<Integer, String> canalesDeTrabajo() {
+        Map<Integer, String> m = new HashMap<>();
+        canalesCiclo.forEach((id, canal) -> m.put(id, canal.name()));
+        return m;
     }
 
     /** Canal con el que trabaja esta cuenta en este ciclo (si no se calculó, el de la hora). */
@@ -589,7 +605,9 @@ public class AsignacionAutomaticaService {
             // pedido NO puede recibir más ventas "por cajero" mientras el retiro no se confirma (incidente de Ana y
             // Jose del 9/10: cruzaron 10M, se pidió su retiro y siguieron recibiendo hasta ~12,7M).
             case CAJERO -> porHoraCiclo == Canal.CAJERO ? bal(a) - corr : bal(a);
-            case CORRESPONSAL_MANANA -> bal(a) - corr - caj;   // los retiros de hoy no gastan el cupo de mañana
+            // Para MAÑANA un retiro sin confirmar NO cuenta como hecho: si al final no se realiza, el dinero sigue en la
+            // cuenta y no tendrá los 10M libres mañana. Solo se usa mañana con el saldo real (incidente de Ledys, 9/10).
+            case CORRESPONSAL_MANANA -> bal(a);
         };
     }
 
@@ -775,10 +793,10 @@ public class AsignacionAutomaticaService {
             if (propio == previo) continue; // su canal no cambió desde la última vez: no se pisa un cambio hecho a mano
             String actual = a.getCupoTipoP2P();
             if (!"CORRESPONSAL".equals(actual) && !"CAJERO".equals(actual)) continue; // AMBOS u otro: no se toca
-            if (marca(propio).equals(actual)) continue;
+            if (marca(propio, actual).equals(actual)) continue;
             if (disponible(a, enCurso.comprometido(), canal) <= 0) continue;          // no sirve para el canal nuevo
             log.info("[AutoAsign] {} pasa de {} a {} (sigue activa, sin avisar a Movimientos).", a.getName(), actual, propio);
-            a.setCupoTipoP2P(marca(propio));
+            a.setCupoTipoP2P(marca(propio, actual));
             cambiadas.add(a);
         }
     }
@@ -878,7 +896,7 @@ public class AsignacionAutomaticaService {
         }
         boolean antes = Boolean.TRUE.equals(next.getActivaParaP2P());
         next.setActivaParaP2P(true);
-        next.setCupoTipoP2P(marca(elegido));
+        next.setCupoTipoP2P(marca(elegido, next.getCupoTipoP2P()));
         canalesCiclo.put(next.getId(), elegido); // en este mismo ciclo ya cuenta con su canal
         activadasPorAuto.put(next.getId(), reloj.millis());
         cuentaP2PSyncService.sincronizar(next, antes);

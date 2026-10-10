@@ -1513,6 +1513,7 @@ class AsignacionAutomaticaReglasTest {
 
     @Test
     void saldoParaCajero_conRetiroDeCorresponsalPedido_elSaldoSeDescuentaYLaCuentaSigue() {
+        horaDelDia(19, 0);   // de noche el retiro pedido por corresponsal SI se descuenta del saldo de cajero
         AccountCop c = cuenta(1, 11_500, 10_000, 2_700);         // 11,5M; ya se pidieron 10M por corresponsal
         when(accountCopRepository.findAll()).thenReturn(List.of(c));
         retirosCorrPendientes(new Object[]{1, 10_000.0});          // quedaran 1,5M: 1,2M de espacio de cajero
@@ -1681,7 +1682,7 @@ class AsignacionAutomaticaReglasTest {
 
         assertEquals(7, cuantasActivas(cuentas));                        // ninguna se cierra
         verify(activeOrderService).upsertPreAsignacion(eq("v1"), any(), any(), any());
-        assertEquals("CORRESPONSAL", cuentas.get(0).getCupoTipoP2P());   // el cupo de manana se marca como corresponsal
+        assertEquals("CAJERO", cuentas.get(0).getCupoTipoP2P());   // ya eran cajero: siguen marcadas CAJERO (su retiro de cajero de hoy se pide igual)
     }
 
     @Test
@@ -1716,16 +1717,16 @@ class AsignacionAutomaticaReglasTest {
     }
 
     @Test
-    void manana_losRetirosPendientesDeHoySeDescuentanDelSaldo() {
+    void manana_unRetiroSinConfirmarNoCuentaComoHecho_laCuentaConSaldoAltoNoUsaManana() {
         horaDelDia(21, 0);
         AccountCop c = cuenta(1, 12_000, 0, 2_700);              // 12M de saldo
         when(accountCopRepository.findAll()).thenReturn(List.of(c));
         retirosCajPendientes(new Object[]{1, 2_700.0});
-        retirosCorrPendientes(new Object[]{1, 9_000.0});         // 11,7M ya pedidos: quedan 300 de saldo contra manana
+        retirosCorrPendientes(new Object[]{1, 9_000.0});         // pedidos pero NO confirmados: no se descuentan
 
         servicio.asignar(List.of());
 
-        assertEquals(true, c.getActivaParaP2P());
+        assertEquals(false, c.getActivaParaP2P());               // con el saldo real (12M) no le cabe mañana: se cierra
     }
 
     @Test
@@ -2139,5 +2140,35 @@ class AsignacionAutomaticaReglasTest {
         // No entra la de 700 (sin espacio minimo), ni la bloqueada, ni la de 2.600 (mas lejos del limite).
         assertEquals(java.util.Set.of(50, 52), deDia);
         assertEquals(deDia, deNoche);   // exactamente la misma regla de dia (sin corresponsal) que de noche
+    }
+
+    // ── Cupo de mañana: marca y retiros sin confirmar ──
+
+    @Test
+    void manana_unaCuentaYaMarcadaCajeroSigueCajero_paraQueSuRetiroDeCajeroDeHoySePida() {
+        horaDelDia(21, 0);
+        AccountCop ledys = cuenta(10, 2_786, 0, 2_700);          // el cajero de hoy ya se lleno (2.786 > 2.700)
+        ledys.setCupoTipoP2P("CAJERO");
+        List<AccountCop> todas = new ArrayList<>(List.of(ledys));
+        when(accountCopRepository.findAll()).thenReturn(todas);
+
+        servicio.asignar(List.of());
+
+        assertEquals(true, ledys.getActivaParaP2P());             // sigue, ahora contra el cupo de mañana
+        assertEquals("CAJERO", ledys.getCupoTipoP2P());          // y sigue marcada CAJERO (no AMBOS, no CORRESPONSAL)
+        assertEquals("MANANA", servicio.canalesDeTrabajo().get(10).replace("CORRESPONSAL_", ""));   // el canal real se informa
+    }
+
+    @Test
+    void canalesDeTrabajo_informaElCanalRealDeCadaCuenta() {
+        horaDelDia(13, 0);
+        AccountCop corr = cuenta(1, 100, 10_000, 2_700);
+        AccountCop caj = cuenta(2, 100, 0, 2_700);
+        when(accountCopRepository.findAll()).thenReturn(List.of(corr, caj));
+
+        servicio.asignar(List.of());
+
+        assertEquals("CORRESPONSAL", servicio.canalesDeTrabajo().get(1));
+        assertEquals("CAJERO", servicio.canalesDeTrabajo().get(2));
     }
 }

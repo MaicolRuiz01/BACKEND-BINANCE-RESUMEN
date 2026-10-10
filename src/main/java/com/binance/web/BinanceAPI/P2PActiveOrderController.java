@@ -59,6 +59,15 @@ public class P2PActiveOrderController {
         return ResponseEntity.ok(saldosEnCursoService.calcular());
     }
 
+    /**
+     * GET /api/p2p/canales-trabajo
+     * Canal REAL con el que el Auto trabaja cada cuenta (CORRESPONSAL, CAJERO o CORRESPONSAL_MANANA), por id de cuenta COP.
+     */
+    @GetMapping("/canales-trabajo")
+    public ResponseEntity<Map<Integer, String>> getCanalesTrabajo() {
+        return ResponseEntity.ok(asignacionService.canalesDeTrabajo());
+    }
+
     // ─────────────────────────────────────────────────────────────
     // Asignación automática (interruptor global ON/OFF)
     // ─────────────────────────────────────────────────────────────
