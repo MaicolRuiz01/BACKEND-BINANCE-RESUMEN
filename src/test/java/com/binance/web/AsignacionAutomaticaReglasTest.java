@@ -2357,4 +2357,34 @@ class AsignacionAutomaticaReglasTest {
 
         assertEquals("CORRESPONSAL_MANANA", servicio.canalesDeTrabajo().get(1));
     }
+
+    @Test
+    void sabado_estadoRealDeProduccion_conRetirosDeCajeroPendientes_abreLas7() {
+        sabado(17, 30);
+        // Saldos reales del sabado 10/10 17:30 (MILES). Ledys es la unica activa; el resto inactivas.
+        int[][] saldos = {{10, 1042}, {8, 2719}, {29, 2720}, {14, 2738}, {6, 2805}, {17, 2807}, {30, 2821}, {22, 2845},
+                {2, 2890}, {5, 2989}, {1, 3005}, {4, 3024}, {7, 3150}, {27, 3162}, {15, 3202}, {9, 4021}, {26, 4085},
+                {28, 6573}, {20, 9007}};
+        List<AccountCop> todas = new ArrayList<>();
+        for (int[] f : saldos) {
+            AccountCop c = cuenta(f[0], f[1], 10_000, 2_700);
+            c.setActivaParaP2P(f[0] == 10);
+            c.setCupoTipoP2P("CAJERO");
+            todas.add(c);
+        }
+        for (int id : new int[]{12, 13, 16, 21, 31, 32, 33}) {      // bloqueadas, saldo 0
+            AccountCop c = cuenta(id, 0, 10_000, 2_700);
+            c.setActivaParaP2P(false);
+            c.setBloqueada(true);
+            todas.add(c);
+        }
+        when(accountCopRepository.findAll()).thenReturn(todas);
+        List<Object[]> pend = new ArrayList<>();
+        for (int[] f : saldos) if (f[1] > 2_700 && f[0] != 10) pend.add(new Object[]{f[0], 2_700.0});
+        retirosCajPendientes(pend.toArray(new Object[0][]));
+
+        servicio.asignar(List.of());
+
+        assertEquals(7, cuantasActivas(todas));
+    }
 }
