@@ -104,6 +104,9 @@ import lombok.extern.slf4j.Slf4j;
  *     por la regla de cuenta llena. Dentro de una misma ventana no se pisa un cambio hecho a mano, y una cuenta
  *     marcada AMBOS no se toca.
  *     OJO: ese tipo decide por qué canal se dispara el retiro automático de la cuenta.
+ * 11a) SÁBADO: los corresponsales cierran a las 14:00; el cajero empieza a las 13:30 (y el retiro de corte se hace a esa
+ *     hora). Ese día NO se usa el cupo de corresponsal de mañana (el domingo no hay corresponsales): solo cajero, aunque
+ *     la cuenta ya lo haya llenado. No toca la regla de oro ni la de hierro.
  * 11) RETIRO DE CORTE: la primera vez del día que el trabajo pasa a CAJERO por la hora (18:30), y solo en los
  *     primeros {@link #VENTANA_CORTE_MIN} minutos, se pide por CORRESPONSAL todo lo que cada cuenta activa pueda
  *     retirar por ese canal (RetiradorService.solicitarRetiroCorteCorresponsal). Se hace ANTES de cerrar cuentas,
@@ -429,7 +432,7 @@ public class AsignacionAutomaticaService {
     private void retiroDeCorteSiCorresponde(List<AccountCop> todas, Canal porHora) {
         if (!corteHabilitado || porHora != Canal.CAJERO) return;
         java.time.ZonedDateTime ahora = java.time.ZonedDateTime.now(reloj.withZone(VentanaCupoP2P.ZONA));
-        if (ahora.toLocalTime().isAfter(VentanaCupoP2P.INICIO_CAJERO.plusMinutes(VENTANA_CORTE_MIN))) return;
+        if (ahora.toLocalTime().isAfter(VentanaCupoP2P.inicioCajero(ahora.getDayOfWeek()).plusMinutes(VENTANA_CORTE_MIN))) return;
         java.time.LocalDate hoy = ahora.toLocalDate();
         if (hoy.equals(fechaCorteEjecutado)) return;
         fechaCorteEjecutado = hoy;
@@ -495,7 +498,9 @@ public class AsignacionAutomaticaService {
         retiroCorrPendCiclo = retirosPendientes(false);
         retiroCajPendCiclo = retirosPendientes(true);
         cajeroHabilitado = porHora == Canal.CAJERO || !hayCandidataDeCorresponsal(todas);
-        mananaHabilitado = !hayCandidataConCupoDeHoy(todas, porHora);
+        // El sábado NO hay cupo de mañana: el domingo no abren corresponsales (solo se asigna cajero, aunque se llene).
+        mananaHabilitado = VentanaCupoP2P.mananaDisponible(java.time.ZonedDateTime.now(reloj.withZone(VentanaCupoP2P.ZONA)).getDayOfWeek())
+                && !hayCandidataConCupoDeHoy(todas, porHora);
         Map<Integer, Canal> canales = new HashMap<>();
         for (AccountCop a : todas) {
             if (a.getId() == null || a.getBankType() != BankType.BANCOLOMBIA) continue;
