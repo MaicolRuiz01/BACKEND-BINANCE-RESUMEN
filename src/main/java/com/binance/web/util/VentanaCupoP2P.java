@@ -64,6 +64,11 @@ public final class VentanaCupoP2P {
         return dia != java.time.DayOfWeek.SATURDAY || hora.isBefore(LocalTime.of(14, 0));
     }
 
+    /** Fin de semana (sábado y domingo): rige la ley del crecimiento paralelo del cupo de mañana. */
+    public static boolean esFinDeSemana(java.time.DayOfWeek dia) {
+        return dia == java.time.DayOfWeek.SATURDAY || dia == java.time.DayOfWeek.SUNDAY;
+    }
+
     public static boolean corresponsalAbierto(Clock reloj) {
         java.time.ZonedDateTime ahora = java.time.ZonedDateTime.now(reloj.withZone(ZONA));
         return corresponsalAbierto(ahora.getDayOfWeek(), ahora.toLocalTime());
@@ -82,8 +87,18 @@ public final class VentanaCupoP2P {
      * en el día. Llamar antes {@link CupoDiarioRules#asegurarCupoHoy} para que no sea de ayer.
      */
     public static double cupoHoy(AccountCop cuenta, Canal canal) {
+        return cupoHoy(cuenta, canal, 1);
+    }
+
+    /**
+     * Igual, con el NIVEL del cupo de mañana: el fin de semana, cuando todas las cuentas llenan los 10.000 de mañana se
+     * abre el siguiente nivel (20.000, 30.000…): el tope por cuenta es el corresponsal completo multiplicado por el nivel.
+     */
+    public static double cupoHoy(AccountCop cuenta, Canal canal, int nivelManana) {
         if (canal == Canal.CORRESPONSAL_MANANA) {
-            return cuenta.getBankType() != null ? CupoDiarioRules.maxCorresponsalPorBanco(cuenta.getBankType()) : 0.0;
+            return cuenta.getBankType() != null
+                    ? CupoDiarioRules.maxCorresponsalPorBanco(cuenta.getBankType()) * Math.max(1, nivelManana)
+                    : 0.0;
         }
         Double v = canal == Canal.CAJERO
                 ? cuenta.getCupoCajeroDisponibleHoy()

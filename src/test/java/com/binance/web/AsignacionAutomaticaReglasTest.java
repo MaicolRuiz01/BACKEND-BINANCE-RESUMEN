@@ -2279,14 +2279,39 @@ class AsignacionAutomaticaReglasTest {
     }
 
     @Test
-    void sabado_elCupoDeMananaTieneTopeDe10Millones_unaCuentaConCasiTodoNoEntra() {
+    void sabado_crecimientoParalelo_siTodasLlenaronLos10Millones_seAbreElNivelDe20() {
         sabado(17, 0);
-        AccountCop c = cuenta(1, 9_500, 0, 2_700);              // 500 de espacio contra 10.000: menos que el minimo
+        AccountCop c = cuenta(1, 9_500, 0, 2_700);              // 500 de espacio en el nivel 1 (menos que el minimo)
         when(accountCopRepository.findAll()).thenReturn(List.of(c));
 
         servicio.asignar(List.of());
 
-        assertEquals(false, c.getActivaParaP2P());
+        assertEquals(true, c.getActivaParaP2P());                // nivel 2: 20.000 - 9.500 = 10.500 de espacio
+        assertEquals("CORRESPONSAL_MANANA", servicio.canalesDeTrabajo().get(1));
+    }
+
+    @Test
+    void sabado_crecimientoParalelo_mientrasAlgunaTengaEspacioEnElNivel1_nadieSaltaAl20() {
+        sabado(17, 0);
+        AccountCop llena = cuenta(1, 9_500, 0, 2_700);          // casi en 10M
+        AccountCop libre = cuenta(2, 3_000, 0, 2_700);          // 7.000 de espacio en el nivel 1
+        when(accountCopRepository.findAll()).thenReturn(List.of(llena, libre));
+
+        servicio.asignar(List.of());
+
+        assertEquals(false, llena.getActivaParaP2P());           // la de 9.500 no sube a 20M mientras otra pueda crecer en 10M
+        assertEquals(true, libre.getActivaParaP2P());
+    }
+
+    @Test
+    void entreSemana_elCupoDeMananaSigueEn10Millones_sinNiveles() {
+        horaDelDia(21, 0);
+        AccountCop c = cuenta(1, 9_500, 0, 2_700);
+        when(accountCopRepository.findAll()).thenReturn(List.of(c));
+
+        servicio.asignar(List.of());
+
+        assertEquals(false, c.getActivaParaP2P());               // 500 de espacio: no hay nivel 2 de lunes a viernes
     }
 
     @Test

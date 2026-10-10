@@ -109,6 +109,8 @@ import lombok.extern.slf4j.Slf4j;
  *     hoy se sigue con el cupo de "mañana" (ojo azul): 10.000 por cuenta, para repartir la carga y poder retirar el
  *     lunes 10M por cuenta. Con los corresponsales cerrados NO se piden retiros automáticos por corresponsal. No toca la
  *     regla de hierro (7 cuentas) ni la de oro.
+ * 11b) CRECIMIENTO PARALELO (fin de semana): el cupo azul es de 10.000 por cuenta; cuando todas lo llenan se abre el
+ *     siguiente nivel (20.000, 30.000…, de 10 en 10) para seguir vendiendo repartido (ver calcularNivelManana).
  * 11) RETIRO DE CORTE: la primera vez del día que el trabajo pasa a CAJERO por la hora (18:30), y solo en los
  *     primeros {@link #VENTANA_CORTE_MIN} minutos, se pide por CORRESPONSAL todo lo que cada cuenta activa pueda
  *     retirar por ese canal (RetiradorService.solicitarRetiroCorteCorresponsal). Se hace ANTES de cerrar cuentas,
@@ -206,6 +208,10 @@ public class AsignacionAutomaticaService {
     private volatile Canal porHoraCiclo = Canal.CORRESPONSAL;
     /** true cuando ya no hay NINGUNA candidata con cupo de hoy: se puede usar el cupo de corresponsal de mañana. */
     private volatile boolean mananaHabilitado;
+    /** Fin de semana: nivel del cupo de mañana en uso (1 = 10.000 por cuenta, 2 = 20.000…). Los demás días siempre 1. */
+    private volatile int nivelManana = 1;
+    /** Tope de niveles del cupo de mañana (10 niveles = 100M por cuenta): evita un ciclo sin fin. */
+    private static final int MAX_NIVEL_MANANA = 10;
     /**
      * De día, el cajero solo se usa cuando ya NO queda ninguna candidata con cupo de corresponsal (ninguna cuenta
      * inactiva y utilizable de todas las Bancolombia). Mientras haya una, una cuenta con el corresponsal agotado se
@@ -502,6 +508,7 @@ public class AsignacionAutomaticaService {
         retiroCajPendCiclo = retirosPendientes(true);
         cajeroHabilitado = porHora == Canal.CAJERO || !hayCandidataDeCorresponsal(todas);
         mananaHabilitado = !hayCandidataConCupoDeHoy(todas, porHora);
+        nivelManana = calcularNivelManana(todas);
         Map<Integer, Canal> canales = new HashMap<>();
         for (AccountCop a : todas) {
             if (a.getId() == null || a.getBankType() != BankType.BANCOLOMBIA) continue;
@@ -509,6 +516,27 @@ public class AsignacionAutomaticaService {
         }
         canalesCiclo = canales;
         return porHora;
+    }
+
+    /**
+     * CRECIMIENTO PARALELO (fin de semana): el cupo de mañana es de 10.000 por cuenta, para que todas crezcan parejo y el
+     * lunes se pueda retirar 10M de cada una. Mientras alguna cuenta tenga espacio en el nivel 1 se queda en 1; cuando
+     * TODAS llenaron los 10.000 se abre el nivel 2 (20.000 por cuenta), y así de 10 en 10. Solo sábado y domingo.
+     */
+    private int calcularNivelManana(List<AccountCop> todas) {
+        java.time.DayOfWeek dia = java.time.ZonedDateTime.now(reloj.withZone(VentanaCupoP2P.ZONA)).getDayOfWeek();
+        if (!mananaHabilitado || !VentanaCupoP2P.esFinDeSemana(dia)) return 1;
+        List<AccountCop> utilizables = todas.stream()
+                .filter(a -> a.getId() != null)
+                .filter(a -> !Boolean.TRUE.equals(a.getBloqueada()))
+                .filter(a -> a.getBankType() == BankType.BANCOLOMBIA)
+                .filter(a -> !enEnfriamiento(a))
+                .collect(Collectors.toList());
+        for (int k = 1; k < MAX_NIVEL_MANANA; k++) {
+            nivelManana = k;   // espacio() lo lee
+            if (utilizables.stream().anyMatch(a -> espacio(a, Canal.CORRESPONSAL_MANANA) >= SUBLIMITE_ACTIVAR)) return k;
+        }
+        return MAX_NIVEL_MANANA;
     }
 
     /**
@@ -623,7 +651,7 @@ public class AsignacionAutomaticaService {
 
     /** Espacio real (MILES) que le queda a la cuenta en su canal, sin contar ventas en curso. */
     private double espacio(AccountCop a, Canal c) {
-        return VentanaCupoP2P.cupoHoy(a, c) - saldoParaCanal(a, c);
+        return VentanaCupoP2P.cupoHoy(a, c, nivelManana) - saldoParaCanal(a, c);
     }
 
     // ── Mantenimiento del grupo ───────────────────────────────────
@@ -745,7 +773,7 @@ public class AsignacionAutomaticaService {
             Canal propio = canalDe(a, canal);
             log.info("[AutoAsign] {} llegó al límite de {} sin ventas abiertas → se cierra primero, luego se abre la siguiente. "
                             + "(cupo restante {}, saldo {}, retiros pedidos sin confirmar: corresponsal {} / cajero {}; el cierre NO depende de que se confirmen)",
-                    a.getName(), propio, VentanaCupoP2P.cupoHoy(a, propio), bal(a),
+                    a.getName(), propio, VentanaCupoP2P.cupoHoy(a, propio, nivelManana), bal(a),
                     retiroCorrPendCiclo.getOrDefault(a.getId(), 0.0), retiroCajPendCiclo.getOrDefault(a.getId(), 0.0));
             desactivar(a);
             cambiadas.add(a);
