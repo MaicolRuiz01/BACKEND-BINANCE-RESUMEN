@@ -2308,4 +2308,28 @@ class AsignacionAutomaticaReglasTest {
         assertEquals(false, VentanaCupoP2P.corresponsalAbierto(java.time.DayOfWeek.SUNDAY, LocalTime.of(9, 0)));
         assertEquals(true, VentanaCupoP2P.corresponsalAbierto(java.time.DayOfWeek.MONDAY, LocalTime.of(9, 0)));
     }
+
+    @Test
+    void sabado_reglaDeOro_sinCupoDeCorresponsalAntesDeLas1330_saltaAlCajero() {
+        sabado(10, 0);
+        AccountCop sinCorresponsal = cuenta(1, 1_000, 0, 2_700);   // corresponsal agotado; le quedan 1.700 de cajero
+        sinCorresponsal.setCupoTipoP2P("CORRESPONSAL");
+        when(accountCopRepository.findAll()).thenReturn(List.of(sinCorresponsal));
+
+        servicio.asignar(List.of());
+
+        assertEquals("CAJERO", servicio.canalesDeTrabajo().get(1));   // la regla de oro aplica tambien el sabado
+    }
+
+    @Test
+    void sabado_reglaDeOro_siSeAcabaronCorresponsalYCajeroAntesDeLas1330_saltaAlCupoAzul() {
+        sabado(10, 0);
+        AccountCop a = cuenta(1, 3_000, 0, 2_700);                 // sin corresponsal y con el cajero pasado: cupo de manana
+        a.setCupoTipoP2P("CORRESPONSAL");
+        when(accountCopRepository.findAll()).thenReturn(List.of(a));
+
+        servicio.asignar(List.of());
+
+        assertEquals("CORRESPONSAL_MANANA", servicio.canalesDeTrabajo().get(1));
+    }
 }
