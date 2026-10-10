@@ -2225,4 +2225,79 @@ class AsignacionAutomaticaReglasTest {
 
         verify(activeOrderService).upsertPreAsignacion(eq("v1"), eq(1), any(), any());   // primero el cajero de hoy
     }
+
+    // ── Sabado: cajero desde las 13:30 y sin cupo de manana (el domingo no hay corresponsales) ──
+
+    private void sabado(int h, int m) {
+        ReflectionTestUtils.setField(servicio, "reloj", Clock.fixed(
+                LocalDate.of(2026, 10, 10).atTime(LocalTime.of(h, m)).atZone(VentanaCupoP2P.ZONA).toInstant(),
+                VentanaCupoP2P.ZONA));
+    }
+
+    @Test
+    void sabado_elCajeroEmpiezaALasUnaYMedia_losOtrosDiasA_lasSeisYMedia() {
+        assertEquals(Canal.CORRESPONSAL, VentanaCupoP2P.canalEn(java.time.DayOfWeek.SATURDAY, LocalTime.of(13, 29, 59)));
+        assertEquals(Canal.CAJERO, VentanaCupoP2P.canalEn(java.time.DayOfWeek.SATURDAY, LocalTime.of(13, 30)));
+        assertEquals(Canal.CORRESPONSAL, VentanaCupoP2P.canalEn(java.time.DayOfWeek.TUESDAY, LocalTime.of(13, 30)));
+        assertEquals(Canal.CAJERO, VentanaCupoP2P.canalEn(java.time.DayOfWeek.TUESDAY, LocalTime.of(18, 30)));
+    }
+
+    @Test
+    void sabado_conCorresponsalDisponibleAntesDeLasUnaYMedia_trabajaPorCorresponsal() {
+        sabado(12, 0);
+        AccountCop c = cuenta(1, 100, 10_000, 2_700);
+        when(accountCopRepository.findAll()).thenReturn(List.of(c));
+
+        servicio.asignar(List.of());
+
+        assertEquals("CORRESPONSAL", servicio.canalesDeTrabajo().get(1));
+    }
+
+    @Test
+    void sabado_desdeLasUnaYMediaSoloCajero_aunqueTengaCupoDeCorresponsal() {
+        sabado(14, 0);
+        AccountCop c = cuenta(1, 100, 10_000, 2_700);
+        when(accountCopRepository.findAll()).thenReturn(List.of(c));
+
+        servicio.asignar(List.of());
+
+        assertEquals("CAJERO", servicio.canalesDeTrabajo().get(1));
+    }
+
+    @Test
+    void sabado_cuandoSeLlenaElCajeroSaltaAlCajeroDeManana_noAlCorresponsalDeManana() {
+        sabado(15, 0);
+        AccountCop llena = cuenta(1, 2_786, 0, 2_700);          // cajero de hoy lleno
+        llena.setCupoTipoP2P("CAJERO");
+        AccountCop casiVacia = cuenta(2, 100, 0, 0);            // sin cajero de hoy: queda el cajero de manana (2.600)
+        casiVacia.setCupoTipoP2P("CORRESPONSAL");
+        when(accountCopRepository.findAll()).thenReturn(List.of(llena, casiVacia));
+
+        servicio.asignar(List.of());
+
+        assertEquals("CORRESPONSAL_MANANA", servicio.canalesDeTrabajo().get(2));   // cupo de manana...
+        assertEquals("CAJERO", casiVacia.getCupoTipoP2P());                         // ...pero se retira por CAJERO
+    }
+
+    @Test
+    void sabado_elCupoDeMananaEsElDelCajero_unaCuentaConMuchoSaldoNoEntra() {
+        sabado(15, 0);
+        AccountCop c = cuenta(1, 5_000, 0, 0);                  // 5M: no cabe en el cajero de manana (2.700)
+        when(accountCopRepository.findAll()).thenReturn(List.of(c));
+
+        servicio.asignar(List.of());
+
+        assertEquals(false, c.getActivaParaP2P());
+    }
+
+    @Test
+    void sabado_losOtrosDiasElCupoDeMananaSigueSiendoElDeCorresponsal() {
+        horaDelDia(21, 0);
+        AccountCop c = cuenta(1, 5_000, 0, 0);                  // 5M: cabe en el corresponsal de manana (10.000)
+        when(accountCopRepository.findAll()).thenReturn(List.of(c));
+
+        servicio.asignar(List.of());
+
+        assertEquals("CORRESPONSAL_MANANA", servicio.canalesDeTrabajo().get(1));
+    }
 }
