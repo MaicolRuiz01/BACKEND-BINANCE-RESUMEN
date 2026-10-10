@@ -109,6 +109,10 @@ import lombok.extern.slf4j.Slf4j;
  *     retirar por ese canal (RetiradorService.solicitarRetiroCorteCorresponsal). Se hace ANTES de cerrar cuentas,
  *     para que las que se cierran no se queden sin su retiro, y así las cuentas quedan en cero para cajero.
  *     Se apaga con p2p.retiro-corte-corresponsal.habilitado=false.
+ * 12a) PRIORIDAD AL ELEGIR LA CUENTA DE UNA VENTA: (1) cupo VIGENTE primero: mientras haya cuentas de corresponsal y de
+ *     cajero a la vez, las de corresponsal reciben primero (su tiempo se acaba a las 18:30); de noche, las de cajero de
+ *     hoy antes que las de cupo de mañana. (2) Dentro del mismo canal, la MÁS CERCANA a llenar su cupo, para despacharla
+ *     y pedir su retiro. Si la venta no cabe en el canal prioritario se baja al siguiente.
  * 12) RESCATE EN CAJERO ("una venta es una venta"): con el canal de trabajo en CAJERO no hay tope práctico.
  *     Si la venta no cabe en ninguna cuenta (ni con la tolerancia), se asigna igual a la cuenta ACTIVA con MÁS
  *     espacio libre (la de menor saldo), para poder retirar pronto y dejar las demás libres para ventas chicas.
@@ -827,8 +831,25 @@ public class AsignacionAutomaticaService {
                 .filter(a -> !montosAbiertos.getOrDefault(a.getId(), Set.of()).contains(clave)) // no repetidas
                 .filter(a -> disponible(a, comprometido, canal) > 0) // cupo aún sin completar: la tolerancia solo sirve para completarlo
                 .filter(a -> disponible(a, comprometido, canal) - monto >= -TOLERANCIA) // cabe (hasta 500k de exceso)
-                .min(Comparator.comparingDouble(a -> disponible(a, comprometido, canal)))
+                // REGLA DE LA PRIORIDAD (dos subreglas): 1) cupo VIGENTE primero: el canal que se está acabando (de día
+                // el corresponsal, de noche el cajero de hoy) va antes que el siguiente; 2) dentro de ese canal, la MÁS
+                // CERCANA a su cupo, para despacharla y mandarle el retiro. Si la venta no cabe en el canal prioritario,
+                // se baja al siguiente. Nunca se pasa del cupo (más la tolerancia), así que ninguna se sobrecarga.
+                .min(Comparator.<AccountCop>comparingInt(a -> prioridadDeCanal(canalDe(a, canal)))
+                        .thenComparingDouble(a -> disponible(a, comprometido, canal)))
                 .orElse(null);
+    }
+
+    /**
+     * Prioridad del canal con el que trabaja una cuenta al elegirle una venta (menor = primero): el cupo que vence
+     * antes se llena antes. De día CORRESPONSAL → CAJERO → cupo de mañana; de noche CAJERO → cupo de mañana.
+     */
+    private static int prioridadDeCanal(Canal c) {
+        return switch (c) {
+            case CORRESPONSAL -> 0;
+            case CAJERO -> 1;
+            case CORRESPONSAL_MANANA -> 2;
+        };
     }
 
     /**

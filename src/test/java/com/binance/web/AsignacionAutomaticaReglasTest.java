@@ -2171,4 +2171,58 @@ class AsignacionAutomaticaReglasTest {
         assertEquals("CORRESPONSAL", servicio.canalesDeTrabajo().get(1));
         assertEquals("CAJERO", servicio.canalesDeTrabajo().get(2));
     }
+
+    // ── Regla de la prioridad: cupo vigente primero, y dentro del canal la mas cercana al cupo ──
+
+    @Test
+    void prioridad_deDia_elCorresponsalVaAntesQueElCajero_aunqueLaDeCajeroEsteMasCerca() {
+        horaDelDia(17, 0);
+        AccountCop corr = cuenta(1, 2_000, 10_000, 2_700);    // corresponsal: 8.000 de espacio
+        corr.setCupoTipoP2P("CORRESPONSAL");
+        AccountCop caj = cuenta(2, 1_900, 0, 2_700);          // cajero: 800 de espacio (mas cerca de su limite)
+        caj.setCupoTipoP2P("CAJERO");
+        when(accountCopRepository.findAll()).thenReturn(List.of(corr, caj));
+
+        servicio.asignar(List.of(orden("v1", 500, null)));
+
+        verify(activeOrderService).upsertPreAsignacion(eq("v1"), eq(1), any(), any());   // va a la de corresponsal
+    }
+
+    @Test
+    void prioridad_siLaVentaNoCabeEnElCorresponsal_bajaAlCajero() {
+        horaDelDia(17, 0);
+        AccountCop corr = cuenta(1, 9_700, 10_000, 2_700);    // corresponsal: 300 de espacio
+        corr.setCupoTipoP2P("CORRESPONSAL");
+        AccountCop caj = cuenta(2, 100, 0, 2_700);            // cajero: 2.600
+        caj.setCupoTipoP2P("CAJERO");
+        when(accountCopRepository.findAll()).thenReturn(List.of(corr, caj));
+
+        servicio.asignar(List.of(orden("v1", 2_000, null)));
+
+        verify(activeOrderService).upsertPreAsignacion(eq("v1"), eq(2), any(), any());   // 2.000 no cabe en 300: baja al cajero
+    }
+
+    @Test
+    void prioridad_dentroDelCorresponsal_laMasCercanaAlCupoVaPrimero() {
+        horaDelDia(17, 0);
+        AccountCop lejos = cuenta(1, 1_000, 10_000, 2_700);   // 9.000 de espacio
+        AccountCop cerca = cuenta(2, 8_000, 10_000, 2_700);   // 2.000 de espacio
+        when(accountCopRepository.findAll()).thenReturn(List.of(lejos, cerca));
+
+        servicio.asignar(List.of(orden("v1", 500, null)));
+
+        verify(activeOrderService).upsertPreAsignacion(eq("v1"), eq(2), any(), any());   // la que esta a punto de llenarse
+    }
+
+    @Test
+    void prioridad_deNoche_elCajeroDeHoyVaAntesQueElCupoDeManana() {
+        horaDelDia(21, 0);
+        AccountCop caj = cuenta(1, 1_900, 0, 2_700);          // cajero de hoy: 800
+        AccountCop manana = cuenta(2, 100, 0, 0);             // sin cajero de hoy: usa el cupo de manana (9.900)
+        when(accountCopRepository.findAll()).thenReturn(List.of(caj, manana));
+
+        servicio.asignar(List.of(orden("v1", 500, null)));
+
+        verify(activeOrderService).upsertPreAsignacion(eq("v1"), eq(1), any(), any());   // primero el cajero de hoy
+    }
 }
