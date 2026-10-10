@@ -2265,14 +2265,39 @@ class AsignacionAutomaticaReglasTest {
     }
 
     @Test
-    void sabado_unaCuentaQueLlenoElCajeroNoPasaACupoDeManana_sigueCajero() {
+    void sabado_cuandoSeLlenaElCajeroSaltaAlCajeroDeManana_noAlCorresponsalDeManana() {
         sabado(15, 0);
-        AccountCop c = cuenta(1, 20_000, 0, 2_700);   // 20M de saldo: el cajero esta lleno, de lunes a viernes pasaria a manana
-        c.setCupoTipoP2P("CAJERO");
+        AccountCop llena = cuenta(1, 2_786, 0, 2_700);          // cajero de hoy lleno
+        llena.setCupoTipoP2P("CAJERO");
+        AccountCop casiVacia = cuenta(2, 100, 0, 0);            // sin cajero de hoy: queda el cajero de manana (2.600)
+        casiVacia.setCupoTipoP2P("CORRESPONSAL");
+        when(accountCopRepository.findAll()).thenReturn(List.of(llena, casiVacia));
+
+        servicio.asignar(List.of());
+
+        assertEquals("CORRESPONSAL_MANANA", servicio.canalesDeTrabajo().get(2));   // cupo de manana...
+        assertEquals("CAJERO", casiVacia.getCupoTipoP2P());                         // ...pero se retira por CAJERO
+    }
+
+    @Test
+    void sabado_elCupoDeMananaEsElDelCajero_unaCuentaConMuchoSaldoNoEntra() {
+        sabado(15, 0);
+        AccountCop c = cuenta(1, 5_000, 0, 0);                  // 5M: no cabe en el cajero de manana (2.700)
         when(accountCopRepository.findAll()).thenReturn(List.of(c));
 
         servicio.asignar(List.of());
 
-        assertEquals("CAJERO", servicio.canalesDeTrabajo().get(1));
+        assertEquals(false, c.getActivaParaP2P());
+    }
+
+    @Test
+    void sabado_losOtrosDiasElCupoDeMananaSigueSiendoElDeCorresponsal() {
+        horaDelDia(21, 0);
+        AccountCop c = cuenta(1, 5_000, 0, 0);                  // 5M: cabe en el corresponsal de manana (10.000)
+        when(accountCopRepository.findAll()).thenReturn(List.of(c));
+
+        servicio.asignar(List.of());
+
+        assertEquals("CORRESPONSAL_MANANA", servicio.canalesDeTrabajo().get(1));
     }
 }

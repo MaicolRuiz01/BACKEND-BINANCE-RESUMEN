@@ -11,8 +11,8 @@ import com.binance.web.Entity.AccountCop;
  *
  *  - 00:00 → 18:29  CORRESPONSAL
  *  - 18:30 → 23:59  CAJERO
- *  - SÁBADO: 00:00 → 13:29 CORRESPONSAL y 13:30 → 23:59 CAJERO (los corresponsales cierran a las 14:00), sin cupo de
- *    mañana (el domingo no hay corresponsales)
+ *  - SÁBADO: 00:00 → 13:29 CORRESPONSAL y 13:30 → 23:59 CAJERO (los corresponsales cierran a las 14:00); su cupo de
+ *    "mañana" es el de CAJERO del domingo (el domingo no hay corresponsales)
  *
  * Mientras dura una ventana se mira SOLO el cupo de ese canal y se ignora el otro (aunque la
  * cuenta tenga cupo de cajero de día, o de corresponsal de noche). Cuando se llena un canal se pasa al
@@ -56,11 +56,11 @@ public final class VentanaCupoP2P {
     }
 
     /**
-     * ¿Se puede usar el cupo de corresponsal de MAÑANA ese día? No el sábado: el domingo no abren corresponsales,
-     * así que la regla de oro "invertida" no aplica y el sábado solo se asigna cajero.
+     * ¿El cupo de MAÑANA de ese día es de CAJERO (no de corresponsal)? Sí el sábado: el domingo no abren corresponsales,
+     * así que cuando se llena el cajero de hoy se salta al cajero del día siguiente.
      */
-    public static boolean mananaDisponible(java.time.DayOfWeek dia) {
-        return dia != java.time.DayOfWeek.SATURDAY;
+    public static boolean mananaEsCajero(java.time.DayOfWeek dia) {
+        return dia == java.time.DayOfWeek.SATURDAY;
     }
 
     public static Canal canalEn(java.time.DayOfWeek dia, LocalTime hora) {
@@ -76,8 +76,15 @@ public final class VentanaCupoP2P {
      * en el día. Llamar antes {@link CupoDiarioRules#asegurarCupoHoy} para que no sea de ayer.
      */
     public static double cupoHoy(AccountCop cuenta, Canal canal) {
+        return cupoHoy(cuenta, canal, false);
+    }
+
+    /** Igual, indicando si el cupo de mañana es el de CAJERO (sábado) o el de corresponsal (resto de días). */
+    public static double cupoHoy(AccountCop cuenta, Canal canal, boolean mananaEsCajero) {
         if (canal == Canal.CORRESPONSAL_MANANA) {
-            return cuenta.getBankType() != null ? CupoDiarioRules.maxCorresponsalPorBanco(cuenta.getBankType()) : 0.0;
+            if (cuenta.getBankType() == null) return 0.0;
+            return mananaEsCajero ? CupoDiarioRules.maxCajeroPorBanco(cuenta.getBankType())
+                                  : CupoDiarioRules.maxCorresponsalPorBanco(cuenta.getBankType());
         }
         Double v = canal == Canal.CAJERO
                 ? cuenta.getCupoCajeroDisponibleHoy()
