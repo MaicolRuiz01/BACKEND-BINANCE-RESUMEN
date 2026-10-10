@@ -379,6 +379,7 @@ public class P2PActiveOrderService {
         // Si la venta ya se importó (se completó justo antes de asignar), aplicarla ya.
         syncService.aplicarPreAsignacionSiYaSeImporto(orderNumber);
         AccountCopSaldoListener.notificarTrasCommit();
+        P2PSseNotificador.ordenesCambiaron(); // la columna "Cuenta COP" de las pantallas se actualiza sola
 
         // Enviar al cliente, por el chat de la orden, los datos de la cuenta asignada. Va
         // programado con unos segundos de espera (y fuera de esta transacción): si el operador
@@ -405,6 +406,7 @@ public class P2PActiveOrderService {
         preAsignacionRepository.deleteByOrderNumber(orderNumber);
         log.info("[PreAsign] Removida pre-asignación de {}", orderNumber);
         AccountCopSaldoListener.notificarTrasCommit();
+        P2PSseNotificador.ordenesCambiaron();
     }
 
     /** Completa pesos_cop en filas viejas (guardadas antes de existir la columna). */

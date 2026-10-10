@@ -425,13 +425,22 @@ public class P2PSyncService {
             return false;
         }
 
+        long t0 = System.currentTimeMillis();
         SaleP2P sale = buildSale(obj, account);
         saleP2PRepository.save(sale);
+        long tGuardar = System.currentTimeMillis() - t0;
         try {
             autoAssign(sale);
         } catch (Exception e) {
             log.warn("[Sync] Auto-asignación falló para orden {} ({}): {}",
                     orderNumber, account.getName(), e.getMessage());
+        }
+        long total = System.currentTimeMillis() - t0;
+        if (total > 1_000) {
+            // Medición: una venta tarda ~4-5 s en guardarse (con 3 nuevas, 14 s) y el poll espera todo ese tiempo.
+            // Este log dice si el tiempo se va en guardar la venta o en aplicarla a la cuenta COP.
+            log.warn("[Sync][LENTO] Guardar la venta {} tardó {} ms (insertar venta: {} ms, aplicar a la cuenta: {} ms)",
+                    orderNumber, total, tGuardar, total - tGuardar);
         }
         return true;
     }
@@ -577,7 +586,12 @@ public class P2PSyncService {
         cop.setBalance((cop.getBalance() != null ? cop.getBalance() : 0.0) + amount);
         cop.setCupoDisponibleHoy(
                 (cop.getCupoDisponibleHoy() != null ? cop.getCupoDisponibleHoy() : 0.0) - amount);
+        long tCuenta = System.currentTimeMillis();
         accountCopService.saveAccountCopSafe(cop);
+        long msCuenta = System.currentTimeMillis() - tCuenta;
+        if (msCuenta > 1_000) {
+            log.warn("[Sync][LENTO] Guardar el saldo de {} (y revisar su retiro automático) tardó {} ms", cop.getName(), msCuenta);
+        }
 
         // (Se quitó el descuento del USDT en el saldo interno: ese saldo ya no se lleva.
         //  El USDT vendido se refleja solo en Binance, que es de donde se lee todo ahora.)

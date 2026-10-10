@@ -38,6 +38,13 @@ public class P2PSseController {
     /** Lista thread-safe de clientes suscritos. */
     private final List<SseEmitter> emitters = new CopyOnWriteArrayList<>();
 
+    /** Referencia estática para que clases que no son beans (ver P2PSseNotificador) puedan avisar. */
+    public static P2PSseController INSTANCE;
+
+    public P2PSseController() {
+        INSTANCE = this;
+    }
+
     // ─────────────────────────────────────────────────────────────
     // Suscripción del cliente
     // ─────────────────────────────────────────────────────────────
@@ -136,6 +143,70 @@ public class P2PSseController {
         }
         emitters.removeAll(dead);
         log.info("[SSE] Broadcast cambio órdenes activas ({} cambio(s))", cantidad);
+    }
+
+    /**
+     * Avisa a todas las pantallas que cambió la lista de cuentas COP de P2P (una se activó o se desactivó),
+     * para que la recarguen sin que nadie tenga que darle al botón de actualizar.
+     */
+    public void broadcastCuentasP2PCambiaron() {
+        if (emitters.isEmpty()) return;
+
+        String hora = LocalDateTime.now(ZONE).format(FMT);
+        Map<String, Object> payload = Map.of("tipo", "cuentas-p2p-cambiaron", "hora", hora);
+
+        List<SseEmitter> dead = new ArrayList<>();
+        for (SseEmitter emitter : emitters) {
+            try {
+                emitter.send(SseEmitter.event().name("cuentas-p2p-cambiaron").data(payload));
+            } catch (Exception e) {
+                dead.add(emitter);
+                try { emitter.complete(); } catch (Exception ignored) {}
+            }
+        }
+        emitters.removeAll(dead);
+    }
+
+    /**
+     * Avisa a todas las pantallas que llegó una venta GRANDE (por ejemplo, más de $5M): las pantallas muestran una
+     * notificación flotante que no se quita sola. El payload dice el monto, la orden y si se asignó o quedó sin asignar.
+     */
+    public void broadcastVentaGrande(Map<String, Object> payload) {
+        if (emitters.isEmpty()) return;
+
+        List<SseEmitter> dead = new ArrayList<>();
+        for (SseEmitter emitter : emitters) {
+            try {
+                emitter.send(SseEmitter.event().name("venta-grande").data(payload));
+            } catch (Exception e) {
+                dead.add(emitter);
+                try { emitter.complete(); } catch (Exception ignored) {}
+            }
+        }
+        emitters.removeAll(dead);
+        log.info("[SSE] Aviso de venta grande: {}", payload);
+    }
+
+    /**
+     * Avisa que terminó (bien o mal) un envío automático de cuenta por el chat: las pantallas actualizan al
+     * instante el "Enviando cuenta…" / "Cuenta enviada" en vez de esperar su consulta periódica.
+     */
+    public void broadcastChatEnvioActualizado() {
+        if (emitters.isEmpty()) return;
+
+        Map<String, Object> payload = Map.of("tipo", "chat-envio-actualizado",
+                "hora", LocalDateTime.now(ZONE).format(FMT));
+
+        List<SseEmitter> dead = new ArrayList<>();
+        for (SseEmitter emitter : emitters) {
+            try {
+                emitter.send(SseEmitter.event().name("chat-envio-actualizado").data(payload));
+            } catch (Exception e) {
+                dead.add(emitter);
+                try { emitter.complete(); } catch (Exception ignored) {}
+            }
+        }
+        emitters.removeAll(dead);
     }
 
     /**

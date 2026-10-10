@@ -163,7 +163,7 @@ public class AccountCopController {
 	 * Retorna la cuenta actualizada.
 	 */
 	@PatchMapping("/{id}/toggle-p2p")
-	public ResponseEntity<AccountCop> toggleActivaParaP2P(@PathVariable Integer id) {
+	public ResponseEntity<?> toggleActivaParaP2P(@PathVariable Integer id) {
 		AccountCop cuenta = AccountCopService.findByIdAccountCop(id);
 		if (cuenta == null) return ResponseEntity.notFound().build();
 
@@ -174,6 +174,22 @@ public class AccountCopController {
 
 		boolean estabaActivaAntes = Boolean.TRUE.equals(cuenta.getActivaParaP2P());
 		boolean nuevoEstado = !estabaActivaAntes;
+
+		// REGLA DE HIERRO: nunca mas de LimitesP2P.MAX_CUENTAS_ACTIVAS cuentas Bancolombia activas a la vez
+		// (cada una es una sesion de Chrome en el computador de Movimientos). Solo aplica a Bancolombia, que es
+		// lo unico que Movimientos monitorea.
+		if (nuevoEstado && cuenta.getBankType() == com.binance.web.Entity.BankType.BANCOLOMBIA) {
+			long activas = accountCopRepository.findByBankType(com.binance.web.Entity.BankType.BANCOLOMBIA).stream()
+					.filter(a -> Boolean.TRUE.equals(a.getActivaParaP2P()) && !Boolean.TRUE.equals(a.getBloqueada()))
+					.count();
+			if (activas >= com.binance.web.util.LimitesP2P.MAX_CUENTAS_ACTIVAS) {
+				return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message",
+						"Ya hay " + activas + " cuentas activas (el máximo es "
+								+ com.binance.web.util.LimitesP2P.MAX_CUENTAS_ACTIVAS
+								+ "). Desactiva una antes de activar otra."));
+			}
+		}
+
 		cuenta.setActivaParaP2P(nuevoEstado);
 		AccountCopService.updateAccountCop(id, cuenta);
 

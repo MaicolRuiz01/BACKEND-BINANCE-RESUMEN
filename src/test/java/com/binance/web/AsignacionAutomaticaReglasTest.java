@@ -53,6 +53,7 @@ class AsignacionAutomaticaReglasTest {
     @Mock private MovimientosCuentasPendientes cuentasPendientes;
     @Mock private SaldosEnCursoService saldosEnCursoService;
     @Mock private RetiradorService retiradorService;
+    @Mock private com.binance.web.Repository.SolicitudRetiroRepository solicitudRetiroRepository;
 
     @InjectMocks private AsignacionAutomaticaService servicio;
 
@@ -696,9 +697,9 @@ class AsignacionAutomaticaReglasTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void casoYeiner_sinCupoConVentaAbierta_seQuedaMonitoreada_perolaReposicionSeAbreYa() {
+    void casoYeiner_sinCupoConVentaAbierta_seQuedaMonitoreadaYOcupaSuLugar_sinAbrirOctava() {
         // Yeiner: cupo de corresponsal en 0 y 401 en curso. Las otras 6 reciben ventas. Hay una candidata.
-        AccountCop yeiner = cuenta(1, 44, 0, 2_700);
+        AccountCop yeiner = cuenta(1, 44, 0, 0);   // sin cupo de corresponsal NI de cajero
         List<AccountCop> otras = activas(2, 6);
         List<AccountCop> cand = candidatas(20, 1);
         when(accountCopRepository.findAll()).thenReturn(juntas(List.of(yeiner), otras, cand));
@@ -707,9 +708,8 @@ class AsignacionAutomaticaReglasTest {
         servicio.asignar(List.of());
 
         assertEquals(true, yeiner.getActivaParaP2P());                    // sigue monitoreada
-        assertEquals(true, cand.get(0).getActivaParaP2P());               // la reposicion ya esta abierta
-        verify(cuentaP2PSyncService).sincronizar(cand.get(0), false);
-        verify(cuentaP2PSyncService, never()).sincronizar(eq(yeiner), eq(true));
+        assertEquals(false, cand.get(0).getActivaParaP2P());              // espera su plata: no se abre una octava por ella
+        verify(cuentaP2PSyncService, never()).sincronizar(any(), any(Boolean.class));
     }
 
     @Test
@@ -728,14 +728,18 @@ class AsignacionAutomaticaReglasTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void conOchoActivas_noQuitaNiAgregaNinguna() {
+    void conOchoActivas_cierraUnaYNoAbreNinguna() {
+        // Antes con 8 no se tocaba nada; ahora el Auto toma el control: 7 es lo sano, la 8ª es solo margen.
         List<AccountCop> act = activas(1, 8);
         List<AccountCop> cand = candidatas(20, 3);
         when(accountCopRepository.findAll()).thenReturn(juntas(act, cand));
 
         servicio.asignar(List.of());
 
-        verify(cuentaP2PSyncService, never()).sincronizar(any(), any(Boolean.class));
+        assertEquals(7, cuantasActivas(act));
+        assertEquals(0, cuantasActivas(cand));
+        verify(cuentaP2PSyncService, org.mockito.Mockito.times(1)).sincronizar(any(), eq(true));
+        verify(cuentaP2PSyncService, never()).sincronizar(any(), eq(false));
     }
 
     @Test
@@ -758,7 +762,7 @@ class AsignacionAutomaticaReglasTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void cuentaConCupoProyectadoAgotadoPorVentasAbiertas_noCuentaEntreLasSiete_yseRepone() {
+    void cuentaConCupoProyectadoAgotadoPorVentasAbiertas_ocupaUnLugarDeLasSiete_noSeRepone() {
         // 9.500 de saldo con 600 en curso: proyectado -100, ya no recibe, aunque su cupo real aun no se cumplio.
         AccountCop casi = cuenta(1, 9_500, 10_000, 2_700);
         List<AccountCop> otras = activas(2, 6);
@@ -768,7 +772,7 @@ class AsignacionAutomaticaReglasTest {
 
         servicio.asignar(List.of());
 
-        assertEquals(true, cand.get(0).getActivaParaP2P());
+        assertEquals(false, cand.get(0).getActivaParaP2P());   // la de las ventas abiertas ocupa su lugar
         assertEquals(true, casi.getActivaParaP2P());
     }
 
@@ -884,7 +888,7 @@ class AsignacionAutomaticaReglasTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void alas1830_unaCuentaConVentaAbierta_seQuedaMonitoreadaPeroYaNoCuenta() {
+    void alas1830_unaCuentaConVentaAbierta_seQuedaMonitoreadaYOcupaSuLugar_noSeAbreOctava() {
         AccountCop conVenta = cuenta(1, 5_000, 10_000, 2_700);
         List<AccountCop> resto = new ArrayList<>();
         for (int i = 2; i <= 7; i++) resto.add(cuenta(i, 500, 10_000, 2_700)); // cajero: espacio 2.200
@@ -896,7 +900,7 @@ class AsignacionAutomaticaReglasTest {
         servicio.asignar(List.of());
 
         assertEquals(true, conVenta.getActivaParaP2P());          // sigue vigilada (espera su venta)
-        assertEquals(1, nuevas.stream().filter(a -> Boolean.TRUE.equals(a.getActivaParaP2P())).count()); // y su reemplazo ya esta abierto (la mas cercana al limite)
+        assertEquals(0, nuevas.stream().filter(a -> Boolean.TRUE.equals(a.getActivaParaP2P())).count()); // y ocupa su lugar: no se abre una octava por ella
     }
 
     // ── Cambio de canal: las cuentas que siguen sirviendo cambian de marca SIN avisar a Movimientos ──
@@ -934,6 +938,7 @@ class AsignacionAutomaticaReglasTest {
     @Test
     void alas1830_laCuentaQueNoSirveParaCajero_peroTieneVentaAbierta_noCambiaDeMarca() {
         List<AccountCop> grupo = siete(1_500, "CORRESPONSAL");
+        grupo.remove(6);   // el maximo es 7 en total: 6 + la que espera su venta
         AccountCop sinEspacio = cuenta(8, 5_000, 10_000, 2_700);   // cajero: -2.300
         sinEspacio.setCupoTipoP2P("CORRESPONSAL");
         List<AccountCop> todas = new ArrayList<>(grupo);
@@ -1183,5 +1188,1041 @@ class AsignacionAutomaticaReglasTest {
 
         verify(activeOrderService).upsertPreAsignacion(eq("grande"), eq(1), any(), any());
         verify(activeOrderService, never()).upsertPreAsignacion(eq("grande"), eq(30), any(), any());
+    }
+
+    // ── Tope de hierro: nunca mas de 8 cuentas activas ────────────
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void tope_conOchoActivasPeroSoloAlgunasRecibiendo_noAbreNingunaMas() {
+        horaDelDia(19, 0);
+        // 5 reciben ventas (espacio de cajero) y 3 ya no reciben pero siguen vigiladas por ventas abiertas.
+        List<AccountCop> recibiendo = new ArrayList<>();
+        for (int i = 1; i <= 5; i++) recibiendo.add(cuenta(i, 500, 10_000, 2_700));
+        List<AccountCop> esperando = new ArrayList<>();
+        for (int i = 6; i <= 8; i++) esperando.add(cuenta(i, 5_000, 10_000, 2_700));   // cajero: -2.300
+        List<AccountCop> cand = candidatas(20, 5);
+        when(accountCopRepository.findAll()).thenReturn(juntas(recibiendo, esperando, cand));
+        when(saldosEnCursoService.calcular()).thenReturn(List.of(
+                enCurso(6, 300, "a"), enCurso(7, 300, "b"), enCurso(8, 300, "c")));
+
+        servicio.asignar(List.of());
+
+        // Recibiendo son 5 (< 7), pero ya hay 8 activas: el tope de hierro gana, no se abre ninguna.
+        verify(cuentaP2PSyncService, never()).sincronizar(any(), eq(false));
+        for (AccountCop c : cand) assertEquals(false, c.getActivaParaP2P());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void tope_conSeisActivas_dosEsperandoVentas_abreSoloUnaParaLlegarASiete() {
+        horaDelDia(19, 0);
+        List<AccountCop> recibiendo = new ArrayList<>();
+        for (int i = 1; i <= 4; i++) recibiendo.add(cuenta(i, 500, 10_000, 2_700));
+        List<AccountCop> esperando = new ArrayList<>();
+        for (int i = 5; i <= 6; i++) esperando.add(cuenta(i, 5_000, 10_000, 2_700));
+        List<AccountCop> cand = candidatas(20, 6);
+        when(accountCopRepository.findAll()).thenReturn(juntas(recibiendo, esperando, cand));
+        when(saldosEnCursoService.calcular()).thenReturn(List.of(enCurso(5, 300, "a"), enCurso(6, 300, "b")));
+
+        servicio.asignar(List.of());
+
+        long activasAhora = juntas(recibiendo, esperando, cand).stream()
+                .filter(a -> Boolean.TRUE.equals(a.getActivaParaP2P())).count();
+        assertEquals(7, activasAhora);   // 4 recibiendo + 2 esperando ventas ya ocupan 6 lugares: falta uno, no se llega a 8
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void tope_lasQueSeCierranLiberanCupoParaAbrirOtras() {
+        horaDelDia(19, 0);
+        // 8 activas, 3 llenas sin ventas abiertas: se cierran y se pueden abrir reemplazos sin pasar de 8.
+        List<AccountCop> sanas = new ArrayList<>();
+        for (int i = 1; i <= 5; i++) sanas.add(cuenta(i, 500, 10_000, 2_700));
+        List<AccountCop> llenas = new ArrayList<>();
+        for (int i = 6; i <= 8; i++) llenas.add(cuenta(i, 5_000, 10_000, 2_700));
+        List<AccountCop> cand = candidatas(20, 6);
+        when(accountCopRepository.findAll()).thenReturn(juntas(sanas, llenas, cand));
+
+        servicio.asignar(List.of());
+
+        long activasAhora = juntas(sanas, llenas, cand).stream()
+                .filter(a -> Boolean.TRUE.equals(a.getActivaParaP2P())).count();
+        assertEquals(7, activasAhora);   // 5 sanas + 2 abiertas hasta 7 recibiendo; nunca mas de 8
+        assertEquals(false, llenas.get(0).getActivaParaP2P());
+    }
+
+    // ── Tomar el control: cerrar las cuentas que sobran ───────────
+
+    private List<AccountCop> activasConSaldos(double... saldos) {
+        List<AccountCop> l = new ArrayList<>();
+        for (int i = 0; i < saldos.length; i++) l.add(cuenta(i + 1, saldos[i], 10_000, 2_700));
+        return l;
+    }
+
+    private long cuantasActivas(List<AccountCop> l) {
+        return l.stream().filter(c -> Boolean.TRUE.equals(c.getActivaParaP2P())).count();
+    }
+
+    @Test
+    void sobrantes_conOchoRecibiendo_cierraLaDeMenosEspacio_sinVentas() {
+        // Saldos 1.000..8.000: la de 8.000 (id 8) es la de menos espacio libre.
+        List<AccountCop> cuentas = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 7_000, 8_000);
+        when(accountCopRepository.findAll()).thenReturn(cuentas);
+
+        servicio.asignar(List.of());
+
+        assertEquals(false, cuentas.get(7).getActivaParaP2P());
+        assertEquals(7, cuantasActivas(cuentas));
+    }
+
+    @Test
+    void sobrantes_laDeMenosEspacioTieneVentaAbierta_cierraLaSiguienteSinVentas() {
+        List<AccountCop> cuentas = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 7_000, 8_000);
+        when(accountCopRepository.findAll()).thenReturn(cuentas);
+
+        servicio.asignar(List.of(orden("o1", 500, 8)));   // la 8 espera una venta: no se toca
+
+        assertEquals(true, cuentas.get(7).getActivaParaP2P());
+        assertEquals(false, cuentas.get(6).getActivaParaP2P()); // la siguiente de menos espacio
+    }
+
+    @Test
+    void sobrantes_conSieteActivas_noCierraNinguna() {
+        List<AccountCop> cuentas = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 7_000);
+        when(accountCopRepository.findAll()).thenReturn(cuentas);
+
+        servicio.asignar(List.of());
+
+        assertEquals(7, cuantasActivas(cuentas));
+    }
+
+    @Test
+    void sobrantes_conNueveRecibiendo_cierraDos() {
+        List<AccountCop> cuentas = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 7_000, 8_000, 9_000);
+        when(accountCopRepository.findAll()).thenReturn(cuentas);
+
+        servicio.asignar(List.of());
+
+        assertEquals(7, cuantasActivas(cuentas));
+        assertEquals(false, cuentas.get(8).getActivaParaP2P());
+        assertEquals(false, cuentas.get(7).getActivaParaP2P());
+    }
+
+    @Test
+    void sobrantes_siTodasEsperanVentas_noCierraNingunaYNoRevienta() {
+        List<AccountCop> cuentas = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 7_000, 8_000);
+        when(accountCopRepository.findAll()).thenReturn(cuentas);
+        List<ActiveP2POrderDto> ventas = new ArrayList<>();
+        for (int i = 1; i <= 8; i++) ventas.add(orden("o" + i, 100, i));
+
+        servicio.asignar(ventas);
+
+        assertEquals(8, cuantasActivas(cuentas));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void sobrantes_despuesDeCerrar_noReabreOtraCandidata() {
+        List<AccountCop> activas = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 7_000, 8_000);
+        List<AccountCop> cand = candidatas(20, 3);
+        when(accountCopRepository.findAll()).thenReturn(juntas(activas, cand));
+
+        servicio.asignar(List.of());
+
+        assertEquals(7, cuantasActivas(activas));
+        assertEquals(0, cuantasActivas(cand));
+    }
+
+    @Test
+    void sobrantes_laRecienPedidaAMovimientosSeCierraUltima() {
+        List<AccountCop> cuentas = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 7_000, 8_000);
+        when(accountCopRepository.findAll()).thenReturn(cuentas);
+        lenient().when(cuentasPendientes.estaPendiente(org.mockito.ArgumentMatchers.anyString())).thenReturn(false);
+        when(cuentasPendientes.estaPendiente("Cuenta 8")).thenReturn(true); // aun sin confirmar: la de menos espacio
+
+        servicio.asignar(List.of());
+
+        assertEquals(true, cuentas.get(7).getActivaParaP2P());
+        assertEquals(false, cuentas.get(6).getActivaParaP2P());
+    }
+
+    // ── Reemplazo antes de cerrar: siempre 7 trabajando ───────────
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void siete_laLlenaSeCierraPrimeroYDespuesSeAbreLaSiguiente_nuncaHayOcho() {
+        List<AccountCop> grupo = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 10_000); // la 7 esta llena
+        List<AccountCop> cand = candidatas(20, 2);
+        when(accountCopRepository.findAll()).thenReturn(juntas(grupo, cand));
+        // La nueva queda "pendiente" de Movimientos: aun asi la vieja ya se cerro (no se espera la confirmacion).
+        for (String n : List.of("Cuenta 20", "Cuenta 21")) lenient().when(cuentasPendientes.estaPendiente(n)).thenReturn(true);
+
+        servicio.asignar(List.of());
+
+        assertEquals(false, grupo.get(6).getActivaParaP2P());   // primero se cerro la llena
+        assertEquals(1, cuantasActivas(cand));                  // y despues se abrio la siguiente
+        assertEquals(7, cuantasActivas(juntas(grupo, cand)));   // siempre 7
+        org.mockito.InOrder orden = org.mockito.Mockito.inOrder(cuentaP2PSyncService);
+        orden.verify(cuentaP2PSyncService).sincronizar(grupo.get(6), true);   // la orden de cerrar sale primero
+        orden.verify(cuentaP2PSyncService).sincronizar(any(AccountCop.class), eq(false));   // y luego la de abrir
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void reemplazo_cuandoLaNuevaSeConfirma_seCierraLaLlena() {
+        List<AccountCop> grupo = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 10_000);
+        AccountCop nueva = cuenta(20, 1_000, 10_000, 2_700); // ya activa y confirmada
+        List<AccountCop> todas = new ArrayList<>(grupo);
+        todas.add(nueva);
+        when(accountCopRepository.findAll()).thenReturn(todas);
+
+        servicio.asignar(List.of());
+
+        assertEquals(false, grupo.get(6).getActivaParaP2P());
+        assertEquals(7, cuantasActivas(todas));
+    }
+
+    @Test
+    void reemplazo_sinCandidatas_laLlenaSeCierraDeInmediato() {
+        List<AccountCop> grupo = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 10_000);
+        when(accountCopRepository.findAll()).thenReturn(grupo);
+
+        servicio.asignar(List.of());
+
+        assertEquals(false, grupo.get(6).getActivaParaP2P());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void reemplazo_noPasaDeLaOchavaCuenta() {
+        // Dos llenas a la vez: la reposicion de la segunda espera a que se cierre la primera (tope de 8).
+        List<AccountCop> grupo = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 10_000, 10_000);
+        List<AccountCop> cand = candidatas(20, 3);
+        when(accountCopRepository.findAll()).thenReturn(juntas(grupo, cand));
+        lenient().when(cuentasPendientes.estaPendiente(org.mockito.ArgumentMatchers.anyString())).thenReturn(false);
+        for (String n : List.of("Cuenta 20", "Cuenta 21", "Cuenta 22")) lenient().when(cuentasPendientes.estaPendiente(n)).thenReturn(true);
+
+        servicio.asignar(List.of());
+
+        assertEquals(true, cuantasActivas(juntas(grupo, cand)) <= 8);
+    }
+
+    // ── Corresponsal agotado de día: se trabaja por cajero con las mismas reglas ──
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void unaDeLaTarde_sinCupoDeCorresponsalEnNingunaCuenta_abreCuentasPorCajero() {
+        horaDelDia(13, 0);
+        // 5 activas y 3 candidatas: ninguna tiene cupo de corresponsal (0), todas tienen cajero.
+        List<AccountCop> activas = new ArrayList<>();
+        for (int i = 1; i <= 5; i++) activas.add(cuenta(i, 100 * i, 0, 2_700));
+        List<AccountCop> cand = new ArrayList<>();
+        for (int i = 0; i < 3; i++) cand.add(inactiva2(20 + i, 100 * (i + 1)));
+        when(accountCopRepository.findAll()).thenReturn(juntas(activas, cand));
+
+        servicio.asignar(List.of());
+
+        assertEquals(5, cuantasActivas(activas));              // las activas siguen: tienen espacio de cajero
+        assertEquals(2, cuantasActivas(cand));                 // completa las 7 buscando por cajero
+        verify(cuentaP2PSyncService, org.mockito.Mockito.times(2)).sincronizar(any(), eq(false));
+        assertEquals(2, cand.stream().filter(c -> "CAJERO".equals(c.getCupoTipoP2P())).count()); // las nuevas se marcan para cajero
+    }
+
+    @Test
+    void unaDeLaTarde_sinCupoDeCorresponsal_laVentaSeAsignaPorEspacioDeCajero() {
+        horaDelDia(13, 0);
+        List<AccountCop> activas = new ArrayList<>();
+        for (int i = 1; i <= 7; i++) activas.add(cuenta(i, 1_000, 0, 2_700)); // cajero: 1.700 de espacio
+        when(accountCopRepository.findAll()).thenReturn(activas);
+
+        servicio.asignar(List.of(orden("v1", 1_500, null)));
+
+        verify(activeOrderService).upsertPreAsignacion(eq("v1"), any(), any(), any());
+    }
+
+    private AccountCop inactiva2(int id, double saldo) {
+        AccountCop c = cuenta(id, saldo, 0, 2_700);   // sin corresponsal, con cajero
+        c.setActivaParaP2P(false);
+        return c;
+    }
+
+    // ── Un canal por cuenta: el cajero se adelanta; los retiros pendientes cuentan ──
+
+    private void retirosCorrPendientes(Object[]... filas) {
+        when(solicitudRetiroRepository.sumMontoCorresponsalPendientePorCuenta()).thenReturn(List.of(filas));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void canalPorCuenta_laQueAgotoElCorresponsalPeroTieneCajero_sigueActivaComoCajero() {
+        List<AccountCop> grupo = new ArrayList<>();
+        // Regla de oro: el cajero solo cuando NINGUNA cuenta tiene corresponsal (las otras 6 ya lo agotaron).
+        for (int i = 1; i <= 6; i++) { AccountCop c = cuenta(i, 1_000, 0, 2_700); c.setCupoTipoP2P("CORRESPONSAL"); grupo.add(c); }
+        AccountCop gastada = cuenta(7, 500, 600, 2_700);   // corresponsal: le quedan 100; cajero: 2.200
+        gastada.setCupoTipoP2P("CORRESPONSAL");
+        grupo.add(gastada);
+        when(accountCopRepository.findAll()).thenReturn(grupo);
+
+        servicio.asignar(List.of());
+
+        assertEquals(7, cuantasActivas(grupo));                 // sigue abierta: no se cierra ni se reemplaza
+        assertEquals("CAJERO", gastada.getCupoTipoP2P());       // pasa sola a cajero
+        verify(cuentaP2PSyncService, never()).sincronizar(any(), any(Boolean.class)); // sin avisar a Movimientos
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void canalPorCuenta_siSoloQuedanTresConCorresponsal_sinMasQueTraer_seCompletaConCajero() {
+        horaDelDia(13, 0);
+        List<AccountCop> activas = activasConSaldos(1_000, 1_000, 1_000);   // aun con corresponsal
+        List<AccountCop> cand = new ArrayList<>();
+        for (int i = 0; i < 4; i++) cand.add(inactiva2(20 + i, 100));      // no hay mas con corresponsal; si con cajero
+        when(accountCopRepository.findAll()).thenReturn(juntas(activas, cand));
+
+        servicio.asignar(List.of());
+
+        assertEquals(3, cuantasActivas(activas));
+        assertEquals(4, cuantasActivas(cand));   // "no hay mas cuentas de corresponsal: toca completar con cajeros"
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void canalPorCuenta_prefiereCandidatasDeCorresponsalAntesQueLasDeCajero() {
+        List<AccountCop> activas = activasConSaldos(1_000, 1_000, 1_000, 1_000, 1_000, 1_000);
+        AccountCop conCorresponsal = inactiva(30, 500);          // corresponsal: 9.500 libres
+        AccountCop soloCajero = inactiva2(31, 100);
+        when(accountCopRepository.findAll()).thenReturn(juntas(activas, List.of(conCorresponsal, soloCajero)));
+
+        servicio.asignar(List.of());
+
+        assertEquals(true, conCorresponsal.getActivaParaP2P());
+        assertEquals("CORRESPONSAL", conCorresponsal.getCupoTipoP2P());
+        assertEquals(false, soloCajero.getActivaParaP2P());
+    }
+
+    @Test
+    void saldoParaCajero_cuentaConDoceMillonesSinRetiroPedido_noTieneCupo_seCierra() {
+        AccountCop c = cuenta(1, 12_000, 10_000, 2_700);
+        when(accountCopRepository.findAll()).thenReturn(List.of(c));
+
+        servicio.asignar(List.of());
+
+        assertEquals(false, c.getActivaParaP2P());               // sin retiro pedido, el saldo de 12M no deja cupo
+    }
+
+    @Test
+    void saldoParaCajero_conRetiroDeCorresponsalPedido_elSaldoSeDescuentaYLaCuentaSigue() {
+        horaDelDia(19, 0);   // de noche el retiro pedido por corresponsal SI se descuenta del saldo de cajero
+        AccountCop c = cuenta(1, 11_500, 10_000, 2_700);         // 11,5M; ya se pidieron 10M por corresponsal
+        when(accountCopRepository.findAll()).thenReturn(List.of(c));
+        retirosCorrPendientes(new Object[]{1, 10_000.0});          // quedaran 1,5M: 1,2M de espacio de cajero
+
+        servicio.asignar(List.of());
+
+        assertEquals(true, c.getActivaParaP2P());                // sigue: tras el retiro le sirve para cajero
+    }
+
+    @Test
+    void saldoParaCajero_alas1830_conRetiroDeCortePedido_laCuentaDe11Coma5MillonesNoSeDesselecciona() {
+        horaDelDia(18, 31);
+        AccountCop c = cuenta(1, 11_500, 10_000, 2_700);
+        c.setCupoTipoP2P("CORRESPONSAL");
+        when(accountCopRepository.findAll()).thenReturn(List.of(c));
+        retirosCorrPendientes(new Object[]{1, 10_000.0});
+
+        servicio.asignar(List.of());
+
+        assertEquals(true, c.getActivaParaP2P());                // de un solo tiro a cajero, sin cerrarse
+        assertEquals("CAJERO", c.getCupoTipoP2P());
+    }
+
+    @Test
+    void saldoParaCajero_alas1830_sinRetiroPedido_laCuentaDe11Coma5MillonesSiSeCierra() {
+        horaDelDia(18, 31);
+        AccountCop c = cuenta(1, 11_500, 10_000, 2_700);
+        when(accountCopRepository.findAll()).thenReturn(List.of(c));
+
+        servicio.asignar(List.of());
+
+        assertEquals(false, c.getActivaParaP2P());
+    }
+
+    @Test
+    void saldoParaCajero_unRetiroPendienteDeCorresponsalNoDevuelveCupoDeCorresponsal() {
+        // 10M de saldo y 10M pedidos por corresponsal: el cupo de corresponsal sigue gastado (no es "ya hay 10M libres").
+        horaDelDia(19, 0);   // de noche todo es cajero y ahi si se descuenta lo pedido por corresponsal
+        AccountCop c = cuenta(1, 10_000, 10_000, 2_700);
+        c.setCupoTipoP2P("CORRESPONSAL");
+        when(accountCopRepository.findAll()).thenReturn(List.of(c));
+        retirosCorrPendientes(new Object[]{1, 10_000.0});
+
+        servicio.asignar(List.of());
+
+        // Corresponsal sigue sin espacio (10.000 de saldo contra 10.000 de cupo): pasa a cajero, donde el saldo
+        // efectivo es 0. Si el retiro pendiente devolviera cupo de corresponsal, seguiria marcada CORRESPONSAL.
+        assertEquals("CAJERO", c.getCupoTipoP2P());
+    }
+
+    // ── Cuenta casi llena (9,8M): espera su tope; solo el corte de las 18:30 la retira ──
+
+    @Test
+    void casiLlena_alas4DeLaTarde_siguePorCorresponsalYRecibeLaVentaQueLaCompleta() {
+        horaDelDia(16, 0);
+        AccountCop c = cuenta(1, 9_800, 10_000, 2_700);    // 200 de espacio de corresponsal
+        c.setCupoTipoP2P("CORRESPONSAL");
+        when(accountCopRepository.findAll()).thenReturn(List.of(c));
+
+        servicio.asignar(List.of(orden("completa", 600, null)));   // 200 - 600 = -400: dentro de la tolerancia de 500
+
+        assertEquals(true, c.getActivaParaP2P());
+        assertEquals("CORRESPONSAL", c.getCupoTipoP2P());          // no pasa a cajero con 9,8M encima
+        verify(activeOrderService).upsertPreAsignacion(eq("completa"), eq(1), any(), any());
+    }
+
+    @Test
+    void casiLlena_alas1830_seIncluyeEnElRetiroDeCorteYNoSeCierra() {
+        corteConfigurado(true);
+        AccountCop c = cuenta(1, 9_800, 10_000, 2_700);
+        c.setCupoTipoP2P("CORRESPONSAL");
+        when(accountCopRepository.findAll()).thenReturn(List.of(c));
+        retirosCorrPendientes(new Object[]{1, 9_800.0});            // el corte ya la dejo pedida
+
+        horaDelDia(18, 30);
+        servicio.asignar(List.of());
+
+        verify(retiradorService).solicitarRetiroCorteCorresponsal(
+                org.mockito.ArgumentMatchers.argThat(l -> l.size() == 1 && l.contains(c)), eq(500.0));
+        assertEquals(true, c.getActivaParaP2P());                   // con 9,8M pedidos queda en 0 efectivo: sigue por cajero
+        assertEquals("CAJERO", c.getCupoTipoP2P());
+    }
+
+    // ── Ventas grandes: no se asignan solas por encima del maximo y avisan desde $5M ──
+
+    private com.binance.web.BinanceAPI.P2PSseController sseSimulado() {
+        com.binance.web.BinanceAPI.P2PSseController sse = org.mockito.Mockito.mock(com.binance.web.BinanceAPI.P2PSseController.class);
+        com.binance.web.BinanceAPI.P2PSseController.INSTANCE = sse;
+        return sse;
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void limpiarSse() {
+        com.binance.web.BinanceAPI.P2PSseController.INSTANCE = null;
+    }
+
+    @Test
+    void ventaGrande_deDoceMillones_noSeAsignaSolaYAvisa() {
+        horaDelDia(19, 0);
+        com.binance.web.BinanceAPI.P2PSseController sse = sseSimulado();
+        List<AccountCop> cuentas = cuentasCajero(100, 200, 300);
+        when(accountCopRepository.findAll()).thenReturn(cuentas);
+
+        servicio.asignar(List.of(orden("enorme", 12_000, null)));
+
+        verify(activeOrderService, never()).upsertPreAsignacion(eq("enorme"), any(), any(), any());
+        verify(sse).broadcastVentaGrande(org.mockito.ArgumentMatchers.argThat(p ->
+                "SIN_ASIGNAR_TOPE".equals(p.get("estado")) && "enorme".equals(p.get("orderNumber"))));
+    }
+
+    @Test
+    void ventaGrande_deDiezMillonesExactos_siSeAsigna_yAvisa() {
+        horaDelDia(19, 0);
+        com.binance.web.BinanceAPI.P2PSseController sse = sseSimulado();
+        List<AccountCop> cuentas = cuentasCajero(100, 200, 300);
+        when(accountCopRepository.findAll()).thenReturn(cuentas);
+
+        servicio.asignar(List.of(orden("diez", 10_000, null)));
+
+        verify(activeOrderService).upsertPreAsignacion(eq("diez"), any(), any(), any());   // rescate de cajero
+        verify(sse).broadcastVentaGrande(org.mockito.ArgumentMatchers.argThat(p -> "ASIGNADA".equals(p.get("estado"))));
+    }
+
+    @Test
+    void ventaGrande_porDebajoDelAviso_noAvisa() {
+        horaDelDia(19, 0);
+        com.binance.web.BinanceAPI.P2PSseController sse = sseSimulado();
+        when(accountCopRepository.findAll()).thenReturn(cuentasCajero(100, 200, 300));
+
+        servicio.asignar(List.of(orden("normal", 1_000, null)));
+
+        verify(sse, never()).broadcastVentaGrande(any());
+    }
+
+    @Test
+    void ventaGrande_cadaVentaAvisaUnaSolaVez_aunqueElCicloSeRepita() {
+        horaDelDia(19, 0);
+        com.binance.web.BinanceAPI.P2PSseController sse = sseSimulado();
+        when(accountCopRepository.findAll()).thenReturn(cuentasCajero(100, 200, 300));
+
+        servicio.asignar(List.of(orden("enorme", 12_000, null)));
+        servicio.asignar(List.of(orden("enorme", 12_000, null)));
+        servicio.asignar(List.of(orden("enorme", 12_000, null)));
+
+        verify(sse, org.mockito.Mockito.times(1)).broadcastVentaGrande(any());
+    }
+
+    // ── Sin cupo de hoy: se usa el cupo de corresponsal de manana ──
+
+    private AccountCop sinCupoHoy(int id, double saldo) {
+        return cuenta(id, saldo, 0, 0);   // corresponsal y cajero de hoy en 0
+    }
+
+    private void retirosCajPendientes(Object[]... filas) {
+        when(solicitudRetiroRepository.sumMontoCajeroPendientePorCuenta()).thenReturn(List.of(filas));
+    }
+
+    @Test
+    void manana_conTodosLosCuposDeHoyAgotados_laCuentaSigueYRecibeVentasContraManana() {
+        horaDelDia(21, 0);
+        List<AccountCop> cuentas = new ArrayList<>();
+        for (int i = 1; i <= 7; i++) { AccountCop c = sinCupoHoy(i, 500); c.setCupoTipoP2P("CAJERO"); cuentas.add(c); }
+        when(accountCopRepository.findAll()).thenReturn(cuentas);
+
+        servicio.asignar(List.of(orden("v1", 3_000, null)));
+
+        assertEquals(7, cuantasActivas(cuentas));                        // ninguna se cierra
+        verify(activeOrderService).upsertPreAsignacion(eq("v1"), any(), any(), any());
+        assertEquals("CAJERO", cuentas.get(0).getCupoTipoP2P());   // ya eran cajero: siguen marcadas CAJERO (su retiro de cajero de hoy se pide igual)
+    }
+
+    @Test
+    void manana_siHayUnaCandidataConCupoDeHoy_noSeUsaManana() {
+        horaDelDia(21, 0);
+        List<AccountCop> activas = new ArrayList<>();
+        for (int i = 1; i <= 6; i++) activas.add(sinCupoHoy(i, 500));
+        AccountCop conCajero = cuenta(20, 100, 0, 2_700);
+        conCajero.setActivaParaP2P(false);
+        when(accountCopRepository.findAll()).thenReturn(juntas(activas, List.of(conCajero)));
+
+        servicio.asignar(List.of());
+
+        // Hay una con cajero de hoy: se abre esa y las sin cupo de hoy NO cuentan como recibiendo (mañana apagado).
+        assertEquals(true, conCajero.getActivaParaP2P());
+        assertEquals("CAJERO", conCajero.getCupoTipoP2P());
+    }
+
+    @Test
+    void manana_siNoHayCandidatas_seAbrenCuentasPorElCupoDeManana() {
+        horaDelDia(21, 0);
+        List<AccountCop> activas = new ArrayList<>();
+        for (int i = 1; i <= 4; i++) activas.add(sinCupoHoy(i, 500));
+        List<AccountCop> cand = new ArrayList<>();
+        for (int i = 0; i < 5; i++) { AccountCop c = sinCupoHoy(20 + i, 200); c.setActivaParaP2P(false); cand.add(c); }
+        when(accountCopRepository.findAll()).thenReturn(juntas(activas, cand));
+
+        servicio.asignar(List.of());
+
+        assertEquals(3, cuantasActivas(cand));                  // completa las 7
+        assertEquals(3, cand.stream().filter(c -> "CORRESPONSAL".equals(c.getCupoTipoP2P())).count());
+    }
+
+    @Test
+    void manana_unRetiroSinConfirmarNoCuentaComoHecho_laCuentaConSaldoAltoNoUsaManana() {
+        horaDelDia(21, 0);
+        AccountCop c = cuenta(1, 12_000, 0, 2_700);              // 12M de saldo
+        when(accountCopRepository.findAll()).thenReturn(List.of(c));
+        retirosCajPendientes(new Object[]{1, 2_700.0});
+        retirosCorrPendientes(new Object[]{1, 9_000.0});         // pedidos pero NO confirmados: no se descuentan
+
+        servicio.asignar(List.of());
+
+        assertEquals(false, c.getActivaParaP2P());               // con el saldo real (12M) no le cabe mañana: se cierra
+    }
+
+    @Test
+    void manana_cuentaConElCupoDeMananaLleno_seCierra() {
+        horaDelDia(21, 0);
+        AccountCop c = sinCupoHoy(1, 10_200);                    // ya pasa los 10M de manana y sin retiros pedidos
+        when(accountCopRepository.findAll()).thenReturn(List.of(c));
+
+        servicio.asignar(List.of());
+
+        assertEquals(false, c.getActivaParaP2P());
+    }
+
+    @Test
+    void manana_deDiaTambien_conCorresponsalYCajeroAgotados() {
+        horaDelDia(14, 0);
+        List<AccountCop> cuentas = new ArrayList<>();
+        for (int i = 1; i <= 7; i++) cuentas.add(sinCupoHoy(i, 300));
+        when(accountCopRepository.findAll()).thenReturn(cuentas);
+
+        servicio.asignar(List.of(orden("v1", 2_000, null)));
+
+        assertEquals(7, cuantasActivas(cuentas));
+        verify(activeOrderService).upsertPreAsignacion(eq("v1"), any(), any(), any());
+    }
+
+    // ── La octava cuenta solo existe en el instante en que una llena SIN ventas esta por cerrarse ──
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void siete_unaLlenaConVentasNoAbreOtra_yUnaLlenaSinVentasSeCierraYLuegoSeAbre() {
+        // 6 cuentas con espacio + 1 llena (10.100 de saldo) con una venta abierta: son 7 lugares ocupados.
+        List<AccountCop> sanas = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 6_000);
+        AccountCop llena = cuenta(7, 10_100, 10_000, 2_700);
+        List<AccountCop> todas = new ArrayList<>(sanas);
+        todas.add(llena);
+        List<AccountCop> cand = candidatas(20, 2);
+        when(accountCopRepository.findAll()).thenReturn(juntas(todas, cand));
+        when(saldosEnCursoService.calcular()).thenReturn(List.of(enCurso(7, 300, "venta")));
+
+        servicio.asignar(List.of());
+
+        assertEquals(0, cuantasActivas(cand));          // con la venta abierta: sin octava
+        assertEquals(7, cuantasActivas(todas));
+
+        // La venta se cierra: la llena ya no tiene ventas -> se abre el reemplazo (la 8a) y, confirmado, se cierra.
+        when(saldosEnCursoService.calcular()).thenReturn(List.of());
+        lenient().when(cuentasPendientes.estaPendiente(org.mockito.ArgumentMatchers.anyString())).thenReturn(false);
+        servicio.asignar(List.of());
+
+        assertEquals(1, cuantasActivas(cand));          // se abrio el reemplazo
+        assertEquals(false, llena.getActivaParaP2P());  // y la llena se cerro
+        assertEquals(7, cuantasActivas(juntas(todas, cand)));
+    }
+
+    // ── De dia, el cajero solo cuando NO queda ninguna candidata con corresponsal ──
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void cajeroDeDia_conCandidatasDeCorresponsal_laQueAgotoSuCorresponsalNoSigueComoCajero() {
+        horaDelDia(13, 30);
+        // Caso Victor: corresponsal de hoy gastado (0), 2.459 de saldo, cajero libre. Hay candidatas con corresponsal completo.
+        AccountCop victor = cuenta(40, 2_459, 0, 2_700);
+        victor.setCupoTipoP2P("CORRESPONSAL");
+        List<AccountCop> sanas = activasConSaldos(100, 200, 300, 400, 500, 600);
+        List<AccountCop> todas = new ArrayList<>(sanas);
+        todas.add(victor);
+        AccountCop candidata = inactiva(30, 100);                 // corresponsal: 9.900 libres
+        when(accountCopRepository.findAll()).thenReturn(juntas(todas, List.of(candidata)));
+
+        servicio.asignar(List.of());
+
+        assertEquals(false, victor.getActivaParaP2P());           // sin ventas y sin corresponsal: se va
+        assertEquals(true, candidata.getActivaParaP2P());          // y entra una con corresponsal, no una de cajero
+        assertEquals("CORRESPONSAL", candidata.getCupoTipoP2P());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void cajeroDeDia_conRetiroDeCorresponsalPedido_noPasaACajeroMientrasHayaCandidatasDeCorresponsal() {
+        horaDelDia(13, 30);
+        // Caso Amparo: 8.988 de saldo, 8.261 de corresponsal por retirar (ya pedidos). Por cajero le quedarian 1.973.
+        AccountCop amparo = cuenta(8, 8_988, 8_261, 2_700);
+        amparo.setCupoTipoP2P("CORRESPONSAL");
+        List<AccountCop> todas = new ArrayList<>(activasConSaldos(100, 200, 300, 400, 500, 600));
+        todas.add(amparo);
+        AccountCop candidata = inactiva(30, 100);
+        when(accountCopRepository.findAll()).thenReturn(juntas(todas, List.of(candidata)));
+        retirosCorrPendientes(new Object[]{8, 8_261.0});
+
+        servicio.asignar(List.of());
+
+        assertEquals("CORRESPONSAL", amparo.getCupoTipoP2P());   // no se re-marca como cajero
+        assertEquals(false, amparo.getActivaParaP2P());          // se cierra (sin ventas) y la reemplaza una de corresponsal
+        assertEquals(true, candidata.getActivaParaP2P());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void cajeroDeDia_sinCorresponsalEnNingunaCuenta_laQueAgotoElCorresponsalSiPasaACajero() {
+        horaDelDia(13, 30);
+        AccountCop victor = cuenta(40, 1_000, 0, 2_700);          // sin corresponsal, con 1.700 de cajero
+        victor.setCupoTipoP2P("CORRESPONSAL");
+        List<AccountCop> todas = new ArrayList<>();
+        for (int i = 1; i <= 6; i++) todas.add(cuenta(i, 100 * i, 0, 2_700));   // ninguna tiene corresponsal
+        todas.add(victor);
+        when(accountCopRepository.findAll()).thenReturn(todas);
+
+        servicio.asignar(List.of());
+
+        assertEquals(true, victor.getActivaParaP2P());           // ya no queda corresponsal en NINGUNA: se usa cajero
+        assertEquals("CAJERO", victor.getCupoTipoP2P());
+    }
+
+    // ── Una cuenta que Movimientos no pudo abrir no se vuelve a elegir (caso David Gonzalez) ──
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void enfriamiento_laCuentaQueMovimientosNoPudoAbrirNoSeVuelveAElegir() {
+        horaDelDia(12, 0);
+        List<AccountCop> activas = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 6_000);
+        AccountCop david = inactiva(31, 100);            // la mas cercana al limite entre las candidatas... pero no abre
+        AccountCop otra = inactiva(32, 50);
+        when(accountCopRepository.findAll()).thenReturn(juntas(activas, List.of(david, otra)));
+        lenient().when(cuentasPendientes.estaPendiente(org.mockito.ArgumentMatchers.anyString())).thenReturn(false);
+        lenient().when(cuentasPendientes.estaPendiente("Cuenta 31")).thenReturn(true);   // sigue sin confirmarse
+
+        servicio.asignar(List.of());
+        assertEquals(true, david.getActivaParaP2P());     // el Auto la activo
+        assertEquals(false, otra.getActivaParaP2P());
+
+        // El bot no pudo abrirla (sin credenciales) y la desactivo sola.
+        david.setActivaParaP2P(false);
+        servicio.asignar(List.of());
+
+        assertEquals(false, david.getActivaParaP2P());    // no se la vuelve a elegir
+        assertEquals(true, otra.getActivaParaP2P());      // se elige otra en su lugar
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void enfriamiento_unaCuentaQueSiAbrioSigueSiendoElegible() {
+        horaDelDia(12, 0);
+        List<AccountCop> activas = activasConSaldos(1_000, 2_000, 3_000, 4_000, 5_000, 6_000);
+        AccountCop nueva = inactiva(31, 100);
+        when(accountCopRepository.findAll()).thenReturn(juntas(activas, List.of(nueva)));
+
+        servicio.asignar(List.of());       // se activa y queda confirmada (el mock no la deja pendiente)
+        servicio.asignar(List.of());
+
+        assertEquals(true, nueva.getActivaParaP2P());
+        assertEquals(7, cuantasActivas(juntas(activas, List.of(nueva))));
+    }
+
+    // ── Una cuenta con el corresponsal lleno y su retiro pedido NO recibe mas ventas de dia mientras haya otra con corresponsal ──
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void tras10MillonesYRetiroPedido_noSeLeAsignanMasVentas_mientrasHayaCandidatasDeCorresponsal() {
+        horaDelDia(17, 11);
+        // Caso Ana: 10.013 de saldo (10.000 ya pedidos para retirar), corresponsal lleno. Hay una candidata con corresponsal.
+        AccountCop ana = cuenta(17, 10_013, 10_000, 2_700);
+        ana.setCupoTipoP2P("CORRESPONSAL");
+        List<AccountCop> todas = new ArrayList<>(activasConSaldos(100, 200, 300, 400, 500, 600));
+        todas.add(ana);
+        AccountCop candidata = inactiva(30, 100);
+        when(accountCopRepository.findAll()).thenReturn(juntas(todas, List.of(candidata)));
+        retirosCorrPendientes(new Object[]{17, 10_000.0});
+
+        servicio.asignar(List.of(orden("nueva", 700, null)));
+
+        verify(activeOrderService, never()).upsertPreAsignacion(eq("nueva"), eq(17), any(), any());
+        assertEquals(false, ana.getActivaParaP2P());          // sin ventas abiertas: se cierra
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void unaCandidataEnEnfriamientoNoCuentaComoCandidata_asiElCajeroPuedeEmpezar() {
+        horaDelDia(13, 0);
+        List<AccountCop> activas = new ArrayList<>();
+        for (int i = 1; i <= 6; i++) activas.add(cuenta(i, 300, 0, 2_700));   // sin corresponsal, con cajero
+        AccountCop david = inactiva(31, 100);                                  // la unica con corresponsal... pero no abre
+        when(accountCopRepository.findAll()).thenReturn(juntas(activas, List.of(david)));
+        lenient().when(cuentasPendientes.estaPendiente(org.mockito.ArgumentMatchers.anyString())).thenReturn(false);
+        lenient().when(cuentasPendientes.estaPendiente("Cuenta 31")).thenReturn(true);
+
+        servicio.asignar(List.of());   // David tiene corresponsal: el cajero no empieza; las 6 sin corresponsal se cierran y se abre David
+        david.setActivaParaP2P(false); // el bot no la pudo abrir (sin credenciales)
+        servicio.asignar(List.of());   // David queda apartada: ya no queda corresponsal utilizable -> empieza el cajero
+
+        assertEquals(false, david.getActivaParaP2P());
+        assertEquals(6, activas.stream().filter(c -> Boolean.TRUE.equals(c.getActivaParaP2P())
+                && "CAJERO".equals(c.getCupoTipoP2P())).count());
+    }
+
+    // ── El retiro pedido NO convierte de dia a una cuenta llena en una de cajero (incidente Ana y Jose, 9/10) ──
+
+    @Test
+    void deDia_unaCuentaConElCorresponsalLlenoYElRetiroPedido_noSePasaACajeroNiRecibeVentas() {
+        horaDelDia(17, 11);
+        AccountCop jose = cuenta(28, 10_322, 10_000, 2_700);   // 10M y pico, retiro de 10.000 ya pedido, sin ventas abiertas
+        jose.setCupoTipoP2P("CORRESPONSAL");
+        List<AccountCop> todas = new ArrayList<>(activasConSaldos(100, 200, 300, 400, 500, 600));
+        todas.add(jose);
+        when(accountCopRepository.findAll()).thenReturn(todas);   // ninguna candidata
+        retirosCorrPendientes(new Object[]{28, 10_000.0});
+
+        servicio.asignar(List.of(orden("nueva", 100, null)));
+
+        verify(activeOrderService, never()).upsertPreAsignacion(eq("nueva"), eq(28), any(), any());
+        org.junit.jupiter.api.Assertions.assertNotEquals("CAJERO", jose.getCupoTipoP2P());   // antes se re-marcaba CAJERO y recibia otros 2,7M
+    }
+
+    @Test
+    void deNoche_laMismaCuentaSiSigueComoCajeroConElSaldoDescontado() {
+        horaDelDia(19, 0);
+        AccountCop c = cuenta(28, 10_322, 10_000, 2_700);
+        c.setCupoTipoP2P("CORRESPONSAL");
+        when(accountCopRepository.findAll()).thenReturn(List.of(c));
+        retirosCorrPendientes(new Object[]{28, 10_000.0});
+
+        servicio.asignar(List.of());
+
+        assertEquals(true, c.getActivaParaP2P());       // 322 de saldo efectivo: le sobran 2.378 de cajero
+        assertEquals("CAJERO", c.getCupoTipoP2P());
+    }
+
+    // ── REGLA DE ORO: el cajero de dia solo cuando el corresponsal se agoto en TODAS las cuentas ──
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void reglaDeOro_siNoQuedanMasCandidatasDeCorresponsal_seCompletaConCajero() {
+        horaDelDia(13, 0);
+        // 3 activas todavia con corresponsal; no hay mas cuentas con corresponsal para traer; hay 4 con cajero.
+        List<AccountCop> activas = activasConSaldos(1_000, 1_000, 1_000);
+        List<AccountCop> cand = new ArrayList<>();
+        for (int i = 0; i < 4; i++) cand.add(inactiva2(20 + i, 100));
+        when(accountCopRepository.findAll()).thenReturn(juntas(activas, cand));
+
+        servicio.asignar(List.of());
+
+        assertEquals(3, cuantasActivas(activas));                 // las 3 siguen por corresponsal
+        assertEquals(4, cuantasActivas(cand));                    // y se completan las 7 con cajero
+        assertEquals(4, cand.stream().filter(c -> "CAJERO".equals(c.getCupoTipoP2P())).count());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void reglaDeOro_laSeptimaQueLlenaSuCorresponsal_sinMasCandidatasDeCorresponsal_sigueComoCajero() {
+        horaDelDia(13, 0);
+        AccountCop septima = cuenta(40, 1_000, 0, 2_700);        // llena su corresponsal; le quedan 1.700 de cajero
+        septima.setCupoTipoP2P("CORRESPONSAL");
+        List<AccountCop> todas = new ArrayList<>(activasConSaldos(100, 200, 300, 400, 500, 600));  // las otras 6, con corresponsal
+        todas.add(septima);
+        when(accountCopRepository.findAll()).thenReturn(todas);   // no hay mas cuentas con corresponsal para traer
+
+        servicio.asignar(List.of());
+
+        assertEquals(true, septima.getActivaParaP2P());          // "la septima cuenta se vuelve cajero"
+        assertEquals("CAJERO", septima.getCupoTipoP2P());
+        assertEquals(7, cuantasActivas(todas));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void reglaDeOro_siHayOtraCuentaConCorresponsal_laQueSeLlenaSeCierraYNoPasaACajero() {
+        horaDelDia(13, 0);
+        AccountCop llena = cuenta(40, 2_459, 0, 2_700);
+        llena.setCupoTipoP2P("CORRESPONSAL");
+        List<AccountCop> todas = new ArrayList<>(activasConSaldos(100, 200, 300, 400, 500, 600));
+        todas.add(llena);
+        AccountCop candidata = inactiva(30, 100);                // corresponsal completo para traer
+        when(accountCopRepository.findAll()).thenReturn(juntas(todas, List.of(candidata)));
+
+        servicio.asignar(List.of());
+
+        assertEquals(false, llena.getActivaParaP2P());           // se da de baja
+        assertEquals(true, candidata.getActivaParaP2P());        // y entra otra con corresponsal, no una de cajero
+        assertEquals("CORRESPONSAL", candidata.getCupoTipoP2P());
+    }
+
+    @Test
+    void reglaDeOro_cuandoElCorresponsalSeAgotoEnTodas_lasMismasCuentasPasanACajero() {
+        horaDelDia(13, 0);
+        List<AccountCop> todas = new ArrayList<>();
+        for (int i = 1; i <= 7; i++) { AccountCop c = cuenta(i, 300, 0, 2_700); c.setCupoTipoP2P("CORRESPONSAL"); todas.add(c); }
+        when(accountCopRepository.findAll()).thenReturn(todas);
+
+        servicio.asignar(List.of());
+
+        assertEquals(7, cuantasActivas(todas));
+        assertEquals(7, todas.stream().filter(c -> "CAJERO".equals(c.getCupoTipoP2P())).count());
+    }
+
+    @Test
+    void reglaDeOro_laBloqueadaYLaQueNoAbreNoCuentanComoCorresponsalDisponible() {
+        horaDelDia(13, 0);
+        List<AccountCop> todas = new ArrayList<>();
+        for (int i = 1; i <= 3; i++) { AccountCop c = cuenta(i, 300, 0, 2_700); c.setCupoTipoP2P("CORRESPONSAL"); todas.add(c); }
+        AccountCop bloqueada = inactiva(30, 100);   // con corresponsal completo, pero bloqueada
+        bloqueada.setBloqueada(true);
+        todas.add(bloqueada);
+        when(accountCopRepository.findAll()).thenReturn(todas);
+
+        servicio.asignar(List.of());
+
+        assertEquals(3, cuantasActivas(todas) - 0);                     // las 3 siguen (por cajero)
+        assertEquals("CAJERO", todas.get(0).getCupoTipoP2P());
+        assertEquals(false, bloqueada.getActivaParaP2P());
+    }
+
+    @Test
+    void reglaDeOro_manana_soloCuandoNoQuedaNingunaCandidataConCupoDeHoy() {
+        horaDelDia(21, 0);
+        List<AccountCop> todas = new ArrayList<>();
+        AccountCop viva = cuenta(1, 100, 0, 2_700);                               // activa con cajero de hoy
+        for (int i = 2; i <= 4; i++) todas.add(cuenta(i, 300, 0, 0));            // activas sin nada de hoy
+        AccountCop candidata = inactiva2(30, 100);                                // inactiva CON cajero de hoy para traer
+        todas.add(0, viva);
+        when(accountCopRepository.findAll()).thenReturn(juntas(todas, List.of(candidata)));
+
+        servicio.asignar(List.of());
+
+        // Hay una candidata con cupo de hoy: se trae esa y las sin nada de hoy NO usan manana (se cierran sin ventas).
+        assertEquals(true, candidata.getActivaParaP2P());
+        assertEquals(2, cuantasActivas(juntas(todas, List.of(candidata))));
+    }
+
+    @Test
+    void reglaDeOro_manana_seCompletaCuandoNoQuedaCandidataConCupoDeHoy() {
+        horaDelDia(21, 0);
+        List<AccountCop> todas = new ArrayList<>();
+        todas.add(cuenta(1, 100, 0, 2_700));                                      // activa con cajero de hoy
+        for (int i = 2; i <= 4; i++) todas.add(cuenta(i, 300, 0, 0));            // activas sin nada de hoy
+        when(accountCopRepository.findAll()).thenReturn(todas);                   // no hay nadie para traer
+
+        servicio.asignar(List.of());
+
+        assertEquals(4, cuantasActivas(todas));                                   // las 3 sin cupo de hoy siguen contra el de manana
+    }
+
+    // ── Matiz: la cuenta que se llena no se queda "de cajero" solo por ser la que estaba; se trae la mejor candidata ──
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void matiz_laQueSeLlenaNoSeQuedaComoCajero_seTraeLaMasCercanaAlLimiteConEspacio() {
+        horaDelDia(13, 0);
+        // Lady: 10M exactos, su retiro ya pedido; sin cajero que ofrecer (saldo 10.000 contra 2.700).
+        AccountCop lady = cuenta(30, 10_000, 10_000, 2_700);
+        lady.setCupoTipoP2P("CORRESPONSAL");
+        List<AccountCop> todas = new ArrayList<>();
+        for (int i = 1; i <= 6; i++) todas.add(cuenta(i, 300, 0, 2_700));   // las otras 6 ya sin corresponsal
+        todas.add(lady);
+        AccountCop dosMillones = cuenta(50, 700, 0, 2_700);   // cajero: 2.000 de espacio, a punto de cumplir
+        dosMillones.setActivaParaP2P(false);
+        AccountCop casiVacia = cuenta(51, 100, 0, 2_700);     // cajero: 2.600 de espacio
+        casiVacia.setActivaParaP2P(false);
+        when(accountCopRepository.findAll()).thenReturn(juntas(todas, List.of(dosMillones, casiVacia)));
+        retirosCorrPendientes(new Object[]{30, 10_000.0});
+
+        servicio.asignar(List.of());
+
+        assertEquals(false, lady.getActivaParaP2P());            // Lady no se queda: esta en cero
+        assertEquals(true, dosMillones.getActivaParaP2P());      // se trae la que esta mas cerca de cumplir
+        assertEquals("CAJERO", dosMillones.getCupoTipoP2P());
+        assertEquals(false, casiVacia.getActivaParaP2P());       // y no se abre otra de mas
+    }
+
+    @Test
+    void matiz_unaCuentaQueSiYaTrabajaPorCajeroSigueMientrasLeQuedeAlgo() {
+        horaDelDia(13, 0);
+        List<AccountCop> todas = new ArrayList<>();
+        for (int i = 1; i <= 7; i++) { AccountCop c = cuenta(i, 2_100, 0, 2_700); c.setCupoTipoP2P("CAJERO"); todas.add(c); }   // 600 de espacio
+        when(accountCopRepository.findAll()).thenReturn(todas);
+
+        servicio.asignar(List.of());
+
+        assertEquals(7, cuantasActivas(todas));                  // ya eran cajero: no se cierran a mitad de camino
+    }
+
+    // ── La regla del cajero es UNA sola: igual de dia (sin corresponsal para traer) que de noche ──
+
+    private java.util.Set<Integer> elegidasComoCajeroA(int hora, int minuto) {
+        horaDelDia(hora, minuto);
+        List<AccountCop> activas = new ArrayList<>();
+        for (int i = 1; i <= 6; i++) activas.add(cuenta(i, 300, 0, 2_700));     // 6 activas sin corresponsal
+        activas.set(0, cuenta(1, 3_000, 0, 2_700));                             // una se llena (cajero: sin espacio) y se da de baja
+        AccountCop a = cuenta(50, 700, 0, 2_700);   a.setActivaParaP2P(false);  // cajero: 2.000 de espacio
+        AccountCop b = cuenta(51, 100, 0, 2_700);   b.setActivaParaP2P(false);  // 2.600
+        AccountCop c = cuenta(52, 1_200, 0, 2_700); c.setActivaParaP2P(false);  // 1.500: la mas cerca de cumplir con espacio
+        AccountCop sinEspacio = cuenta(53, 2_000, 0, 2_700); sinEspacio.setActivaParaP2P(false);   // 700: no alcanza el minimo
+        AccountCop bloqueada = cuenta(54, 1_200, 0, 2_700);  bloqueada.setActivaParaP2P(false); bloqueada.setBloqueada(true);
+        when(accountCopRepository.findAll()).thenReturn(juntas(activas, List.of(a, b, c, sinEspacio, bloqueada)));
+
+        servicio.asignar(List.of());
+
+        java.util.Set<Integer> abiertas = new java.util.TreeSet<>();
+        for (AccountCop x : List.of(a, b, c, sinEspacio, bloqueada)) {
+            if (Boolean.TRUE.equals(x.getActivaParaP2P())) abiertas.add(x.getId());
+        }
+        return abiertas;
+    }
+
+    @Test
+    void reglaDelCajero_esLaMismaDeDiaSinCorresponsalQueDeNoche() {
+        java.util.Set<Integer> deDia = elegidasComoCajeroA(13, 0);
+        org.springframework.test.util.ReflectionTestUtils.setField(servicio, "canalAplicado", new java.util.concurrent.ConcurrentHashMap<Integer, Canal>());
+        java.util.Set<Integer> deNoche = elegidasComoCajeroA(19, 0);
+
+        // Faltan 2 cuentas: entran las 2 mas cerca de su limite que cumplen el espacio minimo (la de 1.500 y la de 2.000).
+        // No entra la de 700 (sin espacio minimo), ni la bloqueada, ni la de 2.600 (mas lejos del limite).
+        assertEquals(java.util.Set.of(50, 52), deDia);
+        assertEquals(deDia, deNoche);   // exactamente la misma regla de dia (sin corresponsal) que de noche
+    }
+
+    // ── Cupo de mañana: marca y retiros sin confirmar ──
+
+    @Test
+    void manana_unaCuentaYaMarcadaCajeroSigueCajero_paraQueSuRetiroDeCajeroDeHoySePida() {
+        horaDelDia(21, 0);
+        AccountCop ledys = cuenta(10, 2_786, 0, 2_700);          // el cajero de hoy ya se lleno (2.786 > 2.700)
+        ledys.setCupoTipoP2P("CAJERO");
+        List<AccountCop> todas = new ArrayList<>(List.of(ledys));
+        when(accountCopRepository.findAll()).thenReturn(todas);
+
+        servicio.asignar(List.of());
+
+        assertEquals(true, ledys.getActivaParaP2P());             // sigue, ahora contra el cupo de mañana
+        assertEquals("CAJERO", ledys.getCupoTipoP2P());          // y sigue marcada CAJERO (no AMBOS, no CORRESPONSAL)
+        assertEquals("MANANA", servicio.canalesDeTrabajo().get(10).replace("CORRESPONSAL_", ""));   // el canal real se informa
+    }
+
+    @Test
+    void canalesDeTrabajo_informaElCanalRealDeCadaCuenta() {
+        horaDelDia(13, 0);
+        AccountCop corr = cuenta(1, 100, 10_000, 2_700);
+        AccountCop caj = cuenta(2, 100, 0, 2_700);
+        when(accountCopRepository.findAll()).thenReturn(List.of(corr, caj));
+
+        servicio.asignar(List.of());
+
+        assertEquals("CORRESPONSAL", servicio.canalesDeTrabajo().get(1));
+        assertEquals("CAJERO", servicio.canalesDeTrabajo().get(2));
+    }
+
+    // ── Regla de la prioridad: cupo vigente primero, y dentro del canal la mas cercana al cupo ──
+
+    @Test
+    void prioridad_deDia_elCorresponsalVaAntesQueElCajero_aunqueLaDeCajeroEsteMasCerca() {
+        horaDelDia(17, 0);
+        AccountCop corr = cuenta(1, 2_000, 10_000, 2_700);    // corresponsal: 8.000 de espacio
+        corr.setCupoTipoP2P("CORRESPONSAL");
+        AccountCop caj = cuenta(2, 1_900, 0, 2_700);          // cajero: 800 de espacio (mas cerca de su limite)
+        caj.setCupoTipoP2P("CAJERO");
+        when(accountCopRepository.findAll()).thenReturn(List.of(corr, caj));
+
+        servicio.asignar(List.of(orden("v1", 500, null)));
+
+        verify(activeOrderService).upsertPreAsignacion(eq("v1"), eq(1), any(), any());   // va a la de corresponsal
+    }
+
+    @Test
+    void prioridad_siLaVentaNoCabeEnElCorresponsal_bajaAlCajero() {
+        horaDelDia(17, 0);
+        AccountCop corr = cuenta(1, 9_700, 10_000, 2_700);    // corresponsal: 300 de espacio
+        corr.setCupoTipoP2P("CORRESPONSAL");
+        AccountCop caj = cuenta(2, 100, 0, 2_700);            // cajero: 2.600
+        caj.setCupoTipoP2P("CAJERO");
+        when(accountCopRepository.findAll()).thenReturn(List.of(corr, caj));
+
+        servicio.asignar(List.of(orden("v1", 2_000, null)));
+
+        verify(activeOrderService).upsertPreAsignacion(eq("v1"), eq(2), any(), any());   // 2.000 no cabe en 300: baja al cajero
+    }
+
+    @Test
+    void prioridad_dentroDelCorresponsal_laMasCercanaAlCupoVaPrimero() {
+        horaDelDia(17, 0);
+        AccountCop lejos = cuenta(1, 1_000, 10_000, 2_700);   // 9.000 de espacio
+        AccountCop cerca = cuenta(2, 8_000, 10_000, 2_700);   // 2.000 de espacio
+        when(accountCopRepository.findAll()).thenReturn(List.of(lejos, cerca));
+
+        servicio.asignar(List.of(orden("v1", 500, null)));
+
+        verify(activeOrderService).upsertPreAsignacion(eq("v1"), eq(2), any(), any());   // la que esta a punto de llenarse
+    }
+
+    @Test
+    void prioridad_deNoche_elCajeroDeHoyVaAntesQueElCupoDeManana() {
+        horaDelDia(21, 0);
+        AccountCop caj = cuenta(1, 1_900, 0, 2_700);          // cajero de hoy: 800
+        AccountCop manana = cuenta(2, 100, 0, 0);             // sin cajero de hoy: usa el cupo de manana (9.900)
+        when(accountCopRepository.findAll()).thenReturn(List.of(caj, manana));
+
+        servicio.asignar(List.of(orden("v1", 500, null)));
+
+        verify(activeOrderService).upsertPreAsignacion(eq("v1"), eq(1), any(), any());   // primero el cajero de hoy
     }
 }
