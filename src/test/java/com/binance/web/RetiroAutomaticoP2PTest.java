@@ -62,6 +62,9 @@ class RetiroAutomaticoP2PTest {
 
     @BeforeEach
     void setUp() {
+        // Martes al mediodía: los corresponsales abren (los fines de semana no se piden retiros por corresponsal).
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "reloj", java.time.Clock.fixed(
+                LocalDate.of(2026, 10, 6).atTime(12, 0).atZone(ZONE_BOGOTA).toInstant(), ZONE_BOGOTA));
         cuenta = new AccountCop();
         cuenta.setId(1);
         cuenta.setName("David");

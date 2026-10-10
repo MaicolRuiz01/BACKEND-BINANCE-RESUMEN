@@ -2265,24 +2265,23 @@ class AsignacionAutomaticaReglasTest {
     }
 
     @Test
-    void sabado_cuandoSeLlenaElCajeroSaltaAlCajeroDeManana_noAlCorresponsalDeManana() {
-        sabado(15, 0);
-        AccountCop llena = cuenta(1, 2_786, 0, 2_700);          // cajero de hoy lleno
-        llena.setCupoTipoP2P("CAJERO");
-        AccountCop casiVacia = cuenta(2, 100, 0, 0);            // sin cajero de hoy: queda el cajero de manana (2.600)
-        casiVacia.setCupoTipoP2P("CORRESPONSAL");
-        when(accountCopRepository.findAll()).thenReturn(List.of(llena, casiVacia));
+    void sabado_conCajeroLleno_usaElCupoDeManana_de10Millones() {
+        sabado(17, 0);
+        // Cuenta como las de hoy: ~3M de saldo (pasa el cajero de 2.700) pero cabe en el cupo de manana (10.000).
+        AccountCop a = cuenta(1, 3_000, 0, 2_700);
+        a.setCupoTipoP2P("CORRESPONSAL");
+        when(accountCopRepository.findAll()).thenReturn(List.of(a));
 
         servicio.asignar(List.of());
 
-        assertEquals("CORRESPONSAL_MANANA", servicio.canalesDeTrabajo().get(2));   // cupo de manana...
-        assertEquals("CAJERO", casiVacia.getCupoTipoP2P());                         // ...pero se retira por CAJERO
+        assertEquals("CORRESPONSAL_MANANA", servicio.canalesDeTrabajo().get(1));   // ojo azul
+        assertEquals(true, a.getActivaParaP2P());
     }
 
     @Test
-    void sabado_elCupoDeMananaEsElDelCajero_unaCuentaConMuchoSaldoNoEntra() {
-        sabado(15, 0);
-        AccountCop c = cuenta(1, 5_000, 0, 0);                  // 5M: no cabe en el cajero de manana (2.700)
+    void sabado_elCupoDeMananaTieneTopeDe10Millones_unaCuentaConCasiTodoNoEntra() {
+        sabado(17, 0);
+        AccountCop c = cuenta(1, 9_500, 0, 2_700);              // 500 de espacio contra 10.000: menos que el minimo
         when(accountCopRepository.findAll()).thenReturn(List.of(c));
 
         servicio.asignar(List.of());
@@ -2291,10 +2290,43 @@ class AsignacionAutomaticaReglasTest {
     }
 
     @Test
-    void sabado_losOtrosDiasElCupoDeMananaSigueSiendoElDeCorresponsal() {
-        horaDelDia(21, 0);
-        AccountCop c = cuenta(1, 5_000, 0, 0);                  // 5M: cabe en el corresponsal de manana (10.000)
+    void domingo_todoElDiaEsCajero() {
+        ReflectionTestUtils.setField(servicio, "reloj", Clock.fixed(
+                LocalDate.of(2026, 10, 11).atTime(LocalTime.of(9, 0)).atZone(VentanaCupoP2P.ZONA).toInstant(), VentanaCupoP2P.ZONA));
+        AccountCop c = cuenta(1, 100, 10_000, 2_700);
         when(accountCopRepository.findAll()).thenReturn(List.of(c));
+
+        servicio.asignar(List.of());
+
+        assertEquals("CAJERO", servicio.canalesDeTrabajo().get(1));
+    }
+
+    @Test
+    void corresponsalAbierto_noElDomingoNiElSabadoDesdeLas14() {
+        assertEquals(true, VentanaCupoP2P.corresponsalAbierto(java.time.DayOfWeek.SATURDAY, LocalTime.of(13, 59)));
+        assertEquals(false, VentanaCupoP2P.corresponsalAbierto(java.time.DayOfWeek.SATURDAY, LocalTime.of(14, 0)));
+        assertEquals(false, VentanaCupoP2P.corresponsalAbierto(java.time.DayOfWeek.SUNDAY, LocalTime.of(9, 0)));
+        assertEquals(true, VentanaCupoP2P.corresponsalAbierto(java.time.DayOfWeek.MONDAY, LocalTime.of(9, 0)));
+    }
+
+    @Test
+    void sabado_reglaDeOro_sinCupoDeCorresponsalAntesDeLas1330_saltaAlCajero() {
+        sabado(10, 0);
+        AccountCop sinCorresponsal = cuenta(1, 1_000, 0, 2_700);   // corresponsal agotado; le quedan 1.700 de cajero
+        sinCorresponsal.setCupoTipoP2P("CORRESPONSAL");
+        when(accountCopRepository.findAll()).thenReturn(List.of(sinCorresponsal));
+
+        servicio.asignar(List.of());
+
+        assertEquals("CAJERO", servicio.canalesDeTrabajo().get(1));   // la regla de oro aplica tambien el sabado
+    }
+
+    @Test
+    void sabado_reglaDeOro_siSeAcabaronCorresponsalYCajeroAntesDeLas1330_saltaAlCupoAzul() {
+        sabado(10, 0);
+        AccountCop a = cuenta(1, 3_000, 0, 2_700);                 // sin corresponsal y con el cajero pasado: cupo de manana
+        a.setCupoTipoP2P("CORRESPONSAL");
+        when(accountCopRepository.findAll()).thenReturn(List.of(a));
 
         servicio.asignar(List.of());
 

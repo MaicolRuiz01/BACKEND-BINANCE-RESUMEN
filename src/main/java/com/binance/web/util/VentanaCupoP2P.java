@@ -11,8 +11,10 @@ import com.binance.web.Entity.AccountCop;
  *
  *  - 00:00 → 18:29  CORRESPONSAL
  *  - 18:30 → 23:59  CAJERO
- *  - SÁBADO: 00:00 → 13:29 CORRESPONSAL y 13:30 → 23:59 CAJERO (los corresponsales cierran a las 14:00); su cupo de
- *    "mañana" es el de CAJERO del domingo (el domingo no hay corresponsales)
+ *  - LEY DEL FIN DE SEMANA: SÁBADO 00:00 → 13:29 CORRESPONSAL y 13:30 → 23:59 CAJERO (los corresponsales cierran a las
+ *    14:00); DOMINGO todo el día CAJERO (no hay corresponsales). Cuando se acaba el cajero de hoy se sigue con el cupo de
+ *    "mañana" (corresponsal completo, 10.000 por cuenta, para repartir la carga y poder retirar el lunes), sin pedir
+ *    retiros automáticos mientras los corresponsales estén cerrados ({@link #corresponsalAbierto}).
  *
  * Mientras dura una ventana se mira SOLO el cupo de ese canal y se ignora el otro (aunque la
  * cuenta tenga cupo de cajero de día, o de corresponsal de noche). Cuando se llena un canal se pasa al
@@ -50,17 +52,21 @@ public final class VentanaCupoP2P {
         return canalEn(ahora.getDayOfWeek(), ahora.toLocalTime());
     }
 
-    /** Hora desde la que se trabaja con cajero ese día: sábado 13:30, el resto 18:30. */
+    /** Hora desde la que se trabaja con cajero ese día: sábado 13:30, domingo todo el día, el resto 18:30. */
     public static LocalTime inicioCajero(java.time.DayOfWeek dia) {
+        if (dia == java.time.DayOfWeek.SUNDAY) return LocalTime.MIDNIGHT;
         return dia == java.time.DayOfWeek.SATURDAY ? INICIO_CAJERO_SABADO : INICIO_CAJERO;
     }
 
-    /**
-     * ¿El cupo de MAÑANA de ese día es de CAJERO (no de corresponsal)? Sí el sábado: el domingo no abren corresponsales,
-     * así que cuando se llena el cajero de hoy se salta al cajero del día siguiente.
-     */
-    public static boolean mananaEsCajero(java.time.DayOfWeek dia) {
-        return dia == java.time.DayOfWeek.SATURDAY;
+    /** ¿Atienden los corresponsales en ese momento? No el domingo, ni el sábado desde las 14:00. */
+    public static boolean corresponsalAbierto(java.time.DayOfWeek dia, LocalTime hora) {
+        if (dia == java.time.DayOfWeek.SUNDAY) return false;
+        return dia != java.time.DayOfWeek.SATURDAY || hora.isBefore(LocalTime.of(14, 0));
+    }
+
+    public static boolean corresponsalAbierto(Clock reloj) {
+        java.time.ZonedDateTime ahora = java.time.ZonedDateTime.now(reloj.withZone(ZONA));
+        return corresponsalAbierto(ahora.getDayOfWeek(), ahora.toLocalTime());
     }
 
     public static Canal canalEn(java.time.DayOfWeek dia, LocalTime hora) {
@@ -76,15 +82,8 @@ public final class VentanaCupoP2P {
      * en el día. Llamar antes {@link CupoDiarioRules#asegurarCupoHoy} para que no sea de ayer.
      */
     public static double cupoHoy(AccountCop cuenta, Canal canal) {
-        return cupoHoy(cuenta, canal, false);
-    }
-
-    /** Igual, indicando si el cupo de mañana es el de CAJERO (sábado) o el de corresponsal (resto de días). */
-    public static double cupoHoy(AccountCop cuenta, Canal canal, boolean mananaEsCajero) {
         if (canal == Canal.CORRESPONSAL_MANANA) {
-            if (cuenta.getBankType() == null) return 0.0;
-            return mananaEsCajero ? CupoDiarioRules.maxCajeroPorBanco(cuenta.getBankType())
-                                  : CupoDiarioRules.maxCorresponsalPorBanco(cuenta.getBankType());
+            return cuenta.getBankType() != null ? CupoDiarioRules.maxCorresponsalPorBanco(cuenta.getBankType()) : 0.0;
         }
         Double v = canal == Canal.CAJERO
                 ? cuenta.getCupoCajeroDisponibleHoy()
